@@ -1,0 +1,9 @@
+trzsz for Debian
+---------------
+
+trzsz for Debian is developed in Go.
+* Install go and make
+* make && make install
+
+ -- Lonny Wong <lonnywong@qq.com>  Sun, 13 Feb 2022 21:48:19 +0800
+

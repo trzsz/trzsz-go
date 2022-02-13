@@ -13,5 +13,6 @@ clean:
 	-rm -f ${BIN_DIR}/*
 
 install: all
-	cp ${BIN_DIR}/trz ${BIN_DST}/
-	cp ${BIN_DIR}/tsz ${BIN_DST}/
+	mkdir -p ${DESTDIR}${BIN_DST}
+	cp ${BIN_DIR}/trz ${DESTDIR}${BIN_DST}/
+	cp ${BIN_DIR}/tsz ${DESTDIR}${BIN_DST}/
