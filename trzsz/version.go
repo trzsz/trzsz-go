@@ -24,8 +24,4 @@ SOFTWARE.
 
 package trzsz
 
-type PtyIO interface {
-	Read(b []byte) (n int, err error)
-	Write(p []byte) (n int, err error)
-	Close() error
-}
+const TrzszVersion = "0.1.2"

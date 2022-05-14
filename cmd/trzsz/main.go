@@ -22,10 +22,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-package trzsz
+package main
 
-type PtyIO interface {
-	Read(b []byte) (n int, err error)
-	Write(p []byte) (n int, err error)
-	Close() error
+import (
+	"os"
+	"github.com/trzsz/trzsz-go/trzsz"
+)
+
+func main() {
+	os.Exit(trzsz.TrzszMain())
 }

@@ -24,8 +24,21 @@ SOFTWARE.
 
 package trzsz
 
-type PtyIO interface {
-	Read(b []byte) (n int, err error)
-	Write(p []byte) (n int, err error)
-	Close() error
+type TrzszTransfer struct {
+}
+
+func NewTransfer(ptyIn PtyIO, ptyOut PtyIO) *TrzszTransfer {
+	return nil
+}
+
+func (t *TrzszTransfer) stopTransferringFiles() {
+}
+
+func (t *TrzszTransfer) handleClientError(err error) {
+}
+
+func (t *TrzszTransfer) sendFiles() {
+}
+
+func (t *TrzszTransfer) recvFiles() {
 }
