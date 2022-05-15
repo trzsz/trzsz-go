@@ -92,20 +92,68 @@ func detectTrzsz(output []byte) *byte {
 	return &match[1][0]
 }
 
+func newProgressBar(pty *TrzszPty, config map[string]interface{}) (*TextProgressBar, error) {
+	quiet := false
+	if v, ok := config["quiet"].(bool); ok {
+		quiet = v
+	}
+	if quiet {
+		return nil, nil
+	}
+	columns, err := pty.GetColumns()
+	if err != nil {
+		return nil, err
+	}
+	tmuxPaneColumns := -1
+	if v, ok := config["tmux_pane_width"].(int); ok {
+		tmuxPaneColumns = v
+	}
+	return NewTextProgressBar(os.Stdout, columns, tmuxPaneColumns), nil
+}
+
 func downloadFiles(pty *TrzszPty) error {
 	savePath := getTrzszConfig("DefaultDownloadPath")
 	if savePath == nil {
 		path, err := zenity.SelectFile(zenity.Title("Choose a folder to save file(s)"), zenity.Directory(), zenity.ShowHidden())
 		if err != nil {
-			// TODO: send fail or cancel
-			fmt.Println(err)
+			if err == zenity.ErrCanceled {
+				return transfer.sendAction(false)
+			}
 			return err
 		}
 		savePath = &path
 	}
-	// TODO download files
-	fmt.Println(*savePath)
-	return nil
+
+	if savePath == nil || len(*savePath) == 0 {
+		return transfer.sendAction(false)
+	}
+	if err := checkPathWritable(*savePath); err != nil {
+		return err
+	}
+
+	if err := transfer.sendAction(true); err != nil {
+		return err
+	}
+	config, err := transfer.recvConfig()
+	if err != nil {
+		return err
+	}
+
+	progress, err := newProgressBar(pty, config)
+	if err != nil {
+		return err
+	}
+	if progress != nil {
+		pty.OnResize(func(cols int) { progress.setTerminalColumns(cols) })
+		defer pty.OnResize(nil)
+	}
+
+	localNames, err := transfer.recvFiles(*savePath, progress)
+	if err != nil {
+		return err
+	}
+
+	return transfer.sendExit(fmt.Sprintf("Saved %s to %s", strings.Join(localNames, ", "), *savePath))
 }
 
 func uploadFiles(pty *TrzszPty) error {
@@ -116,13 +164,56 @@ func uploadFiles(pty *TrzszPty) error {
 	}
 	files, err := zenity.SelectFileMutiple(options...)
 	if err != nil {
-		// TODO: send fail or cancel
-		fmt.Println(err)
+		if err == zenity.ErrCanceled {
+			return transfer.sendAction(false)
+		}
 		return err
 	}
-	// TODO upload files
-	fmt.Println(files)
-	return nil
+
+	if len(files) == 0 {
+		return transfer.sendAction(false)
+	}
+	if err := checkFilesReadable(files); err != nil {
+		return err
+	}
+
+	if err := transfer.sendAction(true); err != nil {
+		return err
+	}
+	config, err := transfer.recvConfig()
+	if err != nil {
+		return err
+	}
+
+	progress, err := newProgressBar(pty, config)
+	if err != nil {
+		return err
+	}
+	if progress != nil {
+		pty.OnResize(func(cols int) { progress.setTerminalColumns(cols) })
+		defer pty.OnResize(nil)
+	}
+
+	remoteNames, err := transfer.sendFiles(files, progress)
+	if err != nil {
+		return err
+	}
+
+	return transfer.sendExit(fmt.Sprintf("Received %s", strings.Join(remoteNames, ", ")))
+}
+
+func handleTrzsz(pty *TrzszPty, mode byte) {
+	var err error
+	transfer = NewTransfer(pty.Stdout, pty.Stdin)
+	if mode == 'S' {
+		err = downloadFiles(pty)
+	} else if mode == 'R' {
+		err = uploadFiles(pty)
+	}
+	if err != nil {
+		transfer.handleClientError(err)
+	}
+	transfer = nil
 }
 
 func wrapInput(pty *TrzszPty) {
@@ -134,9 +225,9 @@ func wrapInput(pty *TrzszPty) {
 			break
 		} else if err == nil && n > 0 {
 			buf := buffer[0:n]
-			if transfer != nil {
+			if t := transfer; t != nil {
 				if buf[0] == '\x03' { // `ctrl + c` to stop transferring files
-					transfer.stopTransferringFiles()
+					t.stopTransferringFiles()
 				}
 				continue
 			}
@@ -154,22 +245,17 @@ func wrapOutput(pty *TrzszPty) {
 			break
 		} else if err == nil && n > 0 {
 			buf := buffer[0:n]
+			if t := transfer; t != nil {
+				t.addReceivedData(buf)
+				continue
+			}
 			mode := detectTrzsz(buf)
 			if mode == nil {
 				os.Stdout.Write(buf)
 				continue
 			}
 			os.Stdout.Write(bytes.ToLower(buf))
-			transfer = NewTransfer(pty.Stdout, pty.Stdin)
-			if *mode == 'S' {
-				err = downloadFiles(pty)
-			} else if *mode == 'R' {
-				err = uploadFiles(pty)
-			}
-			if err != nil {
-				transfer.handleClientError(err)
-			}
-			transfer = nil
+			go handleTrzsz(pty, *mode)
 		}
 	}
 }

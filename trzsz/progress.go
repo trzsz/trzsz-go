@@ -25,53 +25,18 @@ SOFTWARE.
 package trzsz
 
 import (
-	"bytes"
-	"compress/zlib"
-	"encoding/base64"
-	"io/ioutil"
+	"os"
 )
 
-type PtyIO interface {
-	Read(b []byte) (n int, err error)
-	Write(p []byte) (n int, err error)
-	Close() error
-}
-
-type ProgressCallback interface {
+type TextProgressBar struct {
 	// TODO
 }
 
-func encodeBytes(buf []byte) string {
-	var b bytes.Buffer
-	z := zlib.NewWriter(&b)
-	z.Write([]byte(buf))
-	z.Close()
-	return base64.StdEncoding.EncodeToString(b.Bytes())
-}
-
-func encodeString(str string) string {
-	return encodeBytes([]byte(str))
-}
-
-func decodeString(str string) ([]byte, error) {
-	b, err := base64.StdEncoding.DecodeString(str)
-	if err != nil {
-		return nil, err
-	}
-	z, err := zlib.NewReader(bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-	defer z.Close()
-	return ioutil.ReadAll(z)
-}
-
-func checkPathWritable(path string) error {
+func NewTextProgressBar(stdout *os.File, columns int, tmuxPaneColumns int) *TextProgressBar {
 	// TODO
 	return nil
 }
 
-func checkFilesReadable(files []string) error {
+func (p *TextProgressBar) setTerminalColumns(columns int) {
 	// TODO
-	return nil
 }
