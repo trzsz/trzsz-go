@@ -53,6 +53,20 @@ Similar to lrzsz ( rz / sz ), command `trz` to upload files, command `tsz /path/
 For more information, see the website of trzsz: [https://trzsz.github.io](https://trzsz.github.io/).
 
 
+## Configuration
+
+`trzsz` looks for configuration at `~/.trzsz.conf`. e.g.:
+
+```
+DefaultUploadPath =
+DefaultDownloadPath = /Users/username/Downloads
+```
+
+* If the `DefaultUploadPath` is not empty, the path will be opened by default while choosing upload files.
+
+* If the `DefaultDownloadPath` is not empty, downloading files will be saved to the path automatically instead of asking each time.
+
+
 ## Contact
 
 Feel free to email me <lonnywong@qq.com>.

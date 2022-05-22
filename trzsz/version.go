@@ -24,4 +24,4 @@ SOFTWARE.
 
 package trzsz
 
-const TrzszVersion = "0.1.2"
+const TrzszVersion = "0.1.3"

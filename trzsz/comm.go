@@ -28,7 +28,12 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"io/ioutil"
+	"os"
+	"path/filepath"
+	"runtime/debug"
 )
 
 type PtyIO interface {
@@ -38,7 +43,11 @@ type PtyIO interface {
 }
 
 type ProgressCallback interface {
-	// TODO
+	onNum(num int64)
+	onName(name string)
+	onSize(size int64)
+	onStep(step int64)
+	onDone(name string)
 }
 
 func encodeBytes(buf []byte) string {
@@ -66,12 +75,95 @@ func decodeString(str string) ([]byte, error) {
 	return ioutil.ReadAll(z)
 }
 
+type TrzszError struct {
+	message string
+	errType string
+	trace   bool
+}
+
+func NewTrzszError(message string, errType string, trace bool) *TrzszError {
+	if errType == "fail" || errType == "FAIL" || errType == "EXIT" {
+		msg, err := decodeString(message)
+		if err != nil {
+			message = fmt.Sprintf("decode [%s] error: %s", message, err)
+		} else {
+			message = string(msg)
+		}
+	} else if len(errType) > 0 {
+		message = fmt.Sprintf("[TrzszError] %s: %s", errType, message)
+	}
+	err := &TrzszError{message, errType, trace}
+	if err.isTraceBack() {
+		err.message = fmt.Sprintf("%s\n%s", err.message, string(debug.Stack()))
+	}
+	return err
+}
+
+func newTrzszError(message string) *TrzszError {
+	return NewTrzszError(message, "", false)
+}
+
+func (e *TrzszError) Error() string {
+	return e.message
+}
+
+func (e *TrzszError) isTraceBack() bool {
+	if e.errType == "fail" {
+		return false
+	}
+	return e.trace
+}
+
+func (e *TrzszError) isRemoteExit() bool {
+	return e.errType == "EXIT"
+}
+
+func (e *TrzszError) isRemoteFail() bool {
+	return e.errType == "fail" || e.errType == "FAIL"
+}
+
 func checkPathWritable(path string) error {
-	// TODO
+	fileInfo, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return newTrzszError(fmt.Sprintf("No such directory: %s", path))
+	}
+	if !fileInfo.IsDir() {
+		return newTrzszError(fmt.Sprintf("Not a directory: %s", path))
+	}
+	if fileInfo.Mode().Perm()&(1<<7) == 0 {
+		return newTrzszError(fmt.Sprintf("No permission to write: %s", path))
+	}
 	return nil
 }
 
 func checkFilesReadable(files []string) error {
-	// TODO
+	for _, file := range files {
+		fileInfo, err := os.Stat(file)
+		if errors.Is(err, os.ErrNotExist) {
+			return newTrzszError(fmt.Sprintf("No such file: %s", file))
+		}
+		if fileInfo.IsDir() {
+			return newTrzszError(fmt.Sprintf("Is a directory: %s", file))
+		}
+		if !fileInfo.Mode().IsRegular() {
+			return newTrzszError(fmt.Sprintf("Not a regular file: %s", file))
+		}
+		if fileInfo.Mode().Perm()&(1<<8) == 0 {
+			return newTrzszError(fmt.Sprintf("No permission to read: %s", file))
+		}
+	}
 	return nil
+}
+
+func getNewName(path, name string) (string, error) {
+	if _, err := os.Stat(filepath.Join(path, name)); errors.Is(err, os.ErrNotExist) {
+		return name, nil
+	}
+	for i := 0; i < 1000; i++ {
+		newName := fmt.Sprintf("%s.%d", name, i)
+		if _, err := os.Stat(filepath.Join(path, newName)); errors.Is(err, os.ErrNotExist) {
+			return newName, nil
+		}
+	}
+	return "", newTrzszError("Fail to assign new file name")
 }

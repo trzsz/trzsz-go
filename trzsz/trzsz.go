@@ -31,6 +31,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -105,8 +106,8 @@ func newProgressBar(pty *TrzszPty, config map[string]interface{}) (*TextProgress
 		return nil, err
 	}
 	tmuxPaneColumns := -1
-	if v, ok := config["tmux_pane_width"].(int); ok {
-		tmuxPaneColumns = v
+	if v, ok := config["tmux_pane_width"].(float64); ok {
+		tmuxPaneColumns = int(v)
 	}
 	return NewTextProgressBar(os.Stdout, columns, tmuxPaneColumns), nil
 }
@@ -143,7 +144,7 @@ func downloadFiles(pty *TrzszPty) error {
 	if err != nil {
 		return err
 	}
-	if progress != nil {
+	if progress != nil && !reflect.ValueOf(progress).IsNil() {
 		pty.OnResize(func(cols int) { progress.setTerminalColumns(cols) })
 		defer pty.OnResize(nil)
 	}
@@ -189,7 +190,7 @@ func uploadFiles(pty *TrzszPty) error {
 	if err != nil {
 		return err
 	}
-	if progress != nil {
+	if progress != nil && !reflect.ValueOf(progress).IsNil() {
 		pty.OnResize(func(cols int) { progress.setTerminalColumns(cols) })
 		defer pty.OnResize(nil)
 	}
@@ -204,7 +205,12 @@ func uploadFiles(pty *TrzszPty) error {
 
 func handleTrzsz(pty *TrzszPty, mode byte) {
 	var err error
-	transfer = NewTransfer(pty.Stdout, pty.Stdin)
+	transfer = NewTransfer(pty.Stdin)
+	defer func() {
+		if err := recover(); err != nil {
+			transfer.handleClientError(NewTrzszError(fmt.Sprintf("%v", err), "panic", true))
+		}
+	}()
 	if mode == 'S' {
 		err = downloadFiles(pty)
 	} else if mode == 'R' {
@@ -237,7 +243,8 @@ func wrapInput(pty *TrzszPty) {
 }
 
 func wrapOutput(pty *TrzszPty) {
-	buffer := make([]byte, 10240)
+	const bufSize = 10240
+	buffer := make([]byte, bufSize)
 	for {
 		n, err := pty.Stdout.Read(buffer)
 		if err == io.EOF {
@@ -247,6 +254,7 @@ func wrapOutput(pty *TrzszPty) {
 			buf := buffer[0:n]
 			if t := transfer; t != nil {
 				t.addReceivedData(buf)
+				buffer = make([]byte, bufSize)
 				continue
 			}
 			mode := detectTrzsz(buf)
@@ -254,7 +262,7 @@ func wrapOutput(pty *TrzszPty) {
 				os.Stdout.Write(buf)
 				continue
 			}
-			os.Stdout.Write(bytes.ToLower(buf))
+			os.Stdout.Write(bytes.Replace(buf, []byte("TRZSZ"), []byte("TRZSZGO"), 1))
 			go handleTrzsz(pty, *mode)
 		}
 	}
