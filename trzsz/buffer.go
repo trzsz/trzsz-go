@@ -122,3 +122,61 @@ func (b *TrzszBuffer) readBinary(size int, timeout <-chan time.Time) ([]byte, er
 	}
 	return b.readBuf.Bytes(), nil
 }
+
+func isVT100End(b byte) bool {
+	if 'a' <= b && b <= 'z' {
+		return true
+	}
+	if 'A' <= b && b <= 'Z' {
+		return true
+	}
+	return false
+}
+
+func isTrzszLetter(b byte) bool {
+	if 'a' <= b && b <= 'z' {
+		return true
+	}
+	if 'A' <= b && b <= 'Z' {
+		return true
+	}
+	if '0' <= b && b <= '9' {
+		return true
+	}
+	if b == '#' || b == ':' || b == '+' || b == '/' || b == '=' {
+		return true
+	}
+	return false
+}
+
+func (b *TrzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error) {
+	b.readBuf.Reset()
+	skipVT100 := false
+	for {
+		buf, err := b.nextBuffer(timeout)
+		if err != nil {
+			return nil, err
+		}
+		newLineIdx := bytes.IndexByte(buf, '!')
+		if newLineIdx >= 0 {
+			b.nextIdx += newLineIdx + 1 // +1 to ignroe the newline
+			buf = buf[0:newLineIdx]
+		} else {
+			b.nextIdx += len(buf)
+		}
+		for _, c := range buf {
+			if skipVT100 {
+				if isVT100End(c) {
+					skipVT100 = false
+				}
+			} else if c == '\x1b' {
+				skipVT100 = true
+			} else if isTrzszLetter(c) {
+				b.readBuf.WriteByte(c)
+			}
+		}
+		if newLineIdx >= 0 {
+			return b.readBuf.Bytes(), nil
+		}
+	}
+}

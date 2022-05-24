@@ -53,18 +53,37 @@ Similar to lrzsz ( rz / sz ), command `trz` to upload files, command `tsz /path/
 For more information, see the website of trzsz: [https://trzsz.github.io](https://trzsz.github.io/).
 
 
+## Suggestion
+
+* It is recommended to set alias `alias ssh="trzsz ssh"` for convenience.
+
+* If using `tmux` on the local computer, run `tmux` ( without `trzsz` ) first, then `trzsz ssh` to login.
+
+
 ## Configuration
 
 `trzsz` looks for configuration at `~/.trzsz.conf`. e.g.:
 
 ```
 DefaultUploadPath =
-DefaultDownloadPath = /Users/username/Downloads
+DefaultDownloadPath = /Users/username/Downloads/
 ```
 
 * If the `DefaultUploadPath` is not empty, the path will be opened by default while choosing upload files.
 
 * If the `DefaultDownloadPath` is not empty, downloading files will be saved to the path automatically instead of asking each time.
+
+
+## Screenshot
+
+#### Windows
+
+  ![windows trzsz ssh](https://trzsz.github.io/images/cmd_trzsz.gif)
+
+
+#### Ubuntu
+
+  ![ubuntu trzsz ssh](https://trzsz.github.io/images/ubuntu_trzsz.gif)
 
 
 ## Contact

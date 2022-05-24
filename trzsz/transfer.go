@@ -106,6 +106,10 @@ func (t *TrzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 		return nil, newTrzszError("Stopped")
 	}
 
+	if IsWindows() {
+		return t.buffer.readLineOnWindows(timeout)
+	}
+
 	line, err := t.buffer.readLine(timeout)
 	if err != nil {
 		return nil, err
@@ -125,7 +129,7 @@ func (t *TrzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 			line = buf
 		}
 		idx := bytes.LastIndex(line, []byte("#"+expectType+":"))
-		if idx > 0 {
+		if idx >= 0 {
 			line = line[idx:]
 		}
 	}
@@ -260,6 +264,10 @@ func (t *TrzszTransfer) sendAction(confirm bool) error {
 		"lang":    "go",
 		"confirm": confirm,
 		"version": TrzszVersion,
+	}
+	if IsWindows() {
+		actMap["binary"] = false
+		actMap["newline"] = "!\n"
 	}
 	actStr, err := json.Marshal(actMap)
 	if err != nil {

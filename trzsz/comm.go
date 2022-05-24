@@ -33,8 +33,15 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 )
+
+var is_windows bool = (runtime.GOOS == "windows")
+
+func IsWindows() bool {
+	return is_windows
+}
 
 type PtyIO interface {
 	Read(b []byte) (n int, err error)
@@ -130,8 +137,10 @@ func checkPathWritable(path string) error {
 	if !fileInfo.IsDir() {
 		return newTrzszError(fmt.Sprintf("Not a directory: %s", path))
 	}
-	if fileInfo.Mode().Perm()&(1<<7) == 0 {
-		return newTrzszError(fmt.Sprintf("No permission to write: %s", path))
+	if !IsWindows() {
+		if fileInfo.Mode().Perm()&(1<<7) == 0 {
+			return newTrzszError(fmt.Sprintf("No permission to write: %s", path))
+		}
 	}
 	return nil
 }
@@ -148,8 +157,10 @@ func checkFilesReadable(files []string) error {
 		if !fileInfo.Mode().IsRegular() {
 			return newTrzszError(fmt.Sprintf("Not a regular file: %s", file))
 		}
-		if fileInfo.Mode().Perm()&(1<<8) == 0 {
-			return newTrzszError(fmt.Sprintf("No permission to read: %s", file))
+		if !IsWindows() {
+			if fileInfo.Mode().Perm()&(1<<8) == 0 {
+				return newTrzszError(fmt.Sprintf("No permission to read: %s", file))
+			}
 		}
 	}
 	return nil
