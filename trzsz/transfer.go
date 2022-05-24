@@ -107,7 +107,17 @@ func (t *TrzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 	}
 
 	if IsWindows() {
-		return t.buffer.readLineOnWindows(timeout)
+		line, err := t.buffer.readLineOnWindows(timeout)
+		if err != nil {
+			return nil, err
+		}
+		if t.tmuxOutputJunk || mayHasJunk {
+			idx := bytes.LastIndex(line, []byte("#"+expectType+":"))
+			if idx >= 0 {
+				line = line[idx:]
+			}
+		}
+		return line, nil
 	}
 
 	line, err := t.buffer.readLine(timeout)
