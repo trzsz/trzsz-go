@@ -1,5 +1,5 @@
 # trzsz-go
-trzsz is a simple file transfer tools, similar to lrzsz ( rz / sz ), and compatible with tmux.
+[trzsz](https://github.com/trzsz/trzsz) ( trz / tsz ) is a simple file transfer tools, similar to lrzsz ( rz / sz ), and compatible with tmux.
 
 
 ## Installation
@@ -72,6 +72,17 @@ DefaultDownloadPath = /Users/username/Downloads/
 * If the `DefaultUploadPath` is not empty, the path will be opened by default while choosing upload files.
 
 * If the `DefaultDownloadPath` is not empty, downloading files will be saved to the path automatically instead of asking each time.
+
+
+## Trouble shooting
+
+* If using [MSYS2](https://www.msys2.org/) or [Git Bash](https://www.atlassian.com/git/tutorials/git-bash) on windows, and getting an error `The handle is invalid`.
+  * Install [winpty](https://github.com/rprichard/winpty) by `pacman -S winpty` in `MSYS2`.
+  * `Git Bash` should have winpty installed, no need to install it manually.
+  * Add `winpty` before `trzsz`, e.g.: `winpty trzsz ssh x.x.x.x`.
+
+* `/usr/bin/ssh` in [MSYS2](https://www.msys2.org/) or [Cygwin](https://www.cygwin.com/) is not supported yet.
+  * Use the [OpenSSH](https://docs.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse) instead, e.g.: `winpty trzsz /c/Windows/System32/OpenSSH/ssh.exe x.x.x.x`.
 
 
 ## Screenshot

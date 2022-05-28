@@ -96,9 +96,21 @@ func (t *TrzszTransfer) cleanInput(timeoutDuration time.Duration) {
 	}
 }
 
+func (t *TrzszTransfer) writeAll(buf []byte) error {
+	written := 0
+	length := len(buf)
+	for written < length {
+		n, err := t.writer.Write(buf[written:])
+		if err != nil {
+			return err
+		}
+		written += n
+	}
+	return nil
+}
+
 func (t *TrzszTransfer) sendLine(typ string, buf string) error {
-	_, err := t.writer.Write([]byte(fmt.Sprintf("#%s:%s\n", typ, buf)))
-	return err
+	return t.writeAll([]byte(fmt.Sprintf("#%s:%s\n", typ, buf)))
 }
 
 func (t *TrzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
@@ -245,12 +257,10 @@ func (t *TrzszTransfer) sendData(data []byte, binary bool, escapeCodes [][]byte)
 		return t.sendBinary("DATA", data)
 	}
 	buf := escapeData(data, escapeCodes)
-	_, err := t.writer.Write([]byte(fmt.Sprintf("#DATA:%d\n", len(buf))))
-	if err != nil {
+	if err := t.writeAll([]byte(fmt.Sprintf("#DATA:%d\n", len(buf)))); err != nil {
 		return err
 	}
-	_, err = t.writer.Write(buf)
-	return err
+	return t.writeAll(buf)
 }
 
 func (t *TrzszTransfer) recvData(binary bool, escapeCodes [][]byte, timeout time.Duration) ([]byte, error) {

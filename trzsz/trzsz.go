@@ -296,7 +296,8 @@ func TrzszMain() int {
 	// set stdin in raw mode
 	state, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
-		panic(err)
+		fmt.Fprintln(os.Stderr, err)
+		return -2
 	}
 	defer func() { _ = term.Restore(int(os.Stdin.Fd()), state) }()
 
