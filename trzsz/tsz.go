@@ -26,12 +26,33 @@ package trzsz
 
 import (
 	"fmt"
+
+	"github.com/alexflint/go-arg"
 )
+
+type TszArgs struct {
+	Quiet     bool       `arg:"-q" help:"quiet (hide progress bar)"`
+	Overwrite bool       `arg:"-y" help:"yes, overwrite existing file(s)"`
+	Binary    bool       `arg:"-b" help:"binary transfer mode, faster for binary files"`
+	Escape    bool       `arg:"-e" help:"escape all known control characters"`
+	Bufsize   BufferSize `arg:"-B" placeholder:"N" default:"10M" help:"max buffer chunk size (1K<=N<=1G). (default: 10M)"`
+	Timeout   int        `arg:"-t" placeholder:"N" default:"100" help:"timeout ( N seconds ) for each buffer chunk.\nN <= 0 means never timeout. (default: 100)"`
+	File      []string   `arg:"positional,required" help:"file(s) to be sent"`
+}
+
+func (TszArgs) Description() string {
+	return "Send file(s), similar to sz and compatible with tmux.\n"
+}
+
+func (TszArgs) Version() string {
+	return fmt.Sprintf("tsz (trzsz) go %s", kTrzszVersion)
+}
 
 // TszMain entry of send files to client
 func TszMain() int {
-	fmt.Println("The Go version is under development.\n" +
-		"Please use the Python version instead.\n" +
-		"GitHub: https://github.com/trzsz/trzsz")
+	var args TszArgs
+	arg.MustParse(&args)
+
+	fmt.Printf("%#v\n", args)
 	return 0
 }

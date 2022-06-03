@@ -40,7 +40,7 @@ import (
 )
 
 func printVersion() {
-	fmt.Printf("trzsz go %s\n", TrzszVersion)
+	fmt.Printf("trzsz go %s\n", kTrzszVersion)
 }
 
 func printHelp() {

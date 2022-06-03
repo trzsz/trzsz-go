@@ -33,8 +33,11 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"runtime/debug"
+	"strconv"
+	"strings"
 )
 
 var is_windows bool = (runtime.GOOS == "windows")
@@ -55,6 +58,46 @@ type ProgressCallback interface {
 	onSize(size int64)
 	onStep(step int64)
 	onDone(name string)
+}
+
+type BufferSize struct {
+	Size int64
+}
+
+var sizeRegexp = regexp.MustCompile("(?i)^(\\d+)(b|k|m|g|kb|mb|gb)?$")
+
+func (b *BufferSize) UnmarshalText(buf []byte) error {
+	str := string(buf)
+	match := sizeRegexp.FindStringSubmatch(str)
+	if len(match) < 2 {
+		return fmt.Errorf("invalid size %s", str)
+	}
+	sizeValue, err := strconv.ParseInt(match[1], 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid size %s", str)
+	}
+	if len(match) > 2 {
+		unitSuffix := strings.ToLower(match[2])
+		if len(unitSuffix) == 0 || unitSuffix == "b" {
+			// sizeValue *= 1
+		} else if unitSuffix == "k" || unitSuffix == "kb" {
+			sizeValue *= 1024
+		} else if unitSuffix == "m" || unitSuffix == "mb" {
+			sizeValue *= 1024 * 1024
+		} else if unitSuffix == "g" || unitSuffix == "gb" {
+			sizeValue *= 1024 * 1024 * 1024
+		} else {
+			return fmt.Errorf("invalid size %s", str)
+		}
+	}
+	if sizeValue < 1024 {
+		return fmt.Errorf("less than 1K")
+	}
+	if sizeValue > 1024*1024*1024 {
+		return fmt.Errorf("greater than 1G")
+	}
+	b.Size = sizeValue
+	return nil
 }
 
 func encodeBytes(buf []byte) string {

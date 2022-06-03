@@ -146,7 +146,7 @@ func (t *TrzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 				if err != nil {
 					return nil, err
 				}
-				buf = append(buf, line...)
+				buf = append(buf[:len(buf)-1], line...)
 			}
 			line = buf
 		}
@@ -283,7 +283,7 @@ func (t *TrzszTransfer) sendAction(confirm bool) error {
 	actMap := map[string]interface{}{
 		"lang":    "go",
 		"confirm": confirm,
-		"version": TrzszVersion,
+		"version": kTrzszVersion,
 	}
 	if IsWindows() {
 		actMap["binary"] = false
