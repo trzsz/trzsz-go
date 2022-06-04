@@ -30,20 +30,24 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
-var is_windows bool = (runtime.GOOS == "windows")
+var isWindows bool = (runtime.GOOS == "windows")
 
 func IsWindows() bool {
-	return is_windows
+	return isWindows
 }
 
 type PtyIO interface {
@@ -62,6 +66,15 @@ type ProgressCallback interface {
 
 type BufferSize struct {
 	Size int64
+}
+
+type Args struct {
+	Quiet     bool       `arg:"-q" help:"quiet (hide progress bar)"`
+	Overwrite bool       `arg:"-y" help:"yes, overwrite existing file(s)"`
+	Binary    bool       `arg:"-b" help:"binary transfer mode, faster for binary files"`
+	Escape    bool       `arg:"-e" help:"escape all known control characters"`
+	Bufsize   BufferSize `arg:"-B" placeholder:"N" default:"10M" help:"max buffer chunk size (1K<=N<=1G). (default: 10M)"`
+	Timeout   int        `arg:"-t" placeholder:"N" default:"100" help:"timeout ( N seconds ) for each buffer chunk.\nN <= 0 means never timeout. (default: 100)"`
 }
 
 var sizeRegexp = regexp.MustCompile("(?i)^(\\d+)(b|k|m|g|kb|mb|gb)?$")
@@ -158,7 +171,7 @@ func (e *TrzszError) Error() string {
 }
 
 func (e *TrzszError) isTraceBack() bool {
-	if e.errType == "fail" {
+	if e.errType == "fail" || e.errType == "EXIT" {
 		return false
 	}
 	return e.trace
@@ -220,4 +233,100 @@ func getNewName(path, name string) (string, error) {
 		}
 	}
 	return "", newTrzszError("Fail to assign new file name")
+}
+
+type TmuxMode int
+
+const (
+	NoTmux = iota
+	TmuxNormalMode
+	TmuxControlMode
+)
+
+func checkTmux() (TmuxMode, *os.File, int, error) {
+	if _, tmux := os.LookupEnv("TMUX"); !tmux {
+		return NoTmux, os.Stdout, -1, nil
+	}
+
+	cmd := exec.Command("tmux", "display-message", "-p", "#{client_tty}:#{client_control_mode}:#{pane_width}")
+	cmd.Stdin = os.Stdin
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, nil, -1, err
+	}
+
+	output := strings.TrimSpace(string(out))
+	tokens := strings.Split(output, ":")
+	if len(tokens) != 3 {
+		return 0, nil, -1, fmt.Errorf("tmux unexpect output: %s", output)
+	}
+	tmuxTty, controlMode, paneWidth := tokens[0], tokens[1], tokens[2]
+
+	if controlMode == "1" || tmuxTty[0] != '/' {
+		return TmuxControlMode, os.Stdout, -1, nil
+	}
+	if _, err := os.Stat(tmuxTty); errors.Is(err, os.ErrNotExist) {
+		return TmuxControlMode, os.Stdout, -1, nil
+	}
+
+	tmuxStdout, err := os.OpenFile(tmuxTty, os.O_WRONLY, 0)
+	if err != nil {
+		return 0, nil, -1, err
+	}
+	tmuxPaneWidth := -1
+	if len(paneWidth) > 0 {
+		tmuxPaneWidth, err = strconv.Atoi(paneWidth)
+		if err != nil {
+			return 0, nil, -1, err
+		}
+	}
+	return TmuxNormalMode, tmuxStdout, tmuxPaneWidth, nil
+}
+
+func getTerminalColumns() int {
+	cmd := exec.Command("stty", "size")
+	cmd.Stdin = os.Stdin
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	output := strings.TrimSpace(string(out))
+	tokens := strings.Split(output, " ")
+	if len(tokens) != 2 {
+		return 0
+	}
+	cols, _ := strconv.Atoi(tokens[1])
+	return cols
+}
+
+func reverseString(s string) string {
+	rns := []rune(s)
+	for i, j := 0, len(rns)-1; i < j; i, j = i+1, j-1 {
+		rns[i], rns[j] = rns[j], rns[i]
+	}
+	return string(rns)
+}
+
+func wrapStdinInput(transfer *TrzszTransfer) {
+	const bufSize = 10240
+	buffer := make([]byte, bufSize)
+	for {
+		n, err := os.Stdin.Read(buffer)
+		if err == io.EOF {
+			transfer.stopTransferringFiles()
+		} else {
+			buf := buffer[0:n]
+			transfer.addReceivedData(buf)
+			buffer = make([]byte, bufSize)
+		}
+	}
+}
+
+func handleServerSignal(transfer *TrzszTransfer) {
+	sigstop := make(chan os.Signal, 1)
+	signal.Notify(sigstop, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigstop
+		transfer.stopTransferringFiles()
+	}()
 }

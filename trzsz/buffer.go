@@ -164,6 +164,9 @@ func (b *TrzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error
 		} else {
 			b.nextIdx += len(buf)
 		}
+		if bytes.IndexByte(buf, '\x03') >= 0 { // `ctrl + c` to interrupt
+			return nil, newTrzszError("Interrupted")
+		}
 		for _, c := range buf {
 			if skipVT100 {
 				if isVT100End(c) {

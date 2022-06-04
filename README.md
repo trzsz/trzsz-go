@@ -46,8 +46,6 @@ trzsz.exe ssh x.x.x.x
 
 ### on Server
 
-*The `Go` version is under development. Please use the `Python` version instead. GitHub: https://github.com/trzsz/trzsz*
-
 Similar to lrzsz ( rz / sz ), command `trz` to upload files, command `tsz /path/to/file` to download files.
 
 For more information, see the website of trzsz: [https://trzsz.github.io](https://trzsz.github.io/).
@@ -81,8 +79,9 @@ DefaultDownloadPath = /Users/username/Downloads/
   * `Git Bash` should have winpty installed, no need to install it manually.
   * Add `winpty` before `trzsz`, e.g.: `winpty trzsz ssh x.x.x.x`.
 
-* `/usr/bin/ssh` in [MSYS2](https://www.msys2.org/) or [Cygwin](https://www.cygwin.com/) is not supported yet.
-  * Use the [OpenSSH](https://docs.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse) instead, e.g.: `winpty trzsz /c/Windows/System32/OpenSSH/ssh.exe x.x.x.x`.
+* `/usr/bin/ssh` in [MSYS2](https://www.msys2.org/) and [Cygwin](https://www.cygwin.com/) is not supported yet, use the [OpenSSH](https://docs.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse) instead.
+  * in `MSYS2`, e.g.: `winpty trzsz /c/Windows/System32/OpenSSH/ssh.exe x.x.x.x`.
+  * in `Cygwin`, e.g.: `trzsz "C:\Windows\System32\OpenSSH\ssh.exe" x.x.x.x`.
 
 
 ## Screenshot

@@ -25,10 +25,42 @@ SOFTWARE.
 package trzsz
 
 import (
+	"bytes"
 	"fmt"
+	"strconv"
 
 	"golang.org/x/text/encoding/charmap"
 )
+
+type unicode string
+
+func (s unicode) MarshalJSON() ([]byte, error) {
+	b := new(bytes.Buffer)
+	b.WriteByte('"')
+	for _, c := range s {
+		if c < 128 && strconv.IsPrint(c) {
+			b.WriteRune(c)
+		} else {
+			b.WriteString(fmt.Sprintf("\\u%04x", c))
+		}
+	}
+	b.WriteByte('"')
+	return b.Bytes(), nil
+}
+
+func getEscapeChars(escapeAll bool) [][]unicode {
+	escapeChars := [][]unicode{
+		{"\u00ee", "\u00ee\u00ee"},
+		{"\u007e", "\u00ee\u0031"},
+	}
+	if escapeAll {
+		const chars = unicode("\x02\x10\x1b\x1d\u009d")
+		for i, c := range chars {
+			escapeChars = append(escapeChars, []unicode{unicode(c), "\u00ee" + unicode(byte(i+0x41))})
+		}
+	}
+	return escapeChars
+}
 
 func escapeCharsToCodes(escapeChars []interface{}) ([][]byte, error) {
 	escapeCodes := make([][]byte, len(escapeChars))

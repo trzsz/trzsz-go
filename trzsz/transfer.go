@@ -36,17 +36,21 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"golang.org/x/term"
 )
 
 type TrzszTransfer struct {
-	buffer         *TrzszBuffer
-	writer         PtyIO
-	stopped        bool
-	tmuxOutputJunk bool
-	lastInputTime  *time.Time
-	cleanTimeout   time.Duration
-	maxChunkTime   time.Duration
-	transferConfig map[string]interface{}
+	buffer          *TrzszBuffer
+	writer          PtyIO
+	stopped         bool
+	tmuxOutputJunk  bool
+	lastInputTime   *time.Time
+	cleanTimeout    time.Duration
+	maxChunkTime    time.Duration
+	transferConfig  map[string]interface{}
+	protocolNewline string
+	stdinState      *term.State
 }
 
 func maxDuration(a, b time.Duration) time.Duration {
@@ -63,8 +67,18 @@ func minInt64(a, b int64) int64 {
 	return b
 }
 
-func NewTransfer(writer PtyIO) *TrzszTransfer {
-	return &TrzszTransfer{NewTrzszBuffer(), writer, false, false, nil, 100 * time.Millisecond, 0, make(map[string]interface{})}
+func NewTransfer(writer PtyIO, stdinState *term.State) *TrzszTransfer {
+	return &TrzszTransfer{
+		NewTrzszBuffer(),
+		writer,
+		false,
+		false,
+		nil,
+		100 * time.Millisecond,
+		0, make(map[string]interface{}),
+		"\n",
+		stdinState,
+	}
 }
 
 func (t *TrzszTransfer) addReceivedData(buf []byte) {
@@ -110,7 +124,7 @@ func (t *TrzszTransfer) writeAll(buf []byte) error {
 }
 
 func (t *TrzszTransfer) sendLine(typ string, buf string) error {
-	return t.writeAll([]byte(fmt.Sprintf("#%s:%s\n", typ, buf)))
+	return t.writeAll([]byte(fmt.Sprintf("#%s:%s%s", typ, buf, t.protocolNewline)))
 }
 
 func (t *TrzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
@@ -279,7 +293,7 @@ func (t *TrzszTransfer) recvData(binary bool, escapeCodes [][]byte, timeout time
 	return unescapeData(data, escapeCodes), nil
 }
 
-func (t *TrzszTransfer) sendAction(confirm bool) error {
+func (t *TrzszTransfer) sendAction(confirm, remoteIsWindows bool) error {
 	actMap := map[string]interface{}{
 		"lang":    "go",
 		"confirm": confirm,
@@ -293,6 +307,9 @@ func (t *TrzszTransfer) sendAction(confirm bool) error {
 	if err != nil {
 		return err
 	}
+	if remoteIsWindows {
+		t.protocolNewline = "!\n"
+	}
 	return t.sendString("ACT", string(actStr))
 }
 
@@ -302,19 +319,40 @@ func (t *TrzszTransfer) recvAction() (map[string]interface{}, error) {
 		return nil, err
 	}
 	var actMap map[string]interface{}
-	err = json.Unmarshal([]byte(actStr), &actMap)
-	if err != nil {
+	if err := json.Unmarshal([]byte(actStr), &actMap); err != nil {
 		return nil, err
+	}
+	if v, ok := actMap["newline"].(string); ok {
+		t.protocolNewline = v
 	}
 	return actMap, nil
 }
 
-func (t *TrzszTransfer) sendConfig() error {
+func (t *TrzszTransfer) sendConfig(args *Args, escapeChars [][]unicode, tmuxMode TmuxMode, tmuxPaneWidth int) error {
 	cfgMap := map[string]interface{}{
 		"lang": "go",
 	}
+	if args.Quiet {
+		cfgMap["quiet"] = true
+	}
+	if args.Binary {
+		cfgMap["binary"] = true
+		cfgMap["escape_chars"] = escapeChars
+	}
+	cfgMap["bufsize"] = args.Bufsize.Size
+	cfgMap["timeout"] = args.Timeout
+	if args.Overwrite {
+		cfgMap["overwrite"] = true
+	}
+	if tmuxMode == TmuxNormalMode {
+		cfgMap["tmux_output_junk"] = true
+		cfgMap["tmux_pane_width"] = tmuxPaneWidth
+	}
 	cfgStr, err := json.Marshal(cfgMap)
 	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal([]byte(cfgStr), &t.transferConfig); err != nil {
 		return err
 	}
 	return t.sendString("CFG", string(cfgStr))
@@ -325,8 +363,7 @@ func (t *TrzszTransfer) recvConfig() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = json.Unmarshal([]byte(cfgStr), &t.transferConfig)
-	if err != nil {
+	if err := json.Unmarshal([]byte(cfgStr), &t.transferConfig); err != nil {
 		return nil, err
 	}
 	if v, ok := t.transferConfig["tmux_output_junk"].(bool); ok {
@@ -335,16 +372,35 @@ func (t *TrzszTransfer) recvConfig() (map[string]interface{}, error) {
 	return t.transferConfig, nil
 }
 
-func (t *TrzszTransfer) handleClientError(err error) {
+func (t *TrzszTransfer) clientExit(msg string) error {
+	t.cleanInput(200)
+	return t.sendString("EXIT", msg)
+}
+
+func (t *TrzszTransfer) recvExit() (string, error) {
+	return t.recvString("EXIT", false)
+}
+
+func (t *TrzszTransfer) serverExit(msg string) {
+	t.cleanInput(200)
+	if t.stdinState != nil {
+		term.Restore(int(os.Stdin.Fd()), t.stdinState)
+	}
+	os.Stdout.WriteString("\x1b8\x1b[0J")
+	if IsWindows() {
+		os.Stdout.WriteString("\r\n")
+	}
+	os.Stdout.WriteString(msg)
+	os.Stdout.WriteString("\n")
+}
+
+func (t *TrzszTransfer) clientError(err error) {
 	t.cleanInput(t.cleanTimeout)
 
 	trace := true
 	if e, ok := err.(*TrzszError); ok {
 		trace = e.isTraceBack()
-		if e.isRemoteExit() {
-			return
-		}
-		if e.isRemoteFail() {
+		if e.isRemoteExit() || e.isRemoteFail() {
 			return
 		}
 	}
@@ -356,9 +412,25 @@ func (t *TrzszTransfer) handleClientError(err error) {
 	_ = t.sendString(typ, err.Error())
 }
 
-func (t *TrzszTransfer) sendExit(msg string) error {
-	t.cleanInput(200)
-	return t.sendString("EXIT", msg)
+func (t *TrzszTransfer) serverError(err error) {
+	t.cleanInput(t.cleanTimeout)
+
+	trace := true
+	if e, ok := err.(*TrzszError); ok {
+		trace = e.isTraceBack()
+		if e.isRemoteExit() || e.isRemoteFail() {
+			t.serverExit(e.Error())
+			return
+		}
+	}
+
+	typ := "fail"
+	if trace {
+		typ = "FAIL"
+	}
+	_ = t.sendString(typ, err.Error())
+
+	t.serverExit(err.Error())
 }
 
 func (t *TrzszTransfer) sendFiles(files []string, progress ProgressCallback) ([]string, error) {
@@ -485,7 +557,7 @@ func (t *TrzszTransfer) recvFiles(path string, progress ProgressCallback) ([]str
 	if v, ok := t.transferConfig["overwrite"].(bool); ok {
 		overwrite = v
 	}
-	timeout := time.Duration(100) * time.Second
+	timeout := 100 * time.Second
 	if v, ok := t.transferConfig["timeout"].(float64); ok {
 		timeout = time.Duration(v) * time.Second
 	}

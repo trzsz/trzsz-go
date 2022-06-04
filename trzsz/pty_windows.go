@@ -41,6 +41,7 @@ type TrzszPty struct {
 	outMode  uint32
 	width    int
 	height   int
+	closed   bool
 	exitCode *uint32
 }
 
@@ -130,7 +131,7 @@ func Spawn(name string, args ...string) (*TrzszPty, error) {
 		return nil, err
 	}
 
-	return &TrzszPty{cpty, cpty, cpty, inMode, outMode, width, height, nil}, nil
+	return &TrzszPty{cpty, cpty, cpty, inMode, outMode, width, height, false, nil}, nil
 }
 
 func (t *TrzszPty) OnResize(cb func(int)) {
@@ -141,13 +142,21 @@ func (t *TrzszPty) GetColumns() (int, error) {
 }
 
 func (t *TrzszPty) Close() {
+	if t.closed {
+		return
+	}
 	t.cpty.Close()
 	resetVirtualTerminal(t.inMode, t.outMode)
+	t.closed = true
 }
 
 func (t *TrzszPty) Wait() {
 	code, _ := t.cpty.Wait(context.Background())
 	t.exitCode = &code
+}
+
+func (t *TrzszPty) Terminate() {
+	t.Close()
 }
 
 func (t *TrzszPty) ExitCode() int {

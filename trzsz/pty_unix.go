@@ -102,6 +102,10 @@ func (t *TrzszPty) Wait() {
 	t.cmd.Wait()
 }
 
+func (t *TrzszPty) Terminate() {
+	t.cmd.Process.Signal(syscall.SIGTERM)
+}
+
 func (t *TrzszPty) ExitCode() int {
 	return t.cmd.ProcessState.ExitCode()
 }

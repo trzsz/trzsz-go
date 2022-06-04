@@ -197,7 +197,7 @@ func (p *TextProgressBar) onDone(name string) {
 
 func (p *TextProgressBar) showProgress() {
 	now := time.Now()
-	if p.lastUpdateTime != nil && now.Sub(*p.lastUpdateTime) < time.Duration(500)*time.Millisecond {
+	if p.lastUpdateTime != nil && now.Sub(*p.lastUpdateTime) < 500*time.Millisecond {
 		return
 	}
 	p.lastUpdateTime = &now

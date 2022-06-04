@@ -30,10 +30,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
+	"syscall"
 
 	"github.com/ncruces/zenity"
 	"golang.org/x/term"
@@ -79,18 +81,18 @@ func getTrzszConfig(name string) *string {
 	return nil
 }
 
-var transfer *TrzszTransfer = nil
 var trzszRegexp = regexp.MustCompile("::TRZSZ:TRANSFER:([SR]):(\\d+\\.\\d+\\.\\d+)(:\\d+)?")
 
-func detectTrzsz(output []byte) *byte {
+func detectTrzsz(output []byte) (*byte, bool) {
 	if !bytes.Contains(output, []byte("::TRZSZ:TRANSFER:")) {
-		return nil
+		return nil, false
 	}
 	match := trzszRegexp.FindSubmatch(output)
 	if len(match) < 2 {
-		return nil
+		return nil, false
 	}
-	return &match[1][0]
+	remoteIsWindows := len(match) > 3 && string(match[3]) == ":1"
+	return &match[1][0], remoteIsWindows
 }
 
 func newProgressBar(pty *TrzszPty, config map[string]interface{}) (*TextProgressBar, error) {
@@ -112,13 +114,13 @@ func newProgressBar(pty *TrzszPty, config map[string]interface{}) (*TextProgress
 	return NewTextProgressBar(os.Stdout, columns, tmuxPaneColumns), nil
 }
 
-func downloadFiles(pty *TrzszPty) error {
+func downloadFiles(pty *TrzszPty, transfer *TrzszTransfer, remoteIsWindows bool) error {
 	savePath := getTrzszConfig("DefaultDownloadPath")
 	if savePath == nil {
 		path, err := zenity.SelectFile(zenity.Title("Choose a folder to save file(s)"), zenity.Directory(), zenity.ShowHidden())
 		if err != nil {
 			if err == zenity.ErrCanceled {
-				return transfer.sendAction(false)
+				return transfer.sendAction(false, remoteIsWindows)
 			}
 			return err
 		}
@@ -126,13 +128,13 @@ func downloadFiles(pty *TrzszPty) error {
 	}
 
 	if savePath == nil || len(*savePath) == 0 {
-		return transfer.sendAction(false)
+		return transfer.sendAction(false, remoteIsWindows)
 	}
 	if err := checkPathWritable(*savePath); err != nil {
 		return err
 	}
 
-	if err := transfer.sendAction(true); err != nil {
+	if err := transfer.sendAction(true, remoteIsWindows); err != nil {
 		return err
 	}
 	config, err := transfer.recvConfig()
@@ -154,10 +156,10 @@ func downloadFiles(pty *TrzszPty) error {
 		return err
 	}
 
-	return transfer.sendExit(fmt.Sprintf("Saved %s to %s", strings.Join(localNames, ", "), *savePath))
+	return transfer.clientExit(fmt.Sprintf("Saved %s to %s", strings.Join(localNames, ", "), *savePath))
 }
 
-func uploadFiles(pty *TrzszPty) error {
+func uploadFiles(pty *TrzszPty, transfer *TrzszTransfer, remoteIsWindows bool) error {
 	options := []zenity.Option{zenity.Title("Choose some files to send"), zenity.ShowHidden()}
 	defaultPath := getTrzszConfig("DefaultUploadPath")
 	if defaultPath != nil {
@@ -166,19 +168,19 @@ func uploadFiles(pty *TrzszPty) error {
 	files, err := zenity.SelectFileMutiple(options...)
 	if err != nil {
 		if err == zenity.ErrCanceled {
-			return transfer.sendAction(false)
+			return transfer.sendAction(false, remoteIsWindows)
 		}
 		return err
 	}
 
 	if len(files) == 0 {
-		return transfer.sendAction(false)
+		return transfer.sendAction(false, remoteIsWindows)
 	}
 	if err := checkFilesReadable(files); err != nil {
 		return err
 	}
 
-	if err := transfer.sendAction(true); err != nil {
+	if err := transfer.sendAction(true, remoteIsWindows); err != nil {
 		return err
 	}
 	config, err := transfer.recvConfig()
@@ -200,26 +202,34 @@ func uploadFiles(pty *TrzszPty) error {
 		return err
 	}
 
-	return transfer.sendExit(fmt.Sprintf("Received %s", strings.Join(remoteNames, ", ")))
+	return transfer.clientExit(fmt.Sprintf("Received %s", strings.Join(remoteNames, ", ")))
 }
 
-func handleTrzsz(pty *TrzszPty, mode byte) {
-	var err error
-	transfer = NewTransfer(pty.Stdin)
+var gTransfer *TrzszTransfer = nil
+
+func handleTrzsz(pty *TrzszPty, mode byte, remoteIsWindows bool) {
+	transfer := NewTransfer(pty.Stdin, nil)
+
+	gTransfer = transfer
+	defer func() {
+		gTransfer = nil
+	}()
+
 	defer func() {
 		if err := recover(); err != nil {
-			transfer.handleClientError(NewTrzszError(fmt.Sprintf("%v", err), "panic", true))
+			transfer.clientError(NewTrzszError(fmt.Sprintf("%v", err), "panic", true))
 		}
 	}()
+
+	var err error
 	if mode == 'S' {
-		err = downloadFiles(pty)
+		err = downloadFiles(pty, transfer, remoteIsWindows)
 	} else if mode == 'R' {
-		err = uploadFiles(pty)
+		err = uploadFiles(pty, transfer, remoteIsWindows)
 	}
 	if err != nil {
-		transfer.handleClientError(err)
+		transfer.clientError(err)
 	}
-	transfer = nil
 }
 
 func wrapInput(pty *TrzszPty) {
@@ -231,9 +241,9 @@ func wrapInput(pty *TrzszPty) {
 			break
 		} else if err == nil && n > 0 {
 			buf := buffer[0:n]
-			if t := transfer; t != nil {
+			if transfer := gTransfer; transfer != nil {
 				if buf[0] == '\x03' { // `ctrl + c` to stop transferring files
-					t.stopTransferringFiles()
+					transfer.stopTransferringFiles()
 				}
 				continue
 			}
@@ -252,20 +262,40 @@ func wrapOutput(pty *TrzszPty) {
 			break
 		} else if err == nil && n > 0 {
 			buf := buffer[0:n]
-			if t := transfer; t != nil {
-				t.addReceivedData(buf)
+			if transfer := gTransfer; transfer != nil {
+				transfer.addReceivedData(buf)
 				buffer = make([]byte, bufSize)
 				continue
 			}
-			mode := detectTrzsz(buf)
+			mode, remoteIsWindows := detectTrzsz(buf)
 			if mode == nil {
 				os.Stdout.Write(buf)
 				continue
 			}
 			os.Stdout.Write(bytes.Replace(buf, []byte("TRZSZ"), []byte("TRZSZGO"), 1))
-			go handleTrzsz(pty, *mode)
+			go handleTrzsz(pty, *mode, remoteIsWindows)
 		}
 	}
+}
+
+func handleSignal(pty *TrzszPty) {
+	sigterm := make(chan os.Signal, 1)
+	signal.Notify(sigterm, syscall.SIGTERM)
+	go func() {
+		<-sigterm
+		pty.Terminate()
+	}()
+
+	sigint := make(chan os.Signal, 1)
+	signal.Notify(sigint, os.Interrupt)
+	go func() {
+		for {
+			<-sigint
+			if transfer := gTransfer; transfer != nil {
+				transfer.stopTransferringFiles()
+			}
+		}
+	}()
 }
 
 // TrzszMain entry of trzsz client
@@ -304,6 +334,9 @@ func TrzszMain() int {
 	// wrap input and output
 	go wrapInput(pty)
 	go wrapOutput(pty)
+
+	// handle signal
+	go handleSignal(pty)
 
 	// wait for exit
 	pty.Wait()
