@@ -26,8 +26,11 @@ package trzsz
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/UserExistsError/conpty"
 	"golang.org/x/sys/windows"
@@ -147,6 +150,10 @@ func (t *TrzszPty) Close() {
 	}
 	t.cpty.Close()
 	resetVirtualTerminal(t.inMode, t.outMode)
+	time.Sleep(100 * time.Millisecond)
+	cmd := exec.Command("cmd", "/c", "cls")
+	cmd.Stdout = os.Stdout
+	cmd.Run()
 	t.closed = true
 }
 

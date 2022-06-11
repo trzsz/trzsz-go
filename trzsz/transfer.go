@@ -522,7 +522,7 @@ func (t *TrzszTransfer) sendFiles(files []string, progress ProgressCallback) ([]
 				progress.onStep(step)
 			}
 			chunkTime := time.Now().Sub(beginTime)
-			if chunkTime < time.Second && bufSize < maxBufSize {
+			if chunkTime < 500*time.Millisecond && bufSize < maxBufSize {
 				bufSize = minInt64(bufSize*2, maxBufSize)
 				buffer = make([]byte, bufSize)
 			}

@@ -44,7 +44,17 @@ import (
 	"syscall"
 )
 
+var isLinux bool = (runtime.GOOS == "linux")
+var isMacOS bool = (runtime.GOOS == "darwin")
 var isWindows bool = (runtime.GOOS == "windows")
+
+func IsLinux() bool {
+	return isLinux
+}
+
+func IsMacOS() bool {
+	return isMacOS
+}
 
 func IsWindows() bool {
 	return isWindows
@@ -329,4 +339,31 @@ func handleServerSignal(transfer *TrzszTransfer) {
 		<-sigstop
 		transfer.stopTransferringFiles()
 	}()
+}
+
+func isVT100End(b byte) bool {
+	if 'a' <= b && b <= 'z' {
+		return true
+	}
+	if 'A' <= b && b <= 'Z' {
+		return true
+	}
+	return false
+}
+
+func trimVT100(buf []byte) []byte {
+	b := new(bytes.Buffer)
+	skipVT100 := false
+	for _, c := range buf {
+		if skipVT100 {
+			if isVT100End(c) {
+				skipVT100 = false
+			}
+		} else if c == '\x1b' {
+			skipVT100 = true
+		} else {
+			b.WriteByte(c)
+		}
+	}
+	return b.Bytes()
 }

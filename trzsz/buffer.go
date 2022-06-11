@@ -123,16 +123,6 @@ func (b *TrzszBuffer) readBinary(size int, timeout <-chan time.Time) ([]byte, er
 	return b.readBuf.Bytes(), nil
 }
 
-func isVT100End(b byte) bool {
-	if 'a' <= b && b <= 'z' {
-		return true
-	}
-	if 'A' <= b && b <= 'Z' {
-		return true
-	}
-	return false
-}
-
 func isTrzszLetter(b byte) bool {
 	if 'a' <= b && b <= 'z' {
 		return true

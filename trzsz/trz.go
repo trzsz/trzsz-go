@@ -27,6 +27,7 @@ package trzsz
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -95,15 +96,21 @@ func TrzMain() int {
 	var args TrzArgs
 	arg.MustParse(&args)
 
-	if err := checkPathWritable(args.Path); err != nil {
+	var err error
+	args.Path, err = filepath.Abs(args.Path)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return -1
+	}
+	if err := checkPathWritable(args.Path); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return -2
 	}
 
 	tmuxMode, realStdout, tmuxPaneWidth, err := checkTmux()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		return -2
+		return -3
 	}
 
 	if args.Binary && tmuxMode != NoTmux {
@@ -135,7 +142,7 @@ func TrzMain() int {
 	state, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		return -3
+		return -4
 	}
 	defer func() { _ = term.Restore(int(os.Stdin.Fd()), state) }()
 
