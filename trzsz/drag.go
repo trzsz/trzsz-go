@@ -32,7 +32,7 @@ import (
 	"strings"
 )
 
-func detectDragFiles(buf []byte) ([]string, bool) {
+func detectDragFiles(buf []byte) ([]string, bool, bool) {
 	if IsLinux() {
 		return detectDragFilesOnLinux(buf)
 	} else if IsMacOS() {
@@ -40,7 +40,7 @@ func detectDragFiles(buf []byte) ([]string, bool) {
 	} else if IsWindows() {
 		return detectDragFilesOnWindows(buf)
 	}
-	return nil, false
+	return nil, false, false
 }
 
 func detectFilePath(path string, dragFiles *[]string, hasDir *bool) bool {
@@ -60,26 +60,34 @@ func detectFilePath(path string, dragFiles *[]string, hasDir *bool) bool {
 	return false
 }
 
-func detectDragFilesOnLinux(buf []byte) ([]string, bool) {
+func detectDragFilesOnLinux(buf []byte) ([]string, bool, bool) {
 	length := len(buf)
 	if length < 5 || buf[0] != '\'' || buf[1] != '/' || buf[length-1] != ' ' || buf[length-2] != '\'' {
-		return nil, false
+		return nil, false, false
 	}
 	hasDir := false
 	var dragFiles []string
 	paths := strings.Split(string(buf[1:length-2]), "' '")
 	for _, path := range paths {
 		if !detectFilePath(path, &dragFiles, &hasDir) {
-			return nil, false
+			return nil, false, false
 		}
 	}
-	return dragFiles, hasDir
+	return dragFiles, hasDir, false
 }
 
-func detectDragFilesOnMacOS(buf []byte) ([]string, bool) {
+func detectDragFilesOnMacOS(buf []byte) ([]string, bool, bool) {
 	length := len(buf)
+	if length > 5 {
+		buf = bytes.ReplaceAll(buf, []byte("\x1b[200~"), []byte(""))
+		buf = bytes.ReplaceAll(buf, []byte("\x1b[201~"), []byte(""))
+		length = len(buf)
+		if length == 0 {
+			return nil, false, true
+		}
+	}
 	if length < 3 || buf[0] != '/' || buf[length-1] != ' ' || buf[length-2] == '\\' {
-		return nil, false
+		return nil, false, false
 	}
 	hasDir := false
 	var dragFiles []string
@@ -88,7 +96,7 @@ func detectDragFilesOnMacOS(buf []byte) ([]string, bool) {
 		if buf[i] == ' ' {
 			path := string(pathBuf.Bytes())
 			if !detectFilePath(path, &dragFiles, &hasDir) {
-				return nil, false
+				return nil, false, false
 			}
 			pathBuf.Reset()
 		} else if buf[i] == '\\' {
@@ -101,15 +109,15 @@ func detectDragFilesOnMacOS(buf []byte) ([]string, bool) {
 		}
 	}
 	if pathBuf.Len() != 0 {
-		return nil, false
+		return nil, false, false
 	}
-	return dragFiles, hasDir
+	return dragFiles, hasDir, false
 }
 
-func detectDragFilesOnWindows(buf []byte) ([]string, bool) {
+func detectDragFilesOnWindows(buf []byte) ([]string, bool, bool) {
 	length := len(buf)
 	if length < 4 {
-		return nil, false
+		return nil, false, false
 	}
 	hasDir := false
 	var dragFiles []string
@@ -117,7 +125,7 @@ func detectDragFilesOnWindows(buf []byte) ([]string, bool) {
 		bytes.IndexByte(buf[:length-1], '"') < 0 {
 		// Cmd & PowerShell may lost the first `"`, and supports one path only.
 		if detectFilePath(string(buf[:length-1]), &dragFiles, &hasDir) {
-			return dragFiles, hasDir
+			return dragFiles, hasDir, false
 		}
 	}
 	isWinPath, isMsysPath, isCygPath := false, false, false
@@ -131,7 +139,7 @@ func detectDragFilesOnWindows(buf []byte) ([]string, bool) {
 		(length > 12 && string(buf[:10]) == "/cygdrive/" && buf[10] >= 'a' && buf[10] <= 'z' && buf[11] == '/') {
 		isCygPath = true
 	} else {
-		return nil, false
+		return nil, false, false
 	}
 	var i int
 	var path string
@@ -144,13 +152,13 @@ func detectDragFilesOnWindows(buf []byte) ([]string, bool) {
 			path, i = nextCygPath(buf[idx:])
 		}
 		if path == "" {
-			return nil, false
+			return nil, false, false
 		}
 		if !detectFilePath(path, &dragFiles, &hasDir) {
-			return nil, false
+			return nil, false, false
 		}
 	}
-	return dragFiles, hasDir
+	return dragFiles, hasDir, false
 }
 
 func nextWinPath(buf []byte) (string, int) {

@@ -309,7 +309,7 @@ func wrapInput(pty *TrzszPty, dragFile bool) {
 				continue
 			}
 			if dragFile {
-				dragFiles, hasDir := detectDragFiles(buf)
+				dragFiles, hasDir, ignore := detectDragFiles(buf)
 				if dragFiles != nil {
 					if gDragFiles == nil {
 						gDragFiles = dragFiles
@@ -320,7 +320,8 @@ func wrapInput(pty *TrzszPty, dragFile bool) {
 						gDragHasDir = gDragHasDir || hasDir
 					}
 					continue
-				} else if gDragFiles != nil {
+				}
+				if !ignore && gDragFiles != nil {
 					gDragFiles = nil
 					gDragHasDir = false
 				}
