@@ -42,6 +42,17 @@ import (
 	"golang.org/x/term"
 )
 
+type TrzszArgs struct {
+	Help     bool
+	Version  bool
+	TraceLog bool
+	DragFile bool
+	Name     string
+	Args     []string
+}
+
+var gTrzszArgs *TrzszArgs
+var gTraceLog *os.File = nil
 var gDragFiles []string = nil
 var gDragHasDir bool = false
 var gInterrupting bool = false
@@ -53,14 +64,41 @@ func printVersion() {
 }
 
 func printHelp() {
-	fmt.Print("usage: trzsz [-h] [-v] [-d] command line\n\n" +
+	fmt.Print("usage: trzsz [-h] [-v] [-t] [-d] command line\n\n" +
 		"Wrapping command line to support trzsz ( trz / tsz ).\n\n" +
 		"positional arguments:\n" +
 		"  command line       the original command line\n\n" +
 		"optional arguments:\n" +
 		"  -h, --help         show this help message and exit\n" +
 		"  -v, --version      show version number and exit\n" +
+		"  -t, --tracelog     eanble trace log for debugging\n" +
 		"  -d, --dragfile     enable drag file(s) to upload\n")
+}
+
+func parseTrzszArgs() {
+	gTrzszArgs = &TrzszArgs{false, false, false, false, "", nil}
+	var i int
+	for i = 1; i < len(os.Args); i++ {
+		if os.Args[i] == "-h" || os.Args[i] == "--help" {
+			gTrzszArgs.Help = true
+			return
+		} else if os.Args[i] == "-v" || os.Args[i] == "--version" {
+			gTrzszArgs.Version = true
+			return
+		} else if os.Args[i] == "-t" || os.Args[i] == "--tracelog" {
+			gTrzszArgs.TraceLog = true
+		} else if os.Args[i] == "-d" || os.Args[i] == "--dragfile" {
+			gTrzszArgs.DragFile = true
+		} else {
+			break
+		}
+	}
+	if i >= len(os.Args) {
+		gTrzszArgs.Help = true
+		return
+	}
+	gTrzszArgs.Name = os.Args[i]
+	gTrzszArgs.Args = os.Args[i+1:]
 }
 
 func getTrzszConfig(name string) *string {
@@ -286,7 +324,39 @@ func uploadDragFiles(pty *TrzszPty) {
 	}
 }
 
-func wrapInput(pty *TrzszPty, dragFile bool) {
+func writeTraceLog(buf []byte, output bool) []byte {
+	if gTraceLog != nil {
+		if output && bytes.Contains(buf, []byte("\tDISABLE_TRZSZ_TRACE_LOG\t")) {
+			msg := fmt.Sprintf("Closed trace log at %s", gTraceLog.Name())
+			gTraceLog.Close()
+			gTraceLog = nil
+			return bytes.ReplaceAll(buf, []byte("\tDISABLE_TRZSZ_TRACE_LOG\t"), []byte(msg))
+		}
+		if output {
+			gTraceLog.WriteString("[out]")
+		} else {
+			gTraceLog.WriteString("[in]")
+		}
+		gTraceLog.WriteString(encodeBytes(buf))
+		gTraceLog.WriteString("\n")
+		gTraceLog.Sync()
+		return buf
+	}
+	if output && bytes.Contains(buf, []byte("\tENABLE_TRZSZ_TRACE_LOG\t")) {
+		var err error
+		var msg string
+		gTraceLog, err = os.CreateTemp("", "trzsz_*.log")
+		if err != nil {
+			msg = fmt.Sprintf("Create log file error: %v", err)
+		} else {
+			msg = fmt.Sprintf("Writing trace log to %s", gTraceLog.Name())
+		}
+		return bytes.ReplaceAll(buf, []byte("\tENABLE_TRZSZ_TRACE_LOG\t"), []byte(msg))
+	}
+	return buf
+}
+
+func wrapInput(pty *TrzszPty) {
 	buffer := make([]byte, 10240)
 	for {
 		n, err := os.Stdin.Read(buffer)
@@ -302,13 +372,16 @@ func wrapInput(pty *TrzszPty, dragFile bool) {
 		}
 		if err == nil && n > 0 {
 			buf := buffer[0:n]
+			if gTrzszArgs.TraceLog {
+				buf = writeTraceLog(buf, false)
+			}
 			if transfer := gTransfer; transfer != nil {
 				if buf[0] == '\x03' { // `ctrl + c` to stop transferring files
 					transfer.stopTransferringFiles()
 				}
 				continue
 			}
-			if dragFile {
+			if gTrzszArgs.DragFile {
 				dragFiles, hasDir, ignore := detectDragFiles(buf)
 				if dragFiles != nil {
 					if gDragFiles == nil {
@@ -331,7 +404,7 @@ func wrapInput(pty *TrzszPty, dragFile bool) {
 	}
 }
 
-func wrapOutput(pty *TrzszPty, dragFile bool) {
+func wrapOutput(pty *TrzszPty) {
 	const bufSize = 10240
 	buffer := make([]byte, bufSize)
 	for {
@@ -341,6 +414,9 @@ func wrapOutput(pty *TrzszPty, dragFile bool) {
 			break
 		} else if err == nil && n > 0 {
 			buf := buffer[0:n]
+			if gTrzszArgs.TraceLog {
+				buf = writeTraceLog(buf, true)
+			}
 			if transfer := gTransfer; transfer != nil {
 				transfer.addReceivedData(buf)
 				buffer = make([]byte, bufSize)
@@ -355,7 +431,7 @@ func wrapOutput(pty *TrzszPty, dragFile bool) {
 			if gInterrupting {
 				continue
 			}
-			if dragFile && gDragFiles != nil {
+			if gTrzszArgs.DragFile && gDragFiles != nil {
 				output := strings.TrimRight(string(trimVT100(buf)), "\r\n")
 				if output == "trz" {
 					os.Stdout.WriteString("\r\n")
@@ -393,35 +469,18 @@ func handleSignal(pty *TrzszPty) {
 // TrzszMain entry of trzsz client
 func TrzszMain() int {
 	// parse command line arguments
-	if len(os.Args) < 2 {
+	parseTrzszArgs()
+	if gTrzszArgs.Help {
 		printHelp()
 		return 0
 	}
-	if os.Args[1] == "-h" || os.Args[1] == "--help" {
-		printHelp()
-		return 0
-	}
-	if os.Args[1] == "-v" || os.Args[1] == "--version" {
+	if gTrzszArgs.Version {
 		printVersion()
 		return 0
 	}
 
-	// drag file option
-	name := os.Args[1]
-	args := os.Args[2:]
-	dragFile := false
-	if os.Args[1] == "-d" || os.Args[1] == "--dragfile" {
-		if len(os.Args) < 3 {
-			printHelp()
-			return 0
-		}
-		dragFile = true
-		name = os.Args[2]
-		args = os.Args[3:]
-	}
-
 	// spawn a pty
-	pty, err := Spawn(name, args...)
+	pty, err := Spawn(gTrzszArgs.Name, gTrzszArgs.Args...)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return -1
@@ -437,8 +496,8 @@ func TrzszMain() int {
 	defer func() { _ = term.Restore(int(os.Stdin.Fd()), state) }()
 
 	// wrap input and output
-	go wrapInput(pty, dragFile)
-	go wrapOutput(pty, dragFile)
+	go wrapInput(pty)
+	go wrapOutput(pty)
 
 	// handle signal
 	go handleSignal(pty)
