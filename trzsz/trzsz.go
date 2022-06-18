@@ -57,7 +57,7 @@ var gDragFiles []string = nil
 var gDragHasDir bool = false
 var gInterrupting bool = false
 var gTransfer *TrzszTransfer = nil
-var trzszRegexp = regexp.MustCompile("::TRZSZ:TRANSFER:([SR]):(\\d+\\.\\d+\\.\\d+)(:\\d+)?")
+var trzszRegexp = regexp.MustCompile("::TRZSZ:TRANSFER:([SRD]):(\\d+\\.\\d+\\.\\d+)(:\\d+)?")
 
 func printVersion() {
 	fmt.Printf("trzsz go %s\n", kTrzszVersion)
@@ -160,7 +160,7 @@ func chooseDownloadPath() (string, error) {
 	return path, nil
 }
 
-func chooseUploadFiles() ([]string, error) {
+func chooseUploadPaths(directory bool) ([]string, error) {
 	if gDragFiles != nil {
 		files := gDragFiles
 		gDragFiles = nil
@@ -174,6 +174,9 @@ func chooseUploadFiles() ([]string, error) {
 	defaultPath := getTrzszConfig("DefaultUploadPath")
 	if defaultPath != nil {
 		options = append(options, zenity.Filename(*defaultPath))
+	}
+	if directory {
+		options = append(options, zenity.Directory())
 	}
 	files, err := zenity.SelectFileMutiple(options...)
 	if err != nil {
@@ -241,15 +244,16 @@ func downloadFiles(pty *TrzszPty, transfer *TrzszTransfer, remoteIsWindows bool)
 	return transfer.clientExit(fmt.Sprintf("Saved %s to %s", strings.Join(localNames, ", "), path))
 }
 
-func uploadFiles(pty *TrzszPty, transfer *TrzszTransfer, remoteIsWindows bool) error {
-	files, err := chooseUploadFiles()
+func uploadFiles(pty *TrzszPty, transfer *TrzszTransfer, directory, remoteIsWindows bool) error {
+	paths, err := chooseUploadPaths(directory)
 	if err == zenity.ErrCanceled {
 		return transfer.sendAction(false, remoteIsWindows)
 	}
 	if err != nil {
 		return err
 	}
-	if err := checkFilesReadable(files); err != nil {
+	files, err := checkPathsReadable(paths, directory)
+	if err != nil {
 		return err
 	}
 
@@ -259,6 +263,16 @@ func uploadFiles(pty *TrzszPty, transfer *TrzszTransfer, remoteIsWindows bool) e
 	config, err := transfer.recvConfig()
 	if err != nil {
 		return err
+	}
+
+	overwrite := false
+	if v, ok := config["overwrite"].(bool); ok {
+		overwrite = v
+	}
+	if overwrite {
+		if err := checkDuplicateNames(files); err != nil {
+			return err
+		}
 	}
 
 	progress, err := newProgressBar(pty, config)
@@ -293,10 +307,13 @@ func handleTrzsz(pty *TrzszPty, mode byte, remoteIsWindows bool) {
 	}()
 
 	var err error
-	if mode == 'S' {
+	switch mode {
+	case 'S':
 		err = downloadFiles(pty, transfer, remoteIsWindows)
-	} else if mode == 'R' {
-		err = uploadFiles(pty, transfer, remoteIsWindows)
+	case 'R':
+		err = uploadFiles(pty, transfer, false, remoteIsWindows)
+	case 'D':
+		err = uploadFiles(pty, transfer, true, remoteIsWindows)
 	}
 	if err != nil {
 		transfer.clientError(err)
@@ -313,9 +330,9 @@ func uploadDragFiles(pty *TrzszPty) {
 	time.Sleep(200 * time.Millisecond)
 	gInterrupting = false
 	if gDragHasDir {
-		pty.Stdin.Write([]byte("echo 'upload directory is not supported yet'\n"))
+		pty.Stdin.Write([]byte("trz -d\r"))
 	} else {
-		pty.Stdin.Write([]byte("trz\n"))
+		pty.Stdin.Write([]byte("trz\r"))
 	}
 	time.Sleep(time.Second)
 	if gDragFiles != nil {
@@ -433,7 +450,7 @@ func wrapOutput(pty *TrzszPty) {
 			}
 			if gTrzszArgs.DragFile && gDragFiles != nil {
 				output := strings.TrimRight(string(trimVT100(buf)), "\r\n")
-				if output == "trz" {
+				if output == "trz" || output == "trz -d" {
 					os.Stdout.WriteString("\r\n")
 					continue
 				}

@@ -28,6 +28,7 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -51,6 +52,7 @@ type TrzszTransfer struct {
 	transferConfig  map[string]interface{}
 	protocolNewline string
 	stdinState      *term.State
+	fileNameMap     map[int]string
 }
 
 func maxDuration(a, b time.Duration) time.Duration {
@@ -75,9 +77,11 @@ func NewTransfer(writer PtyIO, stdinState *term.State) *TrzszTransfer {
 		false,
 		nil,
 		100 * time.Millisecond,
-		0, make(map[string]interface{}),
+		0,
+		make(map[string]interface{}),
 		"\n",
 		stdinState,
+		make(map[int]string),
 	}
 }
 
@@ -295,9 +299,10 @@ func (t *TrzszTransfer) recvData(binary bool, escapeCodes [][]byte, timeout time
 
 func (t *TrzszTransfer) sendAction(confirm, remoteIsWindows bool) error {
 	actMap := map[string]interface{}{
-		"lang":    "go",
-		"confirm": confirm,
-		"version": kTrzszVersion,
+		"lang":        "go",
+		"confirm":     confirm,
+		"version":     kTrzszVersion,
+		"support_dir": true,
 	}
 	if IsWindows() {
 		actMap["binary"] = false
@@ -339,6 +344,9 @@ func (t *TrzszTransfer) sendConfig(args *Args, escapeChars [][]unicode, tmuxMode
 		cfgMap["binary"] = true
 		cfgMap["escape_chars"] = escapeChars
 	}
+	if args.Directory {
+		cfgMap["directory"] = true
+	}
 	cfgMap["bufsize"] = args.Bufsize.Size
 	cfgMap["timeout"] = args.Timeout
 	if args.Overwrite {
@@ -373,7 +381,7 @@ func (t *TrzszTransfer) recvConfig() (map[string]interface{}, error) {
 }
 
 func (t *TrzszTransfer) clientExit(msg string) error {
-	t.cleanInput(200)
+	t.cleanInput(200 * time.Millisecond)
 	return t.sendString("EXIT", msg)
 }
 
@@ -382,7 +390,7 @@ func (t *TrzszTransfer) recvExit() (string, error) {
 }
 
 func (t *TrzszTransfer) serverExit(msg string) {
-	t.cleanInput(200)
+	t.cleanInput(500 * time.Millisecond)
 	if t.stdinState != nil {
 		term.Restore(int(os.Stdin.Fd()), t.stdinState)
 	}
@@ -433,10 +441,89 @@ func (t *TrzszTransfer) serverError(err error) {
 	t.serverExit(err.Error())
 }
 
-func (t *TrzszTransfer) sendFiles(files []string, progress ProgressCallback) ([]string, error) {
+func (t *TrzszTransfer) sendFileNum(num int64, progress ProgressCallback) error {
+	if err := t.sendInteger("NUM", num); err != nil {
+		return err
+	}
+	if err := t.checkInteger(num); err != nil {
+		return err
+	}
+	if progress != nil && !reflect.ValueOf(progress).IsNil() {
+		progress.onNum(num)
+	}
+	return nil
+}
+
+func (t *TrzszTransfer) sendFileName(f *TrzszFile, directory bool, progress ProgressCallback) (*os.File, string, error) {
+	var fileName string
+	if directory {
+		jsonName, err := json.Marshal(f)
+		if err != nil {
+			return nil, "", err
+		}
+		fileName = string(jsonName)
+	} else {
+		fileName = f.RelPath[0]
+	}
+	if err := t.sendString("NAME", fileName); err != nil {
+		return nil, "", err
+	}
+	remoteName, err := t.recvString("SUCC", false)
+	if err != nil {
+		return nil, "", err
+	}
+	if progress != nil && !reflect.ValueOf(progress).IsNil() {
+		progress.onName(f.RelPath[len(f.RelPath)-1])
+	}
+	if f.IsDir {
+		return nil, remoteName, nil
+	}
+	file, err := os.Open(f.AbsPath)
+	if err != nil {
+		return nil, "", err
+	}
+	return file, remoteName, nil
+}
+
+func (t *TrzszTransfer) sendFileSize(file *os.File, progress ProgressCallback) (int64, error) {
+	stat, err := file.Stat()
+	if err != nil {
+		return 0, err
+	}
+	size := stat.Size()
+	if err := t.sendInteger("SIZE", size); err != nil {
+		return 0, err
+	}
+	if err := t.checkInteger(size); err != nil {
+		return 0, err
+	}
+	if progress != nil && !reflect.ValueOf(progress).IsNil() {
+		progress.onSize(size)
+	}
+	return size, nil
+}
+
+func (t *TrzszTransfer) sendFileMD5(digest []byte, progress ProgressCallback) error {
+	if err := t.sendBinary("MD5", digest); err != nil {
+		return err
+	}
+	if err := t.checkBinary(digest); err != nil {
+		return err
+	}
+	if progress != nil && !reflect.ValueOf(progress).IsNil() {
+		progress.onDone()
+	}
+	return nil
+}
+
+func (t *TrzszTransfer) sendFiles(files []*TrzszFile, progress ProgressCallback) ([]string, error) {
 	binary := false
 	if v, ok := t.transferConfig["binary"].(bool); ok {
 		binary = v
+	}
+	directory := false
+	if v, ok := t.transferConfig["directory"].(bool); ok {
+		directory = v
 	}
 	maxBufSize := int64(10 * 1024 * 1024)
 	if v, ok := t.transferConfig["bufsize"].(float64); ok {
@@ -451,59 +538,39 @@ func (t *TrzszTransfer) sendFiles(files []string, progress ProgressCallback) ([]
 		}
 	}
 
-	num := int64(len(files))
-	if err := t.sendInteger("NUM", num); err != nil {
+	if err := t.sendFileNum(int64(len(files)), progress); err != nil {
 		return nil, err
-	}
-	if err := t.checkInteger(num); err != nil {
-		return nil, err
-	}
-	if progress != nil && !reflect.ValueOf(progress).IsNil() {
-		progress.onNum(num)
 	}
 
 	bufSize := int64(1024)
 	buffer := make([]byte, bufSize)
-	remoteNames := make([]string, len(files))
-	for i, file := range files {
-		fileName := filepath.Base(file)
-		if err := t.sendString("NAME", fileName); err != nil {
-			return nil, err
-		}
-		remoteName, err := t.recvString("SUCC", false)
-		if err != nil {
-			return nil, err
-		}
-		if progress != nil && !reflect.ValueOf(progress).IsNil() {
-			progress.onName(fileName)
-		}
-
-		f, err := os.Open(file)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-		stat, err := f.Stat()
+	var remoteNames []string
+	for _, f := range files {
+		file, remoteName, err := t.sendFileName(f, directory, progress)
 		if err != nil {
 			return nil, err
 		}
 
-		fileSize := stat.Size()
-		if err := t.sendInteger("SIZE", fileSize); err != nil {
-			return nil, err
+		if !containsString(remoteNames, remoteName) {
+			remoteNames = append(remoteNames, remoteName)
 		}
-		if err := t.checkInteger(fileSize); err != nil {
-			return nil, err
+
+		if file == nil {
+			continue
 		}
-		if progress != nil && !reflect.ValueOf(progress).IsNil() {
-			progress.onSize(fileSize)
+
+		defer file.Close()
+
+		fileSize, err := t.sendFileSize(file, progress)
+		if err != nil {
+			return nil, err
 		}
 
 		step := int64(0)
 		hasher := md5.New()
 		for step < fileSize {
 			beginTime := time.Now()
-			n, err := f.Read(buffer)
+			n, err := file.Read(buffer)
 			if err != nil {
 				return nil, err
 			}
@@ -531,27 +598,194 @@ func (t *TrzszTransfer) sendFiles(files []string, progress ProgressCallback) ([]
 			}
 		}
 
-		digest := hasher.Sum(nil)
-		if err := t.sendBinary("MD5", digest); err != nil {
+		if err := t.sendFileMD5(hasher.Sum(nil), progress); err != nil {
 			return nil, err
 		}
-		if err := t.checkBinary(digest); err != nil {
-			return nil, err
-		}
-		if progress != nil && !reflect.ValueOf(progress).IsNil() {
-			progress.onDone(remoteName)
-		}
-
-		remoteNames[i] = remoteName
 	}
 
 	return remoteNames, nil
+}
+
+func (t *TrzszTransfer) recvFileNum(progress ProgressCallback) (int64, error) {
+	num, err := t.recvInteger("NUM", false)
+	if err != nil {
+		return 0, err
+	}
+	if err := t.sendInteger("SUCC", num); err != nil {
+		return 0, err
+	}
+	if progress != nil && !reflect.ValueOf(progress).IsNil() {
+		progress.onNum(num)
+	}
+	return num, nil
+}
+
+func doCreateFile(path string) (*os.File, error) {
+	file, err := os.Create(path)
+	if err != nil {
+		if e, ok := err.(*fs.PathError); ok {
+			if errno, ok := e.Err.(syscall.Errno); ok {
+				if errno == 13 {
+					return nil, newTrzszError(fmt.Sprintf("No permission to write: %s", path))
+				} else if errno == 21 {
+					return nil, newTrzszError(fmt.Sprintf("Is a directory: %s", path))
+				}
+			}
+		}
+		return nil, err
+	}
+	return file, nil
+}
+
+func doCreateDirectory(path string) error {
+	stat, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return os.MkdirAll(path, 0755)
+	} else if err != nil {
+		return err
+	}
+	if !stat.IsDir() {
+		return newTrzszError(fmt.Sprintf("Not a directory: %s", path))
+	}
+	return nil
+}
+
+func (t *TrzszTransfer) createFile(path, fileName string, overwrite bool) (*os.File, string, error) {
+	var localName string
+	if overwrite {
+		localName = fileName
+	} else {
+		var err error
+		localName, err = getNewName(path, fileName)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+	file, err := doCreateFile(filepath.Join(path, localName))
+	if err != nil {
+		return nil, "", err
+	}
+	return file, localName, nil
+}
+
+func (t *TrzszTransfer) createDirOrFile(path, name string, overwrite bool) (*os.File, string, string, error) {
+	var f TrzszFile
+	if err := json.Unmarshal([]byte(name), &f); err != nil {
+		return nil, "", "", err
+	}
+	if len(f.RelPath) < 1 {
+		return nil, "", "", newTrzszError(fmt.Sprintf("Invalid name: %s", name))
+	}
+
+	fileName := f.RelPath[len(f.RelPath)-1]
+
+	var localName string
+	if overwrite {
+		localName = f.RelPath[0]
+	} else {
+		if v, ok := t.fileNameMap[f.PathID]; ok {
+			localName = v
+		} else {
+			var err error
+			localName, err = getNewName(path, f.RelPath[0])
+			if err != nil {
+				return nil, "", "", err
+			}
+			t.fileNameMap[f.PathID] = localName
+		}
+	}
+
+	var fullPath string
+	if len(f.RelPath) > 1 {
+		p := filepath.Join(append([]string{path, localName}, f.RelPath[1:len(f.RelPath)-1]...)...)
+		if err := doCreateDirectory(p); err != nil {
+			return nil, "", "", err
+		}
+		fullPath = filepath.Join(p, fileName)
+	} else {
+		fullPath = filepath.Join(path, localName)
+	}
+
+	if f.IsDir {
+		if err := doCreateDirectory(fullPath); err != nil {
+			return nil, "", "", err
+		}
+		return nil, localName, fileName, nil
+	}
+
+	file, err := doCreateFile(fullPath)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return file, localName, fileName, nil
+}
+
+func (t *TrzszTransfer) recvFileName(path string, directory, overwrite bool, progress ProgressCallback) (*os.File, string, error) {
+	fileName, err := t.recvString("NAME", false)
+	if err != nil {
+		return nil, "", err
+	}
+
+	var file *os.File
+	var localName string
+	if directory {
+		file, localName, fileName, err = t.createDirOrFile(path, fileName, overwrite)
+	} else {
+		file, localName, err = t.createFile(path, fileName, overwrite)
+	}
+	if err != nil {
+		return nil, "", err
+	}
+
+	if err := t.sendString("SUCC", localName); err != nil {
+		return nil, "", err
+	}
+	if progress != nil && !reflect.ValueOf(progress).IsNil() {
+		progress.onName(fileName)
+	}
+
+	return file, localName, nil
+}
+
+func (t *TrzszTransfer) recvFileSize(progress ProgressCallback) (int64, error) {
+	size, err := t.recvInteger("SIZE", false)
+	if err != nil {
+		return 0, err
+	}
+	if err := t.sendInteger("SUCC", size); err != nil {
+		return 0, err
+	}
+	if progress != nil && !reflect.ValueOf(progress).IsNil() {
+		progress.onSize(size)
+	}
+	return size, nil
+}
+
+func (t *TrzszTransfer) recvFileMD5(digest []byte, progress ProgressCallback) error {
+	expectDigest, err := t.recvBinary("MD5", false, nil)
+	if err != nil {
+		return err
+	}
+	if bytes.Compare(digest, expectDigest) != 0 {
+		return newTrzszError("Check MD5 failed")
+	}
+	if err := t.sendBinary("SUCC", digest); err != nil {
+		return err
+	}
+	if progress != nil && !reflect.ValueOf(progress).IsNil() {
+		progress.onDone()
+	}
+	return nil
 }
 
 func (t *TrzszTransfer) recvFiles(path string, progress ProgressCallback) ([]string, error) {
 	binary := false
 	if v, ok := t.transferConfig["binary"].(bool); ok {
 		binary = v
+	}
+	directory := false
+	if v, ok := t.transferConfig["directory"].(bool); ok {
+		directory = v
 	}
 	overwrite := false
 	if v, ok := t.transferConfig["overwrite"].(bool); ok {
@@ -570,61 +804,31 @@ func (t *TrzszTransfer) recvFiles(path string, progress ProgressCallback) ([]str
 		}
 	}
 
-	num, err := t.recvInteger("NUM", false)
+	num, err := t.recvFileNum(progress)
 	if err != nil {
 		return nil, err
 	}
-	if err := t.sendInteger("SUCC", num); err != nil {
-		return nil, err
-	}
-	if progress != nil && !reflect.ValueOf(progress).IsNil() {
-		progress.onNum(num)
-	}
 
-	localNames := make([]string, num)
+	var localNames []string
 	for i := int64(0); i < num; i++ {
-		fileName, err := t.recvString("NAME", false)
+		file, localName, err := t.recvFileName(path, directory, overwrite, progress)
 		if err != nil {
 			return nil, err
-		}
-		localName := fileName
-		if !overwrite {
-			localName, err = getNewName(path, fileName)
-			if err != nil {
-				return nil, err
-			}
-		}
-		fullPath := filepath.Join(path, localName)
-		f, err := os.Create(fullPath)
-		if err != nil {
-			if e, ok := err.(*fs.PathError); ok {
-				if errno, ok := e.Err.(syscall.Errno); ok {
-					if errno == 13 {
-						return nil, newTrzszError(fmt.Sprintf("No permission to write: %s", fullPath))
-					} else if errno == 21 {
-						return nil, newTrzszError(fmt.Sprintf("Is a directory: %s", fullPath))
-					}
-				}
-			}
-			return nil, err
-		}
-		defer f.Close()
-		if err := t.sendString("SUCC", localName); err != nil {
-			return nil, err
-		}
-		if progress != nil && !reflect.ValueOf(progress).IsNil() {
-			progress.onName(fileName)
 		}
 
-		fileSize, err := t.recvInteger("SIZE", false)
+		if !containsString(localNames, localName) {
+			localNames = append(localNames, localName)
+		}
+
+		if file == nil {
+			continue
+		}
+
+		defer file.Close()
+
+		fileSize, err := t.recvFileSize(progress)
 		if err != nil {
 			return nil, err
-		}
-		if err := t.sendInteger("SUCC", fileSize); err != nil {
-			return nil, err
-		}
-		if progress != nil && !reflect.ValueOf(progress).IsNil() {
-			progress.onSize(fileSize)
 		}
 
 		step := int64(0)
@@ -635,7 +839,7 @@ func (t *TrzszTransfer) recvFiles(path string, progress ProgressCallback) ([]str
 			if err != nil {
 				return nil, err
 			}
-			if _, err := f.Write(data); err != nil {
+			if _, err := file.Write(data); err != nil {
 				return nil, err
 			}
 			size := int64(len(data))
@@ -655,22 +859,9 @@ func (t *TrzszTransfer) recvFiles(path string, progress ProgressCallback) ([]str
 			}
 		}
 
-		actualDigest := hasher.Sum(nil)
-		expectDigest, err := t.recvBinary("MD5", false, nil)
-		if err != nil {
+		if err := t.recvFileMD5(hasher.Sum(nil), progress); err != nil {
 			return nil, err
 		}
-		if bytes.Compare(actualDigest, expectDigest) != 0 {
-			return nil, newTrzszError(fmt.Sprintf("Check MD5 of %s failed", fileName))
-		}
-		if err := t.sendBinary("SUCC", actualDigest); err != nil {
-			return nil, err
-		}
-		if progress != nil && !reflect.ValueOf(progress).IsNil() {
-			progress.onDone(localName)
-		}
-
-		localNames[i] = localName
 	}
 
 	return localNames, nil

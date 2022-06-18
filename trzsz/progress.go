@@ -192,7 +192,7 @@ func (p *TextProgressBar) onStep(step int64) {
 	p.showProgress()
 }
 
-func (p *TextProgressBar) onDone(name string) {
+func (p *TextProgressBar) onDone() {
 }
 
 func (p *TextProgressBar) showProgress() {

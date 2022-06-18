@@ -47,7 +47,7 @@ func (TszArgs) Version() string {
 	return fmt.Sprintf("tsz (trzsz) go %s", kTrzszVersion)
 }
 
-func sendFiles(transfer *TrzszTransfer, args *TszArgs, tmuxMode TmuxMode, tmuxPaneWidth int) error {
+func sendFiles(transfer *TrzszTransfer, files []*TrzszFile, args *TszArgs, tmuxMode TmuxMode, tmuxPaneWidth int) error {
 	action, err := transfer.recvAction()
 	if err != nil {
 		return err
@@ -71,12 +71,21 @@ func sendFiles(transfer *TrzszTransfer, args *TszArgs, tmuxMode TmuxMode, tmuxPa
 		args.Binary = false
 	}
 
+	// check if the client doesn't support transfer directory
+	supportDir := false
+	if v, ok := action["support_dir"].(bool); ok {
+		supportDir = v
+	}
+	if args.Directory && !supportDir {
+		return newTrzszError("The client doesn't support transfer directory")
+	}
+
 	var escapeChars [][]unicode
 	if err := transfer.sendConfig(&args.Args, escapeChars, tmuxMode, tmuxPaneWidth); err != nil {
 		return err
 	}
 
-	if _, err := transfer.sendFiles(args.File, nil); err != nil {
+	if _, err := transfer.sendFiles(files, nil); err != nil {
 		return err
 	}
 
@@ -94,15 +103,22 @@ func TszMain() int {
 	var args TszArgs
 	arg.MustParse(&args)
 
-	if err := checkFilesReadable(args.File); err != nil {
+	files, err := checkPathsReadable(args.File, args.Directory)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return -1
+	}
+	if args.Overwrite {
+		if err := checkDuplicateNames(files); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return -2
+		}
 	}
 
 	tmuxMode, realStdout, tmuxPaneWidth, err := checkTmux()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		return -2
+		return -3
 	}
 
 	if args.Binary && tmuxMode == TmuxControlMode {
@@ -114,7 +130,7 @@ func TszMain() int {
 		args.Binary = false
 	}
 
-	uniqueId := "0"
+	uniqueID := "0"
 	if tmuxMode == TmuxNormalMode {
 		columns := getTerminalColumns()
 		if columns > 0 && columns < 40 {
@@ -122,19 +138,19 @@ func TszMain() int {
 		} else {
 			os.Stdout.WriteString("\n\x1b[1A\x1b[0J")
 		}
-		uniqueId = reverseString(strconv.FormatInt(time.Now().UnixMilli(), 10))
+		uniqueID = reverseString(strconv.FormatInt(time.Now().UnixMilli(), 10))
 	}
 	if IsWindows() {
-		uniqueId = "1"
+		uniqueID = "1"
 	}
 
-	os.Stdout.WriteString(fmt.Sprintf("\x1b7\x07::TRZSZ:TRANSFER:S:%s:%s\n", kTrzszVersion, uniqueId))
+	os.Stdout.WriteString(fmt.Sprintf("\x1b7\x07::TRZSZ:TRANSFER:S:%s:%s\n", kTrzszVersion, uniqueID))
 	os.Stdout.Sync()
 
 	state, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		return -3
+		return -4
 	}
 	defer func() { _ = term.Restore(int(os.Stdin.Fd()), state) }()
 
@@ -148,7 +164,7 @@ func TszMain() int {
 	go wrapStdinInput(transfer)
 	handleServerSignal(transfer)
 
-	if err := sendFiles(transfer, &args, tmuxMode, tmuxPaneWidth); err != nil {
+	if err := sendFiles(transfer, files, &args, tmuxMode, tmuxPaneWidth); err != nil {
 		transfer.serverError(err)
 	}
 

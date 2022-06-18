@@ -71,7 +71,7 @@ type ProgressCallback interface {
 	onName(name string)
 	onSize(size int64)
 	onStep(step int64)
-	onDone(name string)
+	onDone()
 }
 
 type BufferSize struct {
@@ -83,8 +83,9 @@ type Args struct {
 	Overwrite bool       `arg:"-y" help:"yes, overwrite existing file(s)"`
 	Binary    bool       `arg:"-b" help:"binary transfer mode, faster for binary files"`
 	Escape    bool       `arg:"-e" help:"escape all known control characters"`
+	Directory bool       `arg:"-d" help:"transfer directories and files"`
 	Bufsize   BufferSize `arg:"-B" placeholder:"N" default:"10M" help:"max buffer chunk size (1K<=N<=1G). (default: 10M)"`
-	Timeout   int        `arg:"-t" placeholder:"N" default:"100" help:"timeout ( N seconds ) for each buffer chunk.\nN <= 0 means never timeout. (default: 100)"`
+	Timeout   int        `arg:"-t" placeholder:"N" default:"10" help:"timeout ( N seconds ) for each buffer chunk.\nN <= 0 means never timeout. (default: 10)"`
 }
 
 var sizeRegexp = regexp.MustCompile("(?i)^(\\d+)(b|k|m|g|kb|mb|gb)?$")
@@ -196,38 +197,107 @@ func (e *TrzszError) isRemoteFail() bool {
 }
 
 func checkPathWritable(path string) error {
-	fileInfo, err := os.Stat(path)
+	info, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return newTrzszError(fmt.Sprintf("No such directory: %s", path))
+	} else if err != nil {
+		return err
 	}
-	if !fileInfo.IsDir() {
+	if !info.IsDir() {
 		return newTrzszError(fmt.Sprintf("Not a directory: %s", path))
 	}
-	if !IsWindows() {
-		if fileInfo.Mode().Perm()&(1<<7) == 0 {
-			return newTrzszError(fmt.Sprintf("No permission to write: %s", path))
+	if syscallAccessWok(path) != nil {
+		return newTrzszError(fmt.Sprintf("No permission to write: %s", path))
+	}
+	return nil
+}
+
+type TrzszFile struct {
+	PathID  int      `json:"path_id"`
+	AbsPath string   `json:"-"`
+	RelPath []string `json:"path_name"`
+	IsDir   bool     `json:"is_dir"`
+}
+
+func resolveLink(path string) string {
+	for {
+		p, err := os.Readlink(path)
+		if err != nil {
+			return path
+		}
+		path = p
+	}
+}
+
+func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*TrzszFile, relPath []string, visitedDir map[string]bool) error {
+	if !info.IsDir() {
+		if !info.Mode().IsRegular() {
+			return newTrzszError(fmt.Sprintf("Not a regular file: %s", path))
+		}
+		if syscallAccessRok(path) != nil {
+			return newTrzszError(fmt.Sprintf("No permission to read: %s", path))
+		}
+		*list = append(*list, &TrzszFile{pathID, path, relPath, false})
+		return nil
+	}
+	realPath := resolveLink(path)
+	if _, ok := visitedDir[realPath]; ok {
+		return newTrzszError(fmt.Sprintf("Loop link: %s", path))
+	}
+	visitedDir[realPath] = true
+	*list = append(*list, &TrzszFile{pathID, path, relPath, true})
+	f, err := os.Open(path)
+	if err != nil {
+		return newTrzszError(fmt.Sprintf("Open [%s] error: %v", path, err))
+	}
+	files, err := f.Readdir(-1)
+	if err != nil {
+		return newTrzszError(fmt.Sprintf("Readdir [%s] error: %v", path, err))
+	}
+	for _, file := range files {
+		p := filepath.Join(path, file.Name())
+		r := make([]string, len(relPath))
+		copy(r, relPath)
+		r = append(r, file.Name())
+		if err := checkPathReadable(pathID, p, file, list, r, visitedDir); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func checkFilesReadable(files []string) error {
-	for _, file := range files {
-		fileInfo, err := os.Stat(file)
+func checkPathsReadable(paths []string, directory bool) ([]*TrzszFile, error) {
+	var list []*TrzszFile
+	visitedDir := make(map[string]bool)
+	for i, p := range paths {
+		path, err := filepath.Abs(p)
+		if err != nil {
+			return nil, err
+		}
+		info, err := os.Stat(path)
 		if errors.Is(err, os.ErrNotExist) {
-			return newTrzszError(fmt.Sprintf("No such file: %s", file))
+			return nil, newTrzszError(fmt.Sprintf("No such file: %s", path))
+		} else if err != nil {
+			return nil, err
 		}
-		if fileInfo.IsDir() {
-			return newTrzszError(fmt.Sprintf("Is a directory: %s", file))
+		if !directory && info.IsDir() {
+			return nil, newTrzszError(fmt.Sprintf("Is a directory: %s", path))
 		}
-		if !fileInfo.Mode().IsRegular() {
-			return newTrzszError(fmt.Sprintf("Not a regular file: %s", file))
+		if err := checkPathReadable(i, path, info, &list, []string{info.Name()}, visitedDir); err != nil {
+			return nil, err
 		}
-		if !IsWindows() {
-			if fileInfo.Mode().Perm()&(1<<8) == 0 {
-				return newTrzszError(fmt.Sprintf("No permission to read: %s", file))
-			}
+	}
+	return list, nil
+}
+
+func checkDuplicateNames(list []*TrzszFile) error {
+	m := make(map[string]bool)
+	for _, f := range list {
+		p := filepath.Join(f.RelPath...)
+		if _, ok := m[p]; ok {
+			return newTrzszError(fmt.Sprintf("Duplicate name: %s", p))
 		}
+		m[p] = true
 	}
 	return nil
 }
@@ -366,4 +436,13 @@ func trimVT100(buf []byte) []byte {
 		}
 	}
 	return b.Bytes()
+}
+
+func containsString(elems []string, v string) bool {
+	for _, s := range elems {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

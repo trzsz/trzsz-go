@@ -33,6 +33,7 @@ import (
 	"syscall"
 
 	"github.com/creack/pty"
+	"golang.org/x/sys/unix"
 )
 
 type TrzszPty struct {
@@ -108,4 +109,12 @@ func (t *TrzszPty) Terminate() {
 
 func (t *TrzszPty) ExitCode() int {
 	return t.cmd.ProcessState.ExitCode()
+}
+
+func syscallAccessWok(path string) error {
+	return syscall.Access(path, unix.W_OK)
+}
+
+func syscallAccessRok(path string) error {
+	return syscall.Access(path, unix.R_OK)
 }

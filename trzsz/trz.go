@@ -73,6 +73,15 @@ func recvFiles(transfer *TrzszTransfer, args *TrzArgs, tmuxMode TmuxMode, tmuxPa
 		args.Binary = false
 	}
 
+	// check if the client doesn't support transfer directory
+	supportDir := false
+	if v, ok := action["support_dir"].(bool); ok {
+		supportDir = v
+	}
+	if args.Directory && !supportDir {
+		return newTrzszError("The client doesn't support transfer directory")
+	}
+
 	escapeChars := getEscapeChars(args.Escape)
 	if err := transfer.sendConfig(&args.Args, escapeChars, tmuxMode, tmuxPaneWidth); err != nil {
 		return err
@@ -122,7 +131,7 @@ func TrzMain() int {
 		args.Binary = false
 	}
 
-	uniqueId := "0"
+	uniqueID := "0"
 	if tmuxMode == TmuxNormalMode {
 		columns := getTerminalColumns()
 		if columns > 0 && columns < 40 {
@@ -130,13 +139,17 @@ func TrzMain() int {
 		} else {
 			os.Stdout.WriteString("\n\x1b[1A\x1b[0J")
 		}
-		uniqueId = reverseString(strconv.FormatInt(time.Now().UnixMilli(), 10))
+		uniqueID = reverseString(strconv.FormatInt(time.Now().UnixMilli(), 10))
 	}
 	if IsWindows() {
-		uniqueId = "1"
+		uniqueID = "1"
 	}
 
-	os.Stdout.WriteString(fmt.Sprintf("\x1b7\x07::TRZSZ:TRANSFER:R:%s:%s\n", kTrzszVersion, uniqueId))
+	mode := "R"
+	if args.Directory {
+		mode = "D"
+	}
+	os.Stdout.WriteString(fmt.Sprintf("\x1b7\x07::TRZSZ:TRANSFER:%s:%s:%s\n", mode, kTrzszVersion, uniqueID))
 	os.Stdout.Sync()
 
 	state, err := term.MakeRaw(int(os.Stdin.Fd()))

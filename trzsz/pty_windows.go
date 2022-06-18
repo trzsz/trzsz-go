@@ -37,15 +37,16 @@ import (
 )
 
 type TrzszPty struct {
-	Stdin    PtyIO
-	Stdout   PtyIO
-	cpty     *conpty.ConPty
-	inMode   uint32
-	outMode  uint32
-	width    int
-	height   int
-	closed   bool
-	exitCode *uint32
+	Stdin     PtyIO
+	Stdout    PtyIO
+	cpty      *conpty.ConPty
+	inMode    uint32
+	outMode   uint32
+	width     int
+	height    int
+	closed    bool
+	exitCode  *uint32
+	startTime time.Time
 }
 
 func getConsoleSize() (int, int, error) {
@@ -134,7 +135,7 @@ func Spawn(name string, args ...string) (*TrzszPty, error) {
 		return nil, err
 	}
 
-	return &TrzszPty{cpty, cpty, cpty, inMode, outMode, width, height, false, nil}, nil
+	return &TrzszPty{cpty, cpty, cpty, inMode, outMode, width, height, false, nil, time.Now()}, nil
 }
 
 func (t *TrzszPty) OnResize(cb func(int)) {
@@ -148,13 +149,15 @@ func (t *TrzszPty) Close() {
 	if t.closed {
 		return
 	}
+	t.closed = true
 	t.cpty.Close()
 	resetVirtualTerminal(t.inMode, t.outMode)
-	time.Sleep(100 * time.Millisecond)
-	cmd := exec.Command("cmd", "/c", "cls")
-	cmd.Stdout = os.Stdout
-	cmd.Run()
-	t.closed = true
+	if time.Now().Sub(t.startTime) > 10*time.Second {
+		time.Sleep(100 * time.Millisecond)
+		cmd := exec.Command("cmd", "/c", "cls")
+		cmd.Stdout = os.Stdout
+		cmd.Run()
+	}
 }
 
 func (t *TrzszPty) Wait() {
@@ -171,4 +174,12 @@ func (t *TrzszPty) ExitCode() int {
 		return 0
 	}
 	return int(*t.exitCode)
+}
+
+func syscallAccessWok(path string) error {
+	return nil
+}
+
+func syscallAccessRok(path string) error {
+	return nil
 }
