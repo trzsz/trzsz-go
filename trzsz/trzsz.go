@@ -57,6 +57,7 @@ var gDragFiles []string = nil
 var gDragHasDir bool = false
 var gInterrupting bool = false
 var gTransfer *TrzszTransfer = nil
+var parentWindowID = getParentWindowID()
 var trzszRegexp = regexp.MustCompile("::TRZSZ:TRANSFER:([SRD]):(\\d+\\.\\d+\\.\\d+)(:\\d+)?")
 
 func printVersion() {
@@ -150,6 +151,7 @@ func chooseDownloadPath() (string, error) {
 		zenity.Title("Choose a folder to save file(s)"),
 		zenity.Directory(),
 		zenity.ShowHidden(),
+		zenity.Attach(parentWindowID),
 	)
 	if err != nil {
 		return "", err
@@ -170,6 +172,7 @@ func chooseUploadPaths(directory bool) ([]string, error) {
 	options := []zenity.Option{
 		zenity.Title("Choose some files to send"),
 		zenity.ShowHidden(),
+		zenity.Attach(parentWindowID),
 	}
 	defaultPath := getTrzszConfig("DefaultUploadPath")
 	if defaultPath != nil {
