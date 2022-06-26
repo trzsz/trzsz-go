@@ -256,10 +256,14 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*Trzsz
 	}
 	for _, file := range files {
 		p := filepath.Join(path, file.Name())
+		info, err := os.Stat(p)
+		if err != nil {
+			return err
+		}
 		r := make([]string, len(relPath))
 		copy(r, relPath)
 		r = append(r, file.Name())
-		if err := checkPathReadable(pathID, p, file, list, r, visitedDir); err != nil {
+		if err := checkPathReadable(pathID, p, info, list, r, visitedDir); err != nil {
 			return err
 		}
 	}
@@ -268,7 +272,6 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*Trzsz
 
 func checkPathsReadable(paths []string, directory bool) ([]*TrzszFile, error) {
 	var list []*TrzszFile
-	visitedDir := make(map[string]bool)
 	for i, p := range paths {
 		path, err := filepath.Abs(p)
 		if err != nil {
@@ -283,6 +286,7 @@ func checkPathsReadable(paths []string, directory bool) ([]*TrzszFile, error) {
 		if !directory && info.IsDir() {
 			return nil, newTrzszError(fmt.Sprintf("Is a directory: %s", path))
 		}
+		visitedDir := make(map[string]bool)
 		if err := checkPathReadable(i, path, info, &list, []string{info.Name()}, visitedDir); err != nil {
 			return nil, err
 		}

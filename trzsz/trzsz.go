@@ -57,6 +57,7 @@ var gDragFiles []string = nil
 var gDragHasDir bool = false
 var gInterrupting bool = false
 var gTransfer *TrzszTransfer = nil
+var gUniqueIDMap = make(map[string]int)
 var parentWindowID = getParentWindowID()
 var trzszRegexp = regexp.MustCompile("::TRZSZ:TRANSFER:([SRD]):(\\d+\\.\\d+\\.\\d+)(:\\d+)?")
 
@@ -131,14 +132,37 @@ func getTrzszConfig(name string) *string {
 }
 
 func detectTrzsz(output []byte) (*byte, bool) {
-	if !bytes.Contains(output, []byte("::TRZSZ:TRANSFER:")) {
+	if len(output) < 24 {
 		return nil, false
 	}
-	match := trzszRegexp.FindSubmatch(output)
+	idx := bytes.LastIndex(output, []byte("::TRZSZ:TRANSFER:"))
+	if idx < 0 {
+		return nil, false
+	}
+	match := trzszRegexp.FindSubmatch(output[idx:])
 	if len(match) < 2 {
 		return nil, false
 	}
-	remoteIsWindows := len(match) > 3 && string(match[3]) == ":1"
+	uniqueID := ""
+	if len(match) > 3 {
+		uniqueID = string(match[3])
+	}
+	if len(uniqueID) >= 8 {
+		if _, ok := gUniqueIDMap[uniqueID]; ok {
+			return nil, false
+		}
+		if len(gUniqueIDMap) > 100 {
+			m := make(map[string]int)
+			for k, v := range gUniqueIDMap {
+				if v >= 50 {
+					m[k] = v - 50
+				}
+			}
+			gUniqueIDMap = m
+		}
+		gUniqueIDMap[uniqueID] = len(gUniqueIDMap)
+	}
+	remoteIsWindows := uniqueID == ":1"
 	return &match[1][0], remoteIsWindows
 }
 
@@ -345,12 +369,14 @@ func uploadDragFiles(pty *TrzszPty) {
 }
 
 func writeTraceLog(buf []byte, output bool) []byte {
+	// Windows disable log: echo ^<DISABLE_TRZSZ_TRACE_LOG^>
+	// Linux macOS disable log: echo -e '\x3CDISABLE_TRZSZ_TRACE_LOG\x3E'
 	if gTraceLog != nil {
-		if output && bytes.Contains(buf, []byte("\tDISABLE_TRZSZ_TRACE_LOG\t")) {
+		if output && bytes.Contains(buf, []byte("<DISABLE_TRZSZ_TRACE_LOG>")) {
 			msg := fmt.Sprintf("Closed trace log at %s", gTraceLog.Name())
 			gTraceLog.Close()
 			gTraceLog = nil
-			return bytes.ReplaceAll(buf, []byte("\tDISABLE_TRZSZ_TRACE_LOG\t"), []byte(msg))
+			return bytes.ReplaceAll(buf, []byte("<DISABLE_TRZSZ_TRACE_LOG>"), []byte(msg))
 		}
 		if output {
 			gTraceLog.WriteString("[out]")
@@ -362,7 +388,9 @@ func writeTraceLog(buf []byte, output bool) []byte {
 		gTraceLog.Sync()
 		return buf
 	}
-	if output && bytes.Contains(buf, []byte("\tENABLE_TRZSZ_TRACE_LOG\t")) {
+	// Windows enable log: echo ^<ENABLE_TRZSZ_TRACE_LOG^>
+	// Linux macOS enable log: echo -e '\x3CENABLE_TRZSZ_TRACE_LOG\x3E'
+	if output && bytes.Contains(buf, []byte("<ENABLE_TRZSZ_TRACE_LOG>")) {
 		var err error
 		var msg string
 		gTraceLog, err = os.CreateTemp("", "trzsz_*.log")
@@ -371,7 +399,7 @@ func writeTraceLog(buf []byte, output bool) []byte {
 		} else {
 			msg = fmt.Sprintf("Writing trace log to %s", gTraceLog.Name())
 		}
-		return bytes.ReplaceAll(buf, []byte("\tENABLE_TRZSZ_TRACE_LOG\t"), []byte(msg))
+		return bytes.ReplaceAll(buf, []byte("<ENABLE_TRZSZ_TRACE_LOG>"), []byte(msg))
 	}
 	return buf
 }
@@ -508,12 +536,9 @@ func TrzszMain() int {
 	defer func() { pty.Close() }()
 
 	// set stdin in raw mode
-	state, err := term.MakeRaw(int(os.Stdin.Fd()))
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return -2
+	if state, err := term.MakeRaw(int(os.Stdin.Fd())); err == nil {
+		defer func() { _ = term.Restore(int(os.Stdin.Fd()), state) }()
 	}
-	defer func() { _ = term.Restore(int(os.Stdin.Fd()), state) }()
 
 	// wrap input and output
 	go wrapInput(pty)

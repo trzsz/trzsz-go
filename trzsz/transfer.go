@@ -115,6 +115,9 @@ func (t *TrzszTransfer) cleanInput(timeoutDuration time.Duration) {
 }
 
 func (t *TrzszTransfer) writeAll(buf []byte) error {
+	if gTrzszArgs != nil && gTrzszArgs.TraceLog {
+		writeTraceLog(buf, false)
+	}
 	written := 0
 	length := len(buf)
 	for written < length {
@@ -381,7 +384,6 @@ func (t *TrzszTransfer) recvConfig() (map[string]interface{}, error) {
 }
 
 func (t *TrzszTransfer) clientExit(msg string) error {
-	t.cleanInput(200 * time.Millisecond)
 	return t.sendString("EXIT", msg)
 }
 
@@ -395,9 +397,6 @@ func (t *TrzszTransfer) serverExit(msg string) {
 		term.Restore(int(os.Stdin.Fd()), t.stdinState)
 	}
 	os.Stdout.WriteString("\x1b8\x1b[0J")
-	if IsWindows() {
-		os.Stdout.WriteString("\r\n")
-	}
 	os.Stdout.WriteString(msg)
 	os.Stdout.WriteString("\n")
 }
@@ -574,22 +573,23 @@ func (t *TrzszTransfer) sendFiles(files []*TrzszFile, progress ProgressCallback)
 			if err != nil {
 				return nil, err
 			}
-			buf := buffer[:n]
-			if err := t.sendData(buf, binary, escapeCodes); err != nil {
+			size := int64(n)
+			data := buffer[:n]
+			if err := t.sendData(data, binary, escapeCodes); err != nil {
 				return nil, err
 			}
-			if _, err := hasher.Write(buf); err != nil {
+			if _, err := hasher.Write(data); err != nil {
 				return nil, err
 			}
-			if err := t.checkInteger(int64(n)); err != nil {
+			if err := t.checkInteger(size); err != nil {
 				return nil, err
 			}
-			step += int64(n)
+			step += size
 			if progress != nil && !reflect.ValueOf(progress).IsNil() {
 				progress.onStep(step)
 			}
 			chunkTime := time.Now().Sub(beginTime)
-			if chunkTime < 500*time.Millisecond && bufSize < maxBufSize {
+			if size == bufSize && chunkTime < 500*time.Millisecond && bufSize < maxBufSize {
 				bufSize = minInt64(bufSize*2, maxBufSize)
 				buffer = make([]byte, bufSize)
 			}
@@ -624,15 +624,15 @@ func doCreateFile(path string) (*os.File, error) {
 	file, err := os.Create(path)
 	if err != nil {
 		if e, ok := err.(*fs.PathError); ok {
-			if errno, ok := e.Err.(syscall.Errno); ok {
-				if errno == 13 {
+			if errno, ok := e.Unwrap().(syscall.Errno); ok {
+				if (!IsWindows() && errno == 13) || (IsWindows() && errno == 5) {
 					return nil, newTrzszError(fmt.Sprintf("No permission to write: %s", path))
-				} else if errno == 21 {
+				} else if (!IsWindows() && errno == 21) || (IsWindows() && errno == 0x2000002a) {
 					return nil, newTrzszError(fmt.Sprintf("Is a directory: %s", path))
 				}
 			}
 		}
-		return nil, err
+		return nil, newTrzszError(fmt.Sprintf("%v", err))
 	}
 	return file, nil
 }

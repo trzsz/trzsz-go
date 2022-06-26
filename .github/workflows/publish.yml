@@ -1,0 +1,37 @@
+name: Release and publish trzsz-go
+on:
+  release:
+    types: [released]
+jobs:
+  release-and-publish:
+    name: Release and publish trzsz-go
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trzsz-go
+        uses: actions/checkout@v3
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '>=1.18.0'
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v3
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --rm-dist --skip-publish
+      - name: Upload Release Assets
+        uses: trzsz/upload-release-assets@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          release_id: ${{ github.event.release.id }}
+          assets_path: |
+            dist/*.tar.gz
+            dist/*.zip
+      - name: Publish rpm to Gemfury
+        env:
+          FURY_TOKEN: ${{ secrets.FURY_TOKEN }}
+        run: |
+          for filename in dist/trzsz*.rpm; do
+            curl -F package=@"$filename" https://{$FURY_TOKEN}@push.fury.io/trzsz/
+          done

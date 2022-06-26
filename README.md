@@ -4,8 +4,7 @@
 
 ## Installation
 
-### on Ubuntu
-*Not released yet, please download the latest [release](https://github.com/trzsz/trzsz-go/releases) from GitHub.*
+### with Apt
 
 ```sh
 sudo add-apt-repository ppa:trzsz/ppa
@@ -14,7 +13,25 @@ sudo apt install trzsz
 ```
 
 
-### on Windows / macOS / Other
+### with Yum
+```
+echo '[trzsz]
+name=Trzsz Repo
+baseurl=https://yum.fury.io/trzsz/
+enabled=1
+gpgcheck=0' | sudo tee /etc/yum.repos.d/trzsz.repo
+sudo yum install trzsz
+```
+
+
+### with Homebrew
+```
+brew update
+brew install trzsz-go
+```
+
+
+### on Windows
 
 Please download the latest [release](https://github.com/trzsz/trzsz-go/releases) from GitHub.
 
@@ -33,8 +50,6 @@ sudo make install
 
 ### on Local
 
-Install the `trzsz` binary to one of the `PATH` directory.
-
 Add `trzsz` before the shell to support trzsz ( trz / tsz ), e.g.:
 
 ```sh
@@ -52,8 +67,6 @@ trzsz --dragfile ssh x.x.x.x
 
 
 ### on Server
-
-Install the `trz` and `tsz` binaries to one of the `PATH` directory.
 
 Similar to lrzsz ( rz / sz ), command `trz` to upload files, command `tsz /path/to/file` to download files.
 
