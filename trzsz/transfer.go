@@ -285,15 +285,18 @@ func (t *TrzszTransfer) sendData(data []byte, binary bool, escapeCodes [][]byte)
 }
 
 func (t *TrzszTransfer) recvData(binary bool, escapeCodes [][]byte, timeout time.Duration) ([]byte, error) {
-	timer := time.NewTimer(timeout)
+	var timeoutChan <-chan time.Time
+	if timeout > 0 {
+		timeoutChan = time.NewTimer(timeout).C
+	}
 	if !binary {
-		return t.recvBinary("DATA", false, timer.C)
+		return t.recvBinary("DATA", false, timeoutChan)
 	}
 	size, err := t.recvInteger("DATA", false)
 	if err != nil {
 		return nil, err
 	}
-	data, err := t.buffer.readBinary(int(size), timer.C)
+	data, err := t.buffer.readBinary(int(size), timeoutChan)
 	if err != nil {
 		return nil, err
 	}
