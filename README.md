@@ -4,39 +4,66 @@
 
 ## Installation
 
-### with Apt
+### with apt on Ubuntu
 
 ```sh
-sudo add-apt-repository ppa:trzsz/ppa
+sudo apt update && sudo apt install software-properties-common
+sudo add-apt-repository ppa:trzsz/ppa && sudo apt update
+sudo apt install trzsz
+```
+
+### with apt on Debian
+```
+sudo apt install curl gpg
+curl -s 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x7074ce75da7cc691c1ae1a7c7e51d1ad956055ca' \
+	| gpg --dearmor -o /usr/share/keyrings/trzsz.gpg
+echo 'deb [signed-by=/usr/share/keyrings/trzsz.gpg] https://ppa.launchpadcontent.net/trzsz/ppa/ubuntu jammy main' \
+	| sudo tee /etc/apt/sources.list.d/trzsz.list
 sudo apt update
 sudo apt install trzsz
 ```
 
 
-### with Yum
+### with yum
+
 ```
 echo '[trzsz]
 name=Trzsz Repo
 baseurl=https://yum.fury.io/trzsz/
 enabled=1
 gpgcheck=0' | sudo tee /etc/yum.repos.d/trzsz.repo
+
 sudo yum install trzsz
 ```
 
 
-### with Homebrew
+### with [homebrew](https://brew.sh/)
+
 ```
 brew update
 brew install trzsz-go
 ```
 
 
-### on Windows
+### with [scoop](https://scoop.sh/) on Windows
 
-Please download the latest [release](https://github.com/trzsz/trzsz-go/releases) from GitHub.
+```
+scoop bucket add extras
+scoop install trzsz
+```
 
 
-### install from Source Code
+### with [yay](https://github.com/Jguer/yay) on ArchLinux
+
+```
+yay -Syu
+yay -S trzsz
+```
+
+
+### Others
+
+Download from the github [releases](https://github.com/trzsz/trzsz-go/releases), or install from the source code:
 
 ```sh
 git clone https://github.com/trzsz/trzsz-go.git
@@ -54,11 +81,11 @@ Add `trzsz` before the shell to support trzsz ( trz / tsz ), e.g.:
 
 ```sh
 trzsz bash
-trzsz.exe cmd
+trzsz PowerShell
 trzsz ssh x.x.x.x
 ```
 
-Add `trzsz --dragfile` before the `ssh` to enable drag files to upload, e.g.:
+Add `trzsz --dragfile` before the `ssh` to enable drag files and directories to upload, e.g.:
 
 ```sh
 trzsz -d ssh x.x.x.x

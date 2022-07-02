@@ -70,4 +70,6 @@ nfpms:
     rpm:
       group: Unspecified
 snapshot:
-  name_template: '{{ .Version }}.next'
+  name_template: "{{ .Version }}.next"
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
