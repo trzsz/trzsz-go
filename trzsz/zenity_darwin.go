@@ -25,12 +25,13 @@ SOFTWARE.
 package trzsz
 
 import (
+	"bytes"
 	"os"
 
 	"golang.org/x/sys/unix"
 )
 
-func getParentWindowID() int {
+func getParentWindowID() any {
 	pid := os.Getppid()
 	for {
 		kinfo, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
@@ -42,6 +43,9 @@ func getParentWindowID() int {
 		case 0:
 			return 0
 		case 1:
+			if bytes.HasPrefix(kinfo.Proc.P_comm[:], []byte("iTermServer")) {
+				return "iTerm2"
+			}
 			return pid
 		default:
 			pid = int(ppid)
