@@ -30,6 +30,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/creack/pty"
@@ -43,6 +44,8 @@ type TrzszPty struct {
 	cmd    *exec.Cmd
 	ch     chan os.Signal
 	resize func(int)
+	mutex  sync.Mutex
+	closed bool
 }
 
 func Spawn(name string, arg ...string) (*TrzszPty, error) {
@@ -55,7 +58,7 @@ func Spawn(name string, arg ...string) (*TrzszPty, error) {
 
 	// handle pty size
 	ch := make(chan os.Signal, 1)
-	tPty := &TrzszPty{ptmx, ptmx, ptmx, cmd, ch, nil}
+	tPty := &TrzszPty{Stdin: ptmx, Stdout: ptmx, ptmx: ptmx, cmd: cmd, ch: ch}
 	signal.Notify(ch, syscall.SIGWINCH)
 	go func() {
 		for range ch {
@@ -68,10 +71,17 @@ func Spawn(name string, arg ...string) (*TrzszPty, error) {
 }
 
 func (t *TrzszPty) OnResize(cb func(int)) {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
 	t.resize = cb
 }
 
 func (t *TrzszPty) Resize() error {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	if t.closed {
+		return nil
+	}
 	size, err := pty.GetsizeFull(os.Stdin)
 	if err != nil {
 		return err
@@ -94,6 +104,12 @@ func (t *TrzszPty) GetColumns() (int, error) {
 }
 
 func (t *TrzszPty) Close() {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+	if t.closed {
+		return
+	}
+	t.closed = true
 	signal.Stop(t.ch)
 	close(t.ch)
 	t.ptmx.Close()

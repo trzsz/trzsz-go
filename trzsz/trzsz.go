@@ -35,8 +35,11 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/ncruces/zenity"
 	"golang.org/x/term"
@@ -53,9 +56,11 @@ type TrzszArgs struct {
 
 var gTrzszArgs *TrzszArgs
 var gTraceLog *os.File = nil
+var gDragging int32 = 0
+var gDragHasDir int32 = 0
+var gDragMutex sync.Mutex
 var gDragFiles []string = nil
-var gDragHasDir bool = false
-var gInterrupting bool = false
+var gInterrupting int32 = 0
 var gTransfer *TrzszTransfer = nil
 var gUniqueIDMap = make(map[string]int)
 var parentWindowID = getParentWindowID()
@@ -187,10 +192,8 @@ func chooseDownloadPath() (string, error) {
 }
 
 func chooseUploadPaths(directory bool) ([]string, error) {
-	if gDragFiles != nil {
-		files := gDragFiles
-		gDragFiles = nil
-		gDragHasDir = false
+	if atomic.LoadInt32(&gDragging) != 0 {
+		files := resetDragFiles()
 		return files, nil
 	}
 	options := []zenity.Option{
@@ -322,9 +325,9 @@ func uploadFiles(pty *TrzszPty, transfer *TrzszTransfer, directory, remoteIsWind
 func handleTrzsz(pty *TrzszPty, mode byte, remoteIsWindows bool) {
 	transfer := NewTransfer(pty.Stdin, nil)
 
-	gTransfer = transfer
+	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&gTransfer)), unsafe.Pointer(transfer))
 	defer func() {
-		gTransfer = nil
+		atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&gTransfer)), unsafe.Pointer(nil))
 	}()
 
 	defer func() {
@@ -347,25 +350,50 @@ func handleTrzsz(pty *TrzszPty, mode byte, remoteIsWindows bool) {
 	}
 }
 
+func resetDragFiles() []string {
+	if atomic.LoadInt32(&gDragging) == 0 {
+		return nil
+	}
+	gDragMutex.Lock()
+	defer gDragMutex.Unlock()
+	atomic.StoreInt32(&gDragging, 0)
+	atomic.StoreInt32(&gDragHasDir, 0)
+	dragFiles := gDragFiles
+	gDragFiles = nil
+	return dragFiles
+}
+
+func addDragFiles(dragFiles []string, hasDir bool) bool {
+	gDragMutex.Lock()
+	defer gDragMutex.Unlock()
+	atomic.StoreInt32(&gDragging, 1)
+	if hasDir {
+		atomic.StoreInt32(&gDragHasDir, 1)
+	}
+	if gDragFiles == nil {
+		gDragFiles = dragFiles
+		return true
+	}
+	gDragFiles = append(gDragFiles, dragFiles...)
+	return false
+}
+
 func uploadDragFiles(pty *TrzszPty) {
 	time.Sleep(300 * time.Millisecond)
-	if gDragFiles == nil {
+	if atomic.LoadInt32(&gDragging) == 0 {
 		return
 	}
-	gInterrupting = true
+	atomic.StoreInt32(&gInterrupting, 1)
 	pty.Stdin.Write([]byte{0x03})
 	time.Sleep(200 * time.Millisecond)
-	gInterrupting = false
-	if gDragHasDir {
+	atomic.StoreInt32(&gInterrupting, 0)
+	if atomic.LoadInt32(&gDragHasDir) != 0 {
 		pty.Stdin.Write([]byte("trz -d\r"))
 	} else {
 		pty.Stdin.Write([]byte("trz\r"))
 	}
 	time.Sleep(time.Second)
-	if gDragFiles != nil {
-		gDragFiles = nil
-		gDragHasDir = false
-	}
+	resetDragFiles()
 }
 
 func writeTraceLog(buf []byte, output bool) []byte {
@@ -423,7 +451,7 @@ func wrapInput(pty *TrzszPty) {
 			if gTrzszArgs.TraceLog {
 				buf = writeTraceLog(buf, false)
 			}
-			if transfer := gTransfer; transfer != nil {
+			if transfer := (*TrzszTransfer)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&gTransfer)))); transfer != nil {
 				if buf[0] == '\x03' { // `ctrl + c` to stop transferring files
 					transfer.stopTransferringFiles()
 				}
@@ -432,19 +460,13 @@ func wrapInput(pty *TrzszPty) {
 			if gTrzszArgs.DragFile {
 				dragFiles, hasDir, ignore := detectDragFiles(buf)
 				if dragFiles != nil {
-					if gDragFiles == nil {
-						gDragFiles = dragFiles
-						gDragHasDir = hasDir
+					if addDragFiles(dragFiles, hasDir) {
 						go uploadDragFiles(pty)
-					} else {
-						gDragFiles = append(gDragFiles, dragFiles...)
-						gDragHasDir = gDragHasDir || hasDir
 					}
 					continue
 				}
-				if !ignore && gDragFiles != nil {
-					gDragFiles = nil
-					gDragHasDir = false
+				if !ignore {
+					resetDragFiles()
 				}
 			}
 			pty.Stdin.Write(buf)
@@ -465,7 +487,7 @@ func wrapOutput(pty *TrzszPty) {
 			if gTrzszArgs.TraceLog {
 				buf = writeTraceLog(buf, true)
 			}
-			if transfer := gTransfer; transfer != nil {
+			if transfer := (*TrzszTransfer)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&gTransfer)))); transfer != nil {
 				transfer.addReceivedData(buf)
 				buffer = make([]byte, bufSize)
 				continue
@@ -476,10 +498,10 @@ func wrapOutput(pty *TrzszPty) {
 				go handleTrzsz(pty, *mode, remoteIsWindows)
 				continue
 			}
-			if gInterrupting {
+			if atomic.LoadInt32(&gInterrupting) != 0 {
 				continue
 			}
-			if gTrzszArgs.DragFile && gDragFiles != nil {
+			if gTrzszArgs.DragFile && atomic.LoadInt32(&gDragging) != 0 {
 				output := strings.TrimRight(string(trimVT100(buf)), "\r\n")
 				if output == "trz" || output == "trz -d" {
 					os.Stdout.WriteString("\r\n")
@@ -507,7 +529,7 @@ func handleSignal(pty *TrzszPty) {
 	go func() {
 		for {
 			<-sigint
-			if transfer := gTransfer; transfer != nil {
+			if transfer := (*TrzszTransfer)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&gTransfer)))); transfer != nil {
 				transfer.stopTransferringFiles()
 			}
 		}

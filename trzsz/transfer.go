@@ -35,6 +35,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -46,7 +47,7 @@ type TrzszTransfer struct {
 	writer          PtyIO
 	stopped         bool
 	tmuxOutputJunk  bool
-	lastInputTime   *time.Time
+	lastInputTime   int64
 	cleanTimeout    time.Duration
 	maxChunkTime    time.Duration
 	transferConfig  map[string]interface{}
@@ -75,7 +76,7 @@ func NewTransfer(writer PtyIO, stdinState *term.State) *TrzszTransfer {
 		writer,
 		false,
 		false,
-		nil,
+		0,
 		100 * time.Millisecond,
 		0,
 		make(map[string]interface{}),
@@ -89,8 +90,7 @@ func (t *TrzszTransfer) addReceivedData(buf []byte) {
 	if !t.stopped {
 		t.buffer.addBuffer(buf)
 	}
-	now := time.Now()
-	t.lastInputTime = &now
+	atomic.StoreInt64(&t.lastInputTime, time.Now().UnixMilli())
 }
 
 func (t *TrzszTransfer) stopTransferringFiles() {
@@ -102,11 +102,11 @@ func (t *TrzszTransfer) stopTransferringFiles() {
 func (t *TrzszTransfer) cleanInput(timeoutDuration time.Duration) {
 	t.stopped = true
 	t.buffer.drainBuffer()
-	if t.lastInputTime == nil {
+	if atomic.LoadInt64(&t.lastInputTime) == 0 {
 		return
 	}
 	for {
-		sleepDuration := timeoutDuration - time.Now().Sub(*t.lastInputTime)
+		sleepDuration := timeoutDuration - time.Now().Sub(time.UnixMilli(atomic.LoadInt64(&t.lastInputTime)))
 		if sleepDuration <= 0 {
 			return
 		}
