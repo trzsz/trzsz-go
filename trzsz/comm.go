@@ -219,16 +219,6 @@ type TrzszFile struct {
 	IsDir   bool     `json:"is_dir"`
 }
 
-func resolveLink(path string) string {
-	for {
-		p, err := os.Readlink(path)
-		if err != nil {
-			return path
-		}
-		path = p
-	}
-}
-
 func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*TrzszFile, relPath []string, visitedDir map[string]bool) error {
 	if !info.IsDir() {
 		if !info.Mode().IsRegular() {
@@ -240,9 +230,12 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*Trzsz
 		*list = append(*list, &TrzszFile{pathID, path, relPath, false})
 		return nil
 	}
-	realPath := resolveLink(path)
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
 	if _, ok := visitedDir[realPath]; ok {
-		return newTrzszError(fmt.Sprintf("Loop link: %s", path))
+		return newTrzszError(fmt.Sprintf("Duplicate link: %s", path))
 	}
 	visitedDir[realPath] = true
 	*list = append(*list, &TrzszFile{pathID, path, relPath, true})
