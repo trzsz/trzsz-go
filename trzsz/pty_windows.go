@@ -81,7 +81,8 @@ func enableVirtualTerminal() (uint32, uint32, error) {
 	if err := windows.GetConsoleMode(windows.Handle(outHandle), &outMode); err != nil {
 		return 0, 0, err
 	}
-	if err := windows.SetConsoleMode(windows.Handle(outHandle), outMode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING); err != nil {
+	if err := windows.SetConsoleMode(windows.Handle(outHandle),
+		outMode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING|windows.DISABLE_NEWLINE_AUTO_RETURN); err != nil {
 		return 0, 0, err
 	}
 
