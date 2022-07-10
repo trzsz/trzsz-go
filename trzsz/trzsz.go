@@ -406,13 +406,11 @@ func writeTraceLog(buf []byte, output bool) []byte {
 			gTraceLog = nil
 			return bytes.ReplaceAll(buf, []byte("<DISABLE_TRZSZ_TRACE_LOG>"), []byte(msg))
 		}
+		typ := "in"
 		if output {
-			gTraceLog.WriteString("[out]")
-		} else {
-			gTraceLog.WriteString("[in]")
+			typ = "out"
 		}
-		gTraceLog.WriteString(encodeBytes(buf))
-		gTraceLog.WriteString("\n")
+		gTraceLog.WriteString(fmt.Sprintf("[%s]%s\n", typ, encodeBytes(buf)))
 		gTraceLog.Sync()
 		return buf
 	}
