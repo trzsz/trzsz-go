@@ -58,7 +58,7 @@ func getConsoleSize() (int, int, error) {
 	if err := windows.GetConsoleScreenBufferInfo(windows.Handle(handle), &info); err != nil {
 		return 0, 0, err
 	}
-	return int(info.Window.Right - info.Window.Left), int(info.Window.Bottom - info.Window.Top), nil
+	return int(info.Window.Right-info.Window.Left) + 1, int(info.Window.Bottom-info.Window.Top) + 1, nil
 }
 
 func enableVirtualTerminal() (uint32, uint32, error) {
