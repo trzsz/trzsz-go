@@ -61,6 +61,7 @@ var gDragHasDir int32 = 0
 var gDragMutex sync.Mutex
 var gDragFiles []string = nil
 var gInterrupting int32 = 0
+var gSkipTrzCommand int32 = 0
 var gTransfer *TrzszTransfer = nil
 var gUniqueIDMap = make(map[string]int)
 var parentWindowID = getParentWindowID()
@@ -387,6 +388,7 @@ func uploadDragFiles(pty *TrzszPty) {
 	pty.Stdin.Write([]byte{0x03})
 	time.Sleep(200 * time.Millisecond)
 	atomic.StoreInt32(&gInterrupting, 0)
+	atomic.StoreInt32(&gSkipTrzCommand, 1)
 	if atomic.LoadInt32(&gDragHasDir) != 0 {
 		pty.Stdin.Write([]byte("trz -d\r"))
 	} else {
@@ -499,13 +501,11 @@ func wrapOutput(pty *TrzszPty) {
 			if atomic.LoadInt32(&gInterrupting) != 0 {
 				continue
 			}
-			if gTrzszArgs.DragFile && atomic.LoadInt32(&gDragging) != 0 {
+			if atomic.LoadInt32(&gSkipTrzCommand) != 0 {
+				atomic.StoreInt32(&gSkipTrzCommand, 0)
 				output := strings.TrimRight(string(trimVT100(buf)), "\r\n")
 				if output == "trz" || output == "trz -d" {
 					os.Stdout.WriteString("\r\n")
-					continue
-				}
-				if output == "" || output == "\"" {
 					continue
 				}
 			}
