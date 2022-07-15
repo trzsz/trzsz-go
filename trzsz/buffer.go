@@ -157,10 +157,18 @@ func (b *TrzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error
 		if bytes.IndexByte(buf, '\x03') >= 0 { // `ctrl + c` to interrupt
 			return nil, newTrzszError("Interrupted")
 		}
-		for _, c := range buf {
+		for i := 0; i < len(buf); i++ {
+			c := buf[i]
 			if skipVT100 {
 				if isVT100End(c) {
 					skipVT100 = false
+					// skip the duplicate character, e.g., the "8" in "8\r\n\x1b[25;119H8".
+					if c == 'H' && i+1 < len(buf) {
+						last := b.readBuf.Bytes()
+						if len(last) > 0 && buf[i+1] == last[len(last)-1] {
+							i++
+						}
+					}
 				}
 			} else if c == '\x1b' {
 				skipVT100 = true

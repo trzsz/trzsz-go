@@ -17,6 +17,8 @@ github.com/ncruces/zenity v0.8.8-0.20220617014907-176a3d48a105 h1:xgv9pDC5jIzkMg
 github.com/ncruces/zenity v0.8.8-0.20220617014907-176a3d48a105/go.mod h1:1IKusn8+InkQpshzR8/56dWvAwVMqMFCtyvskYzbtGo=
 github.com/ncruces/zenity v0.8.8 h1:gsPiY5U4dO6Z/BNmPmrDjqLSQO3vL7FYrexpt8dcGuQ=
 github.com/ncruces/zenity v0.8.8/go.mod h1:69zUhpw7EaRR5tWzqwpxSNKYcGhDoM7tbV65TGh2yuk=
+github.com/ncruces/zenity v0.8.9 h1:9HYlnmKlxL9tuJeJmuvEmItBYRnWexq4skObMKqTy2U=
+github.com/ncruces/zenity v0.8.9/go.mod h1:69zUhpw7EaRR5tWzqwpxSNKYcGhDoM7tbV65TGh2yuk=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/randall77/makefat v0.0.0-20210315173500-7ddd0e42c844 h1:GranzK4hv1/pqTIhMTXt2X8MmMOuH3hMeUR0o9SP5yc=
@@ -40,6 +42,8 @@ golang.org/x/sys v0.0.0-20220702020025-31831981b65f h1:xdsejrW/0Wf2diT5CPp3XmKUN
 golang.org/x/sys v0.0.0-20220702020025-31831981b65f/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/sys v0.0.0-20220708085239-5a0f0661e09d h1:/m5NbqQelATgoSPVC2Z23sR4kVNokFwDDyWh/3rGY+I=
 golang.org/x/sys v0.0.0-20220708085239-5a0f0661e09d/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8 h1:0A+M6Uqn+Eje4kHMK80dtF3JCXC4ykBgQG4Fe06QRhQ=
+golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
 golang.org/x/term v0.0.0-20220411215600-e5f449aeb171 h1:EH1Deb8WZJ0xc0WK//leUHXcX9aLE5SymusoTmMZye8=
 golang.org/x/term v0.0.0-20220411215600-e5f449aeb171/go.mod h1:jbD1KX2456YbFQfuXm/mYQcufACuNUgVhRMnK/tPxf8=
 golang.org/x/term v0.0.0-20220526004731-065cf7ba2467 h1:CBpWXWQpIRjzmkkA+M7q9Fqnwd2mZr3AFqexg8YTfoM=

@@ -8,8 +8,8 @@ require (
 	github.com/UserExistsError/conpty v0.1.0
 	github.com/alexflint/go-arg v1.4.3
 	github.com/creack/pty v1.1.18
-	github.com/ncruces/zenity v0.8.8
-	golang.org/x/sys v0.0.0-20220708085239-5a0f0661e09d
+	github.com/ncruces/zenity v0.8.9
+	golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8
 	golang.org/x/term v0.0.0-20220526004731-065cf7ba2467
 	golang.org/x/text v0.3.7
 )
