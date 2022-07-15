@@ -398,9 +398,18 @@ func uploadDragFiles(pty *TrzszPty) {
 	resetDragFiles()
 }
 
+/**
+ * ┌────────────────────┬───────────────────────────────────────────┬────────────────────────────────────────────┐
+ * │                    │ Enable trace log                          │ Disable trace log                          │
+ * ├────────────────────┼───────────────────────────────────────────┼────────────────────────────────────────────┤
+ * │ Windows cmd        │ echo ^<ENABLE_TRZSZ_TRACE_LOG^>           │ echo ^<DISABLE_TRZSZ_TRACE_LOG^>           │
+ * ├────────────────────┼───────────────────────────────────────────┼────────────────────────────────────────────┤
+ * │ Windows PowerShell │ echo "<ENABLE_TRZSZ_TRACE_LOG$([char]62)" │ echo "<DISABLE_TRZSZ_TRACE_LOG$([char]62)" │
+ * ├────────────────────┼───────────────────────────────────────────┼────────────────────────────────────────────┤
+ * │ Linux and macOS    │ echo -e '<ENABLE_TRZSZ_TRACE_LOG\x3E'     │ echo -e '<DISABLE_TRZSZ_TRACE_LOG\x3E'     │
+ * └────────────────────┴───────────────────────────────────────────┴────────────────────────────────────────────┘
+ */
 func writeTraceLog(buf []byte, output bool) []byte {
-	// Windows disable log: echo ^<DISABLE_TRZSZ_TRACE_LOG^>
-	// Linux macOS disable log: echo -e '\x3CDISABLE_TRZSZ_TRACE_LOG\x3E'
 	if gTraceLog != nil {
 		if output && bytes.Contains(buf, []byte("<DISABLE_TRZSZ_TRACE_LOG>")) {
 			msg := fmt.Sprintf("Closed trace log at %s", gTraceLog.Name())
@@ -416,8 +425,6 @@ func writeTraceLog(buf []byte, output bool) []byte {
 		gTraceLog.Sync()
 		return buf
 	}
-	// Windows enable log: echo ^<ENABLE_TRZSZ_TRACE_LOG^>
-	// Linux macOS enable log: echo -e '\x3CENABLE_TRZSZ_TRACE_LOG\x3E'
 	if output && bytes.Contains(buf, []byte("<ENABLE_TRZSZ_TRACE_LOG>")) {
 		var err error
 		var msg string
