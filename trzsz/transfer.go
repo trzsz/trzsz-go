@@ -102,9 +102,7 @@ func (t *TrzszTransfer) stopTransferringFiles() {
 func (t *TrzszTransfer) cleanInput(timeoutDuration time.Duration) {
 	t.stopped = true
 	t.buffer.drainBuffer()
-	if atomic.LoadInt64(&t.lastInputTime) == 0 {
-		return
-	}
+	atomic.StoreInt64(&t.lastInputTime, time.Now().UnixMilli())
 	for {
 		sleepDuration := timeoutDuration - time.Now().Sub(time.UnixMilli(atomic.LoadInt64(&t.lastInputTime)))
 		if sleepDuration <= 0 {

@@ -1,3 +1,9 @@
+trzsz (0.1.9) trusty; urgency=medium
+
+  * trzsz-go v0.1.9
+
+ -- Lonny Wong <lonnywong@qq.com>  Sun, 17 Jul 2022 08:16:25 +0800
+
 trzsz (0.1.8) trusty; urgency=medium
 
   * Release v0.1.8 with Go1.18.
