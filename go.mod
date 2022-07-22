@@ -9,7 +9,7 @@ require (
 	github.com/alexflint/go-arg v1.4.3
 	github.com/creack/pty v1.1.18
 	github.com/ncruces/zenity v0.8.9
-	golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8
+	golang.org/x/sys v0.0.0-20220721230656-c6bc011c0c49
 	golang.org/x/term v0.0.0-20220526004731-065cf7ba2467
 	golang.org/x/text v0.3.7
 )
@@ -23,4 +23,4 @@ require (
 	golang.org/x/image v0.0.0-20220617043117-41969df76e82 // indirect
 )
 
-replace github.com/alexflint/go-arg v1.4.3 => github.com/trzsz/go-arg v1.4.4-0.20220603094444-443c2e23b974
+replace github.com/alexflint/go-arg v1.4.3 => github.com/trzsz/go-arg v1.4.4-0.20220722153732-ac5a9f75703f
