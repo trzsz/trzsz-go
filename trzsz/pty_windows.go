@@ -40,6 +40,8 @@ type TrzszPty struct {
 	Stdin     PtyIO
 	Stdout    PtyIO
 	cpty      *conpty.ConPty
+	inCP      uint32
+	outCP     uint32
 	inMode    uint32
 	outMode   uint32
 	width     int
@@ -47,6 +49,28 @@ type TrzszPty struct {
 	closed    bool
 	exitCode  *uint32
 	startTime time.Time
+}
+
+const CP_UTF8 uint32 = 65001
+
+var kernel32 = windows.NewLazyDLL("kernel32.dll")
+
+func getConsoleCP() uint32 {
+	result, _, _ := kernel32.NewProc("GetConsoleCP").Call()
+	return uint32(result)
+}
+
+func getConsoleOutputCP() uint32 {
+	result, _, _ := kernel32.NewProc("GetConsoleOutputCP").Call()
+	return uint32(result)
+}
+
+func setConsoleCP(cp uint32) {
+	kernel32.NewProc("SetConsoleCP").Call(uintptr(cp))
+}
+
+func setConsoleOutputCP(cp uint32) {
+	kernel32.NewProc("SetConsoleOutputCP").Call(uintptr(cp))
 }
 
 func getConsoleSize() (int, int, error) {
@@ -122,6 +146,12 @@ func Spawn(name string, args ...string) (*TrzszPty, error) {
 		return nil, err
 	}
 
+	// set code page to UTF8
+	inCP := getConsoleCP()
+	outCP := getConsoleOutputCP()
+	setConsoleCP(CP_UTF8)
+	setConsoleOutputCP(CP_UTF8)
+
 	// spawn a pty
 	var cmdLine strings.Builder
 	cmdLine.WriteString(strings.ReplaceAll(name, "\"", "\"\"\""))
@@ -132,11 +162,13 @@ func Spawn(name string, args ...string) (*TrzszPty, error) {
 	}
 	cpty, err := conpty.Start(cmdLine.String(), conpty.ConPtyDimensions(width, height))
 	if err != nil {
+		setConsoleCP(inCP)
+		setConsoleOutputCP(outCP)
 		resetVirtualTerminal(inMode, outMode)
 		return nil, err
 	}
 
-	return &TrzszPty{cpty, cpty, cpty, inMode, outMode, width, height, false, nil, time.Now()}, nil
+	return &TrzszPty{cpty, cpty, cpty, inCP, outCP, inMode, outMode, width, height, false, nil, time.Now()}, nil
 }
 
 func (t *TrzszPty) OnResize(cb func(int)) {
@@ -152,6 +184,8 @@ func (t *TrzszPty) Close() {
 	}
 	t.closed = true
 	t.cpty.Close()
+	setConsoleCP(t.inCP)
+	setConsoleOutputCP(t.outCP)
 	resetVirtualTerminal(t.inMode, t.outMode)
 	if time.Now().Sub(t.startTime) > 10*time.Second {
 		time.Sleep(100 * time.Millisecond)
