@@ -130,18 +130,19 @@ func TszMain() int {
 		args.Binary = false
 	}
 
-	uniqueID := "0"
-	if tmuxMode == TmuxNormalMode {
+	uniqueID := strconv.FormatInt(time.Now().UnixMilli()%10e10, 10)
+	if IsWindows() {
+		uniqueID += "10"
+	} else if tmuxMode == TmuxNormalMode {
 		columns := getTerminalColumns()
 		if columns > 0 && columns < 40 {
 			os.Stdout.WriteString("\n\n\x1b[2A\x1b[0J")
 		} else {
 			os.Stdout.WriteString("\n\x1b[1A\x1b[0J")
 		}
-		uniqueID = reverseString(strconv.FormatInt(time.Now().UnixMilli(), 10))
-	}
-	if IsWindows() {
-		uniqueID = "1"
+		uniqueID += "20"
+	} else {
+		uniqueID += "00"
 	}
 
 	os.Stdout.WriteString(fmt.Sprintf("\x1b7\x07::TRZSZ:TRANSFER:S:%s:%s\n", kTrzszVersion, uniqueID))

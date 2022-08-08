@@ -153,7 +153,7 @@ func detectTrzsz(output []byte) (*byte, bool) {
 	if len(match) > 3 {
 		uniqueID = string(match[3])
 	}
-	if len(uniqueID) >= 8 {
+	if len(uniqueID) >= 8 && (IsWindows() || !(len(uniqueID) == 14 && strings.HasSuffix(uniqueID, "00"))) {
 		if _, ok := gUniqueIDMap[uniqueID]; ok {
 			return nil, false
 		}
@@ -168,7 +168,10 @@ func detectTrzsz(output []byte) (*byte, bool) {
 		}
 		gUniqueIDMap[uniqueID] = len(gUniqueIDMap)
 	}
-	remoteIsWindows := uniqueID == ":1"
+	remoteIsWindows := false
+	if uniqueID == ":1" || (len(uniqueID) == 14 && strings.HasSuffix(uniqueID, "10")) {
+		remoteIsWindows = true
+	}
 	return &match[1][0], remoteIsWindows
 }
 
