@@ -37,7 +37,7 @@ func getDisplayLength(str string) int {
 	length := 0
 	for _, r := range []rune(str) {
 		if utf8.RuneLen(r) == 1 {
-			length += 1
+			length++
 		} else {
 			length += 2
 		}
@@ -55,16 +55,14 @@ func getEllipsisString(str string, max int) (string, int) {
 			if length+2 > max {
 				b.WriteString("...")
 				return b.String(), length + 3
-			} else {
-				length += 2
 			}
+			length += 2
 		} else {
 			if length+1 > max {
 				b.WriteString("...")
 				return b.String(), length + 3
-			} else {
-				length += 1
 			}
+			length++
 		}
 		b.WriteRune(r)
 	}
@@ -73,7 +71,7 @@ func getEllipsisString(str string, max int) (string, int) {
 }
 
 func convertSizeToString(size float64) string {
-	if math.IsNaN(size) {
+	if size < 0 {
 		return "NaN"
 	}
 
@@ -115,7 +113,7 @@ func convertSizeToString(size float64) string {
 }
 
 func convertTimeToString(seconds float64) string {
-	if math.IsNaN(seconds) {
+	if seconds < 0 {
 		return "NaN"
 	}
 
@@ -143,6 +141,8 @@ func convertTimeToString(seconds float64) string {
 	return b.String()
 }
 
+const kSpeedArraySize = 10
+
 type TextProgressBar struct {
 	writer          *os.File
 	columns         int
@@ -155,13 +155,21 @@ type TextProgressBar struct {
 	startTime       *time.Time
 	lastUpdateTime  *time.Time
 	firstWrite      bool
+	speedCnt        int
+	speedIdx        int
+	timeArray       [kSpeedArraySize]*time.Time
+	stepArray       [kSpeedArraySize]int64
 }
 
 func NewTextProgressBar(writer *os.File, columns int, tmuxPaneColumns int) *TextProgressBar {
 	if tmuxPaneColumns > 1 {
 		columns = tmuxPaneColumns - 1 //  -1 to avoid messing up the tmux pane
 	}
-	return &TextProgressBar{writer, columns, tmuxPaneColumns, 0, 0, "", 0, 0, nil, nil, true}
+	return &TextProgressBar{
+		writer:          writer,
+		columns:         columns,
+		tmuxPaneColumns: tmuxPaneColumns,
+		firstWrite:      true}
 }
 
 func (p *TextProgressBar) setTerminalColumns(columns int) {
@@ -178,9 +186,13 @@ func (p *TextProgressBar) onNum(num int64) {
 
 func (p *TextProgressBar) onName(name string) {
 	p.fileName = name
-	p.fileIdx += 1
+	p.fileIdx++
 	now := time.Now()
 	p.startTime = &now
+	p.timeArray[0] = p.startTime
+	p.stepArray[0] = 0
+	p.speedCnt = 1
+	p.speedIdx = 1
 }
 
 func (p *TextProgressBar) onSize(size int64) {
@@ -215,11 +227,10 @@ func (p *TextProgressBar) showProgress() {
 	}
 	percentage := fmt.Sprintf("%.0f%%", float64(p.fileStep)*100.0/float64(p.fileSize))
 	total := convertSizeToString(float64(p.fileStep))
-	usedTime := float64(now.Sub(*p.startTime)) / float64(time.Second)
-	speed := fmt.Sprintf("%s/s", convertSizeToString(float64(p.fileStep)/usedTime))
-	leftTime := float64(p.fileSize-p.fileStep) * usedTime / float64(p.fileStep)
-	eta := fmt.Sprintf("%s ETA", convertTimeToString(leftTime))
-	progressText := p.getProgressText(percentage, total, speed, eta)
+	speed := p.getSpeed(&now)
+	speedStr := fmt.Sprintf("%s/s", convertSizeToString(speed))
+	eta := fmt.Sprintf("%s ETA", convertTimeToString(math.Round(float64(p.fileSize-p.fileStep)/speed)))
+	progressText := p.getProgressText(percentage, total, speedStr, eta)
 
 	if p.firstWrite {
 		p.firstWrite = false
@@ -232,6 +243,29 @@ func (p *TextProgressBar) showProgress() {
 	} else {
 		p.writer.Write([]byte(fmt.Sprintf("\r%s", progressText)))
 	}
+}
+
+func (p *TextProgressBar) getSpeed(now *time.Time) float64 {
+	var speed float64
+	if p.speedCnt <= kSpeedArraySize {
+		p.speedCnt++
+		speed = float64(p.fileStep-p.stepArray[0]) / (float64(now.Sub(*p.timeArray[0])) / float64(time.Second))
+	} else {
+		speed = float64(p.fileStep-p.stepArray[p.speedIdx]) / (float64(now.Sub(*p.timeArray[p.speedIdx])) / float64(time.Second))
+	}
+
+	p.timeArray[p.speedIdx] = now
+	p.stepArray[p.speedIdx] = p.fileStep
+
+	p.speedIdx++
+	if p.speedIdx >= kSpeedArraySize {
+		p.speedIdx %= kSpeedArraySize
+	}
+
+	if math.IsNaN(speed) {
+		return -1
+	}
+	return speed
 }
 
 func (p *TextProgressBar) getProgressText(percentage, total, speed, eta string) string {
