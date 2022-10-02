@@ -133,6 +133,10 @@ func TrzMain() int {
 
 	uniqueID := strconv.FormatInt(time.Now().UnixMilli()%10e10, 10)
 	if IsWindows() {
+		if inMode, outMode, err := enableVirtualTerminal(); err == nil {
+			defer resetVirtualTerminal(inMode, outMode)
+		}
+		setupConsoleOutput()
 		uniqueID += "10"
 	} else if tmuxMode == TmuxNormalMode {
 		columns := getTerminalColumns()
@@ -150,7 +154,7 @@ func TrzMain() int {
 	if args.Directory {
 		mode = "D"
 	}
-	os.Stdout.WriteString(fmt.Sprintf("\x1b7\x07::TRZSZ:TRANSFER:%s:%s:%s\n", mode, kTrzszVersion, uniqueID))
+	os.Stdout.WriteString(fmt.Sprintf("\x1b7\x07::TRZSZ:TRANSFER:%s:%s:%s\r\n", mode, kTrzszVersion, uniqueID))
 	os.Stdout.Sync()
 
 	state, err := term.MakeRaw(int(os.Stdin.Fd()))

@@ -218,3 +218,28 @@ func syscallAccessWok(path string) error {
 func syscallAccessRok(path string) error {
 	return nil
 }
+
+func setupConsoleOutput() {
+	os.Stdout.WriteString("\x1b[?1049h\x1b[H\x1b[2J")
+
+	logo := []string{
+		"ooooooooooooo      ooooooooo.         oooooooooooo       .oooooo..o       oooooooooooo",
+		"8'   888   '8      `888   `Y88.      d'''''''d888'      d8P'    `Y8      d'''''''d888'",
+		"     888            888   .d88'            .888P        Y88bo.                 .888P  ",
+		"     888            888ooo88P'            d888'          `'Y8888o.            d888'   ",
+		"     888            888`88b.            .888P                `'Y88b         .888P     ",
+		"     888            888  `88b.         d888'    .P      oo     .d8P        d888'    .P",
+		"    o888o          o888o  o888o      .888d888d88P       d888d88P'        .888d888d88P ",
+	}
+	width, height, err := getConsoleSize()
+	if err != nil {
+		return
+	}
+	if width <= len(logo[0]) || height <= len(logo)+2 {
+		return
+	}
+	pad := (width - len(logo[0])) / 2
+	for _, s := range logo {
+		os.Stdout.WriteString(strings.Repeat(" ", pad) + s + "\r\n")
+	}
+}

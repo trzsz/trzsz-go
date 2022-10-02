@@ -134,3 +134,14 @@ func syscallAccessWok(path string) error {
 func syscallAccessRok(path string) error {
 	return syscall.Access(path, unix.R_OK)
 }
+
+func enableVirtualTerminal() (uint32, uint32, error) {
+	return 0, 0, nil
+}
+
+func resetVirtualTerminal(inMode, outMode uint32) error {
+	return nil
+}
+
+func setupConsoleOutput() {
+}

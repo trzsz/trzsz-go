@@ -35,6 +35,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -54,6 +55,7 @@ type TrzszTransfer struct {
 	protocolNewline string
 	stdinState      *term.State
 	fileNameMap     map[int]string
+	remoteIsWindows bool
 }
 
 func maxDuration(a, b time.Duration) time.Duration {
@@ -72,17 +74,13 @@ func minInt64(a, b int64) int64 {
 
 func NewTransfer(writer PtyIO, stdinState *term.State) *TrzszTransfer {
 	return &TrzszTransfer{
-		NewTrzszBuffer(),
-		writer,
-		false,
-		false,
-		0,
-		100 * time.Millisecond,
-		0,
-		make(map[string]interface{}),
-		"\n",
-		stdinState,
-		make(map[int]string),
+		buffer:          NewTrzszBuffer(),
+		writer:          writer,
+		cleanTimeout:    100 * time.Millisecond,
+		transferConfig:  make(map[string]interface{}),
+		protocolNewline: "\n",
+		stdinState:      stdinState,
+		fileNameMap:     make(map[int]string),
 	}
 }
 
@@ -137,16 +135,14 @@ func (t *TrzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 		return nil, newTrzszError("Stopped")
 	}
 
-	if IsWindows() {
+	if IsWindows() || t.remoteIsWindows {
 		line, err := t.buffer.readLineOnWindows(timeout)
 		if err != nil {
 			return nil, err
 		}
-		if t.tmuxOutputJunk || mayHasJunk {
-			idx := bytes.LastIndex(line, []byte("#"+expectType+":"))
-			if idx >= 0 {
-				line = line[idx:]
-			}
+		idx := bytes.LastIndex(line, []byte("#"+expectType+":"))
+		if idx >= 0 {
+			line = line[idx:]
 		}
 		return line, nil
 	}
@@ -308,7 +304,7 @@ func (t *TrzszTransfer) sendAction(confirm, remoteIsWindows bool) error {
 		"version":     kTrzszVersion,
 		"support_dir": true,
 	}
-	if IsWindows() {
+	if IsWindows() || remoteIsWindows {
 		actMap["binary"] = false
 		actMap["newline"] = "!\n"
 	}
@@ -317,6 +313,7 @@ func (t *TrzszTransfer) sendAction(confirm, remoteIsWindows bool) error {
 		return err
 	}
 	if remoteIsWindows {
+		t.remoteIsWindows = true
 		t.protocolNewline = "!\n"
 	}
 	return t.sendString("ACT", string(actStr))
@@ -397,9 +394,14 @@ func (t *TrzszTransfer) serverExit(msg string) {
 	if t.stdinState != nil {
 		term.Restore(int(os.Stdin.Fd()), t.stdinState)
 	}
-	os.Stdout.WriteString("\x1b8\x1b[0J")
+	if IsWindows() {
+		msg = strings.ReplaceAll(msg, "\n", "\r\n")
+		os.Stdout.WriteString("\x1b[H\x1b[2J\x1b[?1049l")
+	} else {
+		os.Stdout.WriteString("\x1b8\x1b[0J")
+	}
 	os.Stdout.WriteString(msg)
-	os.Stdout.WriteString("\n")
+	os.Stdout.WriteString("\r\n")
 }
 
 func (t *TrzszTransfer) clientError(err error) {

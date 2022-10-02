@@ -56,6 +56,7 @@ type TrzszArgs struct {
 
 var gTrzszArgs *TrzszArgs
 var gTraceLog *os.File = nil
+var gTraceBuf *bytes.Buffer = nil
 var gDragging int32 = 0
 var gDragHasDir int32 = 0
 var gDragMutex sync.Mutex
@@ -416,16 +417,24 @@ func writeTraceLog(buf []byte, output bool) []byte {
 	if gTraceLog != nil {
 		if output && bytes.Contains(buf, []byte("<DISABLE_TRZSZ_TRACE_LOG>")) {
 			msg := fmt.Sprintf("Closed trace log at %s", gTraceLog.Name())
+			gTraceLog.Write(gTraceBuf.Bytes())
 			gTraceLog.Close()
 			gTraceLog = nil
+			gTraceBuf = nil
 			return bytes.ReplaceAll(buf, []byte("<DISABLE_TRZSZ_TRACE_LOG>"), []byte(msg))
 		}
 		typ := "in"
 		if output {
 			typ = "out"
 		}
-		gTraceLog.WriteString(fmt.Sprintf("[%s]%s\n", typ, encodeBytes(buf)))
-		gTraceLog.Sync()
+		gTraceBuf.WriteString(fmt.Sprintf("[%s]%s\n", typ, encodeBytes(buf)))
+		if gTraceBuf.Len() >= 10*1024*1024 {
+			go func(bytes []byte) {
+				gTraceLog.Write(bytes)
+			}(gTraceBuf.Bytes())
+			gTraceBuf = new(bytes.Buffer)
+			gTraceBuf.Grow(20 * 1024 * 1024)
+		}
 		return buf
 	}
 	if output && bytes.Contains(buf, []byte("<ENABLE_TRZSZ_TRACE_LOG>")) {
@@ -437,6 +446,8 @@ func writeTraceLog(buf []byte, output bool) []byte {
 		} else {
 			msg = fmt.Sprintf("Writing trace log to %s", gTraceLog.Name())
 		}
+		gTraceBuf = new(bytes.Buffer)
+		gTraceBuf.Grow(20 * 1024 * 1024)
 		return bytes.ReplaceAll(buf, []byte("<ENABLE_TRZSZ_TRACE_LOG>"), []byte(msg))
 	}
 	return buf

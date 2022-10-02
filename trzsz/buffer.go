@@ -141,7 +141,12 @@ func isTrzszLetter(b byte) bool {
 
 func (b *TrzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error) {
 	b.readBuf.Reset()
+	lastByte := byte('\x1b')
 	skipVT100 := false
+	hasNewline := false
+	mayDuplicate := false
+	hasCursorHome := false
+	preHasCursorHome := false
 	for {
 		buf, err := b.nextBuffer(timeout)
 		if err != nil {
@@ -154,29 +159,46 @@ func (b *TrzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error
 		} else {
 			b.nextIdx += len(buf)
 		}
-		if bytes.IndexByte(buf, '\x03') >= 0 { // `ctrl + c` to interrupt
-			return nil, newTrzszError("Interrupted")
-		}
 		for i := 0; i < len(buf); i++ {
 			c := buf[i]
+			if c == '\x03' { // `ctrl + c` to interrupt
+				return nil, newTrzszError("Interrupted")
+			}
+			if c == '\n' {
+				hasNewline = true
+			}
 			if skipVT100 {
 				if isVT100End(c) {
 					skipVT100 = false
-					// skip the duplicate character, e.g., the "8" in "8\r\n\x1b[25;119H8".
-					if c == 'H' && i+1 < len(buf) {
-						last := b.readBuf.Bytes()
-						if len(last) > 0 && buf[i+1] == last[len(last)-1] {
-							i++
-						}
+					// moving the cursor may result in duplicate characters
+					if c == 'H' && lastByte >= '0' && lastByte <= '9' {
+						mayDuplicate = true
 					}
 				}
+				if lastByte == '[' && c == 'H' {
+					hasCursorHome = true
+				}
+				lastByte = c
 			} else if c == '\x1b' {
 				skipVT100 = true
+				lastByte = c
 			} else if isTrzszLetter(c) {
+				if mayDuplicate {
+					mayDuplicate = false
+					// skip the duplicate characters, e.g., the "8" in "8\r\n\x1b[25;119H8".
+					bytes := b.readBuf.Bytes()
+					if hasNewline && len(bytes) > 0 && (c == bytes[len(bytes)-1] || preHasCursorHome) {
+						bytes[len(bytes)-1] = c
+						continue
+					}
+				}
 				b.readBuf.WriteByte(c)
+				preHasCursorHome = hasCursorHome
+				hasCursorHome = false
+				hasNewline = false
 			}
 		}
-		if newLineIdx >= 0 {
+		if newLineIdx >= 0 && b.readBuf.Len() > 0 && !skipVT100 {
 			return b.readBuf.Bytes(), nil
 		}
 	}
