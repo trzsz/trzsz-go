@@ -1,19 +1,41 @@
 BIN_DIR := ./bin
 BIN_DST := /usr/bin
 
-all: ${BIN_DIR}/trz ${BIN_DIR}/tsz ${BIN_DIR}/trzsz
+ifdef GOOS
+	ifeq (${GOOS}, windows)
+		WIN_TARGET := True
+	endif
+else
+	ifeq (${OS}, Windows_NT)
+		WIN_TARGET := True
+	endif
+endif
 
-${BIN_DIR}/trz: $(wildcard ./cmd/trz/*.go ./trzsz/*.go)
-	go build -o $@ ./cmd/trz
+ifdef WIN_TARGET
+	TRZ := trz.exe
+	TSZ := tsz.exe
+	TRZSZ := trzsz.exe
+else
+	TRZ := trz
+	TSZ := tsz
+	TRZSZ := trzsz
+endif
 
-${BIN_DIR}/tsz: $(wildcard ./cmd/tsz/*.go ./trzsz/*.go)
-	go build -o $@ ./cmd/tsz
+.PHONY: all clean install
 
-${BIN_DIR}/trzsz: $(wildcard ./cmd/trzsz/*.go ./trzsz/*.go)
-	go build -o $@ ./cmd/trzsz
+all: ${BIN_DIR}/${TRZ} ${BIN_DIR}/${TSZ} ${BIN_DIR}/${TRZSZ}
+
+${BIN_DIR}/${TRZ}: $(wildcard ./cmd/trz/*.go ./trzsz/*.go)
+	go build -o ${BIN_DIR} ./cmd/trz
+
+${BIN_DIR}/${TSZ}: $(wildcard ./cmd/tsz/*.go ./trzsz/*.go)
+	go build -o ${BIN_DIR} ./cmd/tsz
+
+${BIN_DIR}/${TRZSZ}: $(wildcard ./cmd/trzsz/*.go ./trzsz/*.go)
+	go build -o ${BIN_DIR} ./cmd/trzsz
 
 clean:
-	-rm -f ${BIN_DIR}/*
+	-rm -f ${BIN_DIR}/${TRZ} ${BIN_DIR}/${TSZ} ${BIN_DIR}/${TRZSZ}
 
 install: all
 	mkdir -p ${DESTDIR}${BIN_DST}
