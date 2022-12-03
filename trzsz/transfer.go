@@ -505,6 +505,47 @@ func (t *TrzszTransfer) sendFileSize(file *os.File, progress ProgressCallback) (
 	return size, nil
 }
 
+func (t *TrzszTransfer) sendFileData(file *os.File, size int64, binary bool, escapeCodes [][]byte, maxBufSize int64, progress ProgressCallback) ([]byte, error) {
+	step := int64(0)
+	bufSize := int64(1024)
+	buffer := make([]byte, bufSize)
+	hasher := md5.New()
+	for step < size {
+		beginTime := time.Now()
+		n, err := file.Read(buffer)
+		if err != nil {
+			return nil, err
+		}
+		length := int64(n)
+		data := buffer[:n]
+		if err := t.sendData(data, binary, escapeCodes); err != nil {
+			return nil, err
+		}
+		if _, err := hasher.Write(data); err != nil {
+			return nil, err
+		}
+		if err := t.checkInteger(length); err != nil {
+			return nil, err
+		}
+		step += length
+		if progress != nil && !reflect.ValueOf(progress).IsNil() {
+			progress.onStep(step)
+		}
+		chunkTime := time.Now().Sub(beginTime)
+		if length == bufSize && chunkTime < 500*time.Millisecond && bufSize < maxBufSize {
+			bufSize = minInt64(bufSize*2, maxBufSize)
+			buffer = make([]byte, bufSize)
+		} else if chunkTime >= 2*time.Second && bufSize > 1024 {
+			bufSize = 1024
+			buffer = make([]byte, bufSize)
+		}
+		if chunkTime > t.maxChunkTime {
+			t.maxChunkTime = chunkTime
+		}
+	}
+	return hasher.Sum(nil), nil
+}
+
 func (t *TrzszTransfer) sendFileMD5(digest []byte, progress ProgressCallback) error {
 	if err := t.sendBinary("MD5", digest); err != nil {
 		return err
@@ -544,8 +585,6 @@ func (t *TrzszTransfer) sendFiles(files []*TrzszFile, progress ProgressCallback)
 		return nil, err
 	}
 
-	bufSize := int64(1024)
-	buffer := make([]byte, bufSize)
 	var remoteNames []string
 	for _, f := range files {
 		file, remoteName, err := t.sendFileName(f, directory, progress)
@@ -563,45 +602,17 @@ func (t *TrzszTransfer) sendFiles(files []*TrzszFile, progress ProgressCallback)
 
 		defer file.Close()
 
-		fileSize, err := t.sendFileSize(file, progress)
+		size, err := t.sendFileSize(file, progress)
 		if err != nil {
 			return nil, err
 		}
 
-		step := int64(0)
-		hasher := md5.New()
-		for step < fileSize {
-			beginTime := time.Now()
-			n, err := file.Read(buffer)
-			if err != nil {
-				return nil, err
-			}
-			size := int64(n)
-			data := buffer[:n]
-			if err := t.sendData(data, binary, escapeCodes); err != nil {
-				return nil, err
-			}
-			if _, err := hasher.Write(data); err != nil {
-				return nil, err
-			}
-			if err := t.checkInteger(size); err != nil {
-				return nil, err
-			}
-			step += size
-			if progress != nil && !reflect.ValueOf(progress).IsNil() {
-				progress.onStep(step)
-			}
-			chunkTime := time.Now().Sub(beginTime)
-			if size == bufSize && chunkTime < 500*time.Millisecond && bufSize < maxBufSize {
-				bufSize = minInt64(bufSize*2, maxBufSize)
-				buffer = make([]byte, bufSize)
-			}
-			if chunkTime > t.maxChunkTime {
-				t.maxChunkTime = chunkTime
-			}
+		digest, err := t.sendFileData(file, size, binary, escapeCodes, maxBufSize, progress)
+		if err != nil {
+			return nil, err
 		}
 
-		if err := t.sendFileMD5(hasher.Sum(nil), progress); err != nil {
+		if err := t.sendFileMD5(digest, progress); err != nil {
 			return nil, err
 		}
 	}
@@ -764,6 +775,37 @@ func (t *TrzszTransfer) recvFileSize(progress ProgressCallback) (int64, error) {
 	return size, nil
 }
 
+func (t *TrzszTransfer) recvFileData(file *os.File, size int64, binary bool, escapeCodes [][]byte, timeout time.Duration, progress ProgressCallback) ([]byte, error) {
+	step := int64(0)
+	hasher := md5.New()
+	for step < size {
+		beginTime := time.Now()
+		data, err := t.recvData(binary, escapeCodes, timeout)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := file.Write(data); err != nil {
+			return nil, err
+		}
+		length := int64(len(data))
+		step += length
+		if progress != nil && !reflect.ValueOf(progress).IsNil() {
+			progress.onStep(step)
+		}
+		if err := t.sendInteger("SUCC", length); err != nil {
+			return nil, err
+		}
+		if _, err := hasher.Write(data); err != nil {
+			return nil, err
+		}
+		chunkTime := time.Now().Sub(beginTime)
+		if chunkTime > t.maxChunkTime {
+			t.maxChunkTime = chunkTime
+		}
+	}
+	return hasher.Sum(nil), nil
+}
+
 func (t *TrzszTransfer) recvFileMD5(digest []byte, progress ProgressCallback) error {
 	expectDigest, err := t.recvBinary("MD5", false, nil)
 	if err != nil {
@@ -829,40 +871,17 @@ func (t *TrzszTransfer) recvFiles(path string, progress ProgressCallback) ([]str
 
 		defer file.Close()
 
-		fileSize, err := t.recvFileSize(progress)
+		size, err := t.recvFileSize(progress)
 		if err != nil {
 			return nil, err
 		}
 
-		step := int64(0)
-		hasher := md5.New()
-		for step < fileSize {
-			beginTime := time.Now()
-			data, err := t.recvData(binary, escapeCodes, timeout)
-			if err != nil {
-				return nil, err
-			}
-			if _, err := file.Write(data); err != nil {
-				return nil, err
-			}
-			size := int64(len(data))
-			step += size
-			if progress != nil && !reflect.ValueOf(progress).IsNil() {
-				progress.onStep(step)
-			}
-			if err := t.sendInteger("SUCC", size); err != nil {
-				return nil, err
-			}
-			if _, err := hasher.Write(data); err != nil {
-				return nil, err
-			}
-			chunkTime := time.Now().Sub(beginTime)
-			if chunkTime > t.maxChunkTime {
-				t.maxChunkTime = chunkTime
-			}
+		digest, err := t.recvFileData(file, size, binary, escapeCodes, timeout, progress)
+		if err != nil {
+			return nil, err
 		}
 
-		if err := t.recvFileMD5(hasher.Sum(nil), progress); err != nil {
+		if err := t.recvFileMD5(digest, progress); err != nil {
 			return nil, err
 		}
 	}

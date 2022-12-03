@@ -213,7 +213,7 @@ func chooseUploadPaths(directory bool) ([]string, error) {
 	if directory {
 		options = append(options, zenity.Directory())
 	}
-	files, err := zenity.SelectFileMutiple(options...)
+	files, err := zenity.SelectFileMultiple(options...)
 	if err != nil {
 		return nil, err
 	}

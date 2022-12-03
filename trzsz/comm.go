@@ -85,7 +85,7 @@ type Args struct {
 	Escape    bool       `arg:"-e" help:"escape all known control characters"`
 	Directory bool       `arg:"-d" help:"transfer directories and files"`
 	Bufsize   BufferSize `arg:"-B" placeholder:"N" default:"10M" help:"max buffer chunk size (1K<=N<=1G). (default: 10M)"`
-	Timeout   int        `arg:"-t" placeholder:"N" default:"10" help:"timeout ( N seconds ) for each buffer chunk.\nN <= 0 means never timeout. (default: 10)"`
+	Timeout   int        `arg:"-t" placeholder:"N" default:"20" help:"timeout ( N seconds ) for each buffer chunk.\nN <= 0 means never timeout. (default: 20)"`
 }
 
 var sizeRegexp = regexp.MustCompile("(?i)^(\\d+)(b|k|m|g|kb|mb|gb)?$")
