@@ -26,13 +26,13 @@ endif
 all: ${BIN_DIR}/${TRZ} ${BIN_DIR}/${TSZ} ${BIN_DIR}/${TRZSZ}
 
 ${BIN_DIR}/${TRZ}: $(wildcard ./cmd/trz/*.go ./trzsz/*.go)
-	go build -o ${BIN_DIR} ./cmd/trz
+	go build -o ${BIN_DIR}/ ./cmd/trz
 
 ${BIN_DIR}/${TSZ}: $(wildcard ./cmd/tsz/*.go ./trzsz/*.go)
-	go build -o ${BIN_DIR} ./cmd/tsz
+	go build -o ${BIN_DIR}/ ./cmd/tsz
 
 ${BIN_DIR}/${TRZSZ}: $(wildcard ./cmd/trzsz/*.go ./trzsz/*.go)
-	go build -o ${BIN_DIR} ./cmd/trzsz
+	go build -o ${BIN_DIR}/ ./cmd/trzsz
 
 clean:
 	-rm -f ${BIN_DIR}/${TRZ} ${BIN_DIR}/${TSZ} ${BIN_DIR}/${TRZSZ}
