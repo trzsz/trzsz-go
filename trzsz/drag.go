@@ -62,13 +62,26 @@ func detectFilePath(path string, dragFiles *[]string, hasDir *bool) bool {
 
 func detectDragFilesOnLinux(buf []byte) ([]string, bool, bool) {
 	length := len(buf)
-	if length < 5 || buf[0] != '\'' || buf[1] != '/' || buf[length-1] != ' ' || buf[length-2] != '\'' {
+	if length > 5 && buf[0] == '\x1b' {
+		buf = bytes.ReplaceAll(buf, []byte("\x1b[200~"), []byte(""))
+		buf = bytes.ReplaceAll(buf, []byte("\x1b[201~"), []byte(""))
+		length = len(buf)
+		if length == 0 {
+			return nil, false, true
+		}
+	}
+	if length < 3 || !(buf[0] == '\'' && buf[1] == '/' || buf[0] == '/') || buf[length-1] != ' ' {
 		return nil, false, false
 	}
 	hasDir := false
 	var dragFiles []string
-	paths := strings.Split(string(buf[1:length-2]), "' '")
-	for _, path := range paths {
+	var i int
+	var path string
+	for idx := 0; idx < length; idx += i {
+		path, i = nextLinuxPath(buf[idx:])
+		if path == "" {
+			return nil, false, false
+		}
 		if !detectFilePath(path, &dragFiles, &hasDir) {
 			return nil, false, false
 		}
@@ -76,9 +89,34 @@ func detectDragFilesOnLinux(buf []byte) ([]string, bool, bool) {
 	return dragFiles, hasDir, false
 }
 
+func nextLinuxPath(buf []byte) (string, int) {
+	length := len(buf)
+	if length < 3 {
+		return "", 0
+	}
+	if buf[0] == '\'' && buf[1] == '/' {
+		idx := bytes.IndexByte(buf[1:], '\'')
+		if idx < 0 {
+			return "", 0
+		}
+		idx++
+		if idx+1 >= length || buf[idx+1] != ' ' {
+			return "", 0
+		}
+		return string(buf[1:idx]), idx + 2
+	} else if buf[0] == '/' {
+		idx := bytes.IndexByte(buf, ' ')
+		if idx < 0 {
+			return "", 0
+		}
+		return string(buf[:idx]), idx + 1
+	}
+	return "", 0
+}
+
 func detectDragFilesOnMacOS(buf []byte) ([]string, bool, bool) {
 	length := len(buf)
-	if length > 5 {
+	if length > 5 && buf[0] == '\x1b' {
 		buf = bytes.ReplaceAll(buf, []byte("\x1b[200~"), []byte(""))
 		buf = bytes.ReplaceAll(buf, []byte("\x1b[201~"), []byte(""))
 		length = len(buf)
