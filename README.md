@@ -1,6 +1,13 @@
 # trzsz-go
 [trzsz](https://github.com/trzsz/trzsz) ( trz / tsz ) is a simple file transfer tools, similar to lrzsz ( rz / sz ), and compatible with tmux.
 
+[![MIT License](https://img.shields.io/badge/license-MIT-green.svg?style=flat)](https://choosealicense.com/licenses/mit/)
+[![GitHub Release](https://img.shields.io/github/v/release/trzsz/trzsz-go)](https://github.com/trzsz/trzsz-go/releases)
+
+***Please check [https://github.com/trzsz/trzsz](https://github.com/trzsz/trzsz) for more information of `trzsz`.***
+
+`trzsz-go` is the `go` version of `trzsz`, supports native terminals that support a local shell.
+
 
 ## Installation
 
@@ -97,7 +104,7 @@ trzsz --dragfile ssh x.x.x.x
 
 Similar to lrzsz ( rz / sz ), command `trz` to upload files, command `tsz /path/to/file` to download files.
 
-For more information, see the website of trzsz: [https://trzsz.github.io](https://trzsz.github.io/).
+For more information, check the website of trzsz: [https://trzsz.github.io](https://trzsz.github.io/).
 
 
 ## Suggestion
