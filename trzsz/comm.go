@@ -383,7 +383,7 @@ func wrapStdinInput(transfer *TrzszTransfer) {
 		n, err := os.Stdin.Read(buffer)
 		if err == io.EOF {
 			transfer.stopTransferringFiles()
-		} else {
+		} else if n > 0 {
 			buf := buffer[0:n]
 			transfer.addReceivedData(buf)
 			buffer = make([]byte, bufSize)
