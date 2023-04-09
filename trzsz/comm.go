@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2022 Lonny Wong
+Copyright (c) 2023 Lonny Wong
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -125,8 +124,8 @@ func (b *BufferSize) UnmarshalText(buf []byte) error {
 }
 
 func encodeBytes(buf []byte) string {
-	var b bytes.Buffer
-	z := zlib.NewWriter(&b)
+	b := bytes.NewBuffer(make([]byte, 0, len(buf)+0x10))
+	z := zlib.NewWriter(b)
 	z.Write([]byte(buf))
 	z.Close()
 	return base64.StdEncoding.EncodeToString(b.Bytes())
@@ -146,7 +145,11 @@ func decodeString(str string) ([]byte, error) {
 		return nil, err
 	}
 	defer z.Close()
-	return ioutil.ReadAll(z)
+	buf := bytes.NewBuffer(make([]byte, 0, len(b)<<2))
+	if _, err := io.Copy(buf, z); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 type TrzszError struct {
@@ -381,12 +384,13 @@ func wrapStdinInput(transfer *TrzszTransfer) {
 	buffer := make([]byte, bufSize)
 	for {
 		n, err := os.Stdin.Read(buffer)
-		if err == io.EOF {
-			transfer.stopTransferringFiles()
-		} else if n > 0 {
+		if n > 0 {
 			buf := buffer[0:n]
 			transfer.addReceivedData(buf)
 			buffer = make([]byte, bufSize)
+		}
+		if err == io.EOF {
+			transfer.stopTransferringFiles()
 		}
 	}
 }

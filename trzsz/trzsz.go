@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2022 Lonny Wong
+Copyright (c) 2023 Lonny Wong
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -453,44 +453,46 @@ func writeTraceLog(buf []byte, output bool) []byte {
 	return buf
 }
 
+func sendInput(pty *TrzszPty, buf []byte) {
+	if gTrzszArgs.TraceLog {
+		buf = writeTraceLog(buf, false)
+	}
+	if transfer := (*TrzszTransfer)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&gTransfer)))); transfer != nil {
+		if buf[0] == '\x03' { // `ctrl + c` to stop transferring files
+			transfer.stopTransferringFiles()
+		}
+		return
+	}
+	if gTrzszArgs.DragFile {
+		dragFiles, hasDir, ignore := detectDragFiles(buf)
+		if dragFiles != nil {
+			if addDragFiles(dragFiles, hasDir) {
+				go uploadDragFiles(pty)
+			}
+			return
+		}
+		if !ignore {
+			resetDragFiles()
+		}
+	}
+	pty.Stdin.Write(buf)
+
+}
+
 func wrapInput(pty *TrzszPty) {
 	buffer := make([]byte, 10240)
 	for {
 		n, err := os.Stdin.Read(buffer)
-		if err == io.EOF {
-			if IsWindows() { // ctrl + z
-				n = 1
-				err = nil
-				buffer[0] = 0x1A
-			} else {
-				pty.Stdin.Close()
-				break
-			}
+		if n > 0 {
+			sendInput(pty, buffer[0:n])
 		}
-		if err == nil && n > 0 {
-			buf := buffer[0:n]
-			if gTrzszArgs.TraceLog {
-				buf = writeTraceLog(buf, false)
-			}
-			if transfer := (*TrzszTransfer)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&gTransfer)))); transfer != nil {
-				if buf[0] == '\x03' { // `ctrl + c` to stop transferring files
-					transfer.stopTransferringFiles()
-				}
+		if err == io.EOF {
+			if IsWindows() {
+				sendInput(pty, []byte{0x1A}) // ctrl + z
 				continue
 			}
-			if gTrzszArgs.DragFile {
-				dragFiles, hasDir, ignore := detectDragFiles(buf)
-				if dragFiles != nil {
-					if addDragFiles(dragFiles, hasDir) {
-						go uploadDragFiles(pty)
-					}
-					continue
-				}
-				if !ignore {
-					resetDragFiles()
-				}
-			}
-			pty.Stdin.Write(buf)
+			pty.Stdin.Close()
+			break
 		}
 	}
 }
@@ -500,10 +502,7 @@ func wrapOutput(pty *TrzszPty) {
 	buffer := make([]byte, bufSize)
 	for {
 		n, err := pty.Stdout.Read(buffer)
-		if err == io.EOF {
-			os.Stdout.Close()
-			break
-		} else if err == nil && n > 0 {
+		if n > 0 {
 			buf := buffer[0:n]
 			if gTrzszArgs.TraceLog {
 				buf = writeTraceLog(buf, true)
@@ -531,6 +530,10 @@ func wrapOutput(pty *TrzszPty) {
 				}
 			}
 			os.Stdout.Write(buf)
+		}
+		if err == io.EOF {
+			os.Stdout.Close()
+			break
 		}
 	}
 }
