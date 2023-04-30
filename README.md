@@ -166,4 +166,4 @@ DefaultDownloadPath = /Users/username/Downloads/
 
 ## Contact
 
-Feel free to email me <lonnywong@qq.com>.
+Feel free to email me <lonnywong@qq.com>. Welcome to join the QQ group: 318578930.

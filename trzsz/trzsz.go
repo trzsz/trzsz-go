@@ -223,23 +223,15 @@ func chooseUploadPaths(directory bool) ([]string, error) {
 	return files, nil
 }
 
-func newProgressBar(pty *TrzszPty, config map[string]interface{}) (*TextProgressBar, error) {
-	quiet := false
-	if v, ok := config["quiet"].(bool); ok {
-		quiet = v
-	}
-	if quiet {
+func newProgressBar(pty *TrzszPty, config *TransferConfig) (*TextProgressBar, error) {
+	if config.Quiet {
 		return nil, nil
 	}
 	columns, err := pty.GetColumns()
 	if err != nil {
 		return nil, err
 	}
-	tmuxPaneColumns := -1
-	if v, ok := config["tmux_pane_width"].(float64); ok {
-		tmuxPaneColumns = int(v)
-	}
-	return NewTextProgressBar(os.Stdout, columns, tmuxPaneColumns), nil
+	return NewTextProgressBar(os.Stdout, columns, config.TmuxPaneColumns), nil
 }
 
 func downloadFiles(pty *TrzszPty, transfer *TrzszTransfer, remoteIsWindows bool) error {
@@ -300,11 +292,7 @@ func uploadFiles(pty *TrzszPty, transfer *TrzszTransfer, directory, remoteIsWind
 		return err
 	}
 
-	overwrite := false
-	if v, ok := config["overwrite"].(bool); ok {
-		overwrite = v
-	}
-	if overwrite {
+	if config.Overwrite {
 		if err := checkDuplicateNames(files); err != nil {
 			return err
 		}
@@ -328,7 +316,7 @@ func uploadFiles(pty *TrzszPty, transfer *TrzszTransfer, directory, remoteIsWind
 }
 
 func handleTrzsz(pty *TrzszPty, mode byte, remoteIsWindows bool) {
-	transfer := NewTransfer(pty.Stdin, nil)
+	transfer := NewTransfer(pty.Stdin, nil, IsWindows() || remoteIsWindows)
 
 	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&gTransfer)), unsafe.Pointer(transfer))
 	defer func() {

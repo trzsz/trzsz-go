@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2022 Lonny Wong
+Copyright (c) 2023 Lonny Wong
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -141,7 +141,7 @@ func convertTimeToString(seconds float64) string {
 	return b.String()
 }
 
-const kSpeedArraySize = 10
+const kSpeedArraySize = 30
 
 type TextProgressBar struct {
 	writer          *os.File
@@ -176,7 +176,7 @@ func (p *TextProgressBar) setTerminalColumns(columns int) {
 	p.columns = columns
 	// resizing tmux panes is not supported
 	if p.tmuxPaneColumns > 0 {
-		p.tmuxPaneColumns = -1
+		p.tmuxPaneColumns = 0
 	}
 }
 
@@ -193,6 +193,7 @@ func (p *TextProgressBar) onName(name string) {
 	p.stepArray[0] = 0
 	p.speedCnt = 1
 	p.speedIdx = 1
+	p.fileStep = 0
 }
 
 func (p *TextProgressBar) onSize(size int64) {
@@ -200,6 +201,9 @@ func (p *TextProgressBar) onSize(size int64) {
 }
 
 func (p *TextProgressBar) onStep(step int64) {
+	if step <= p.fileStep {
+		return
+	}
 	p.fileStep = step
 	p.showProgress()
 }
@@ -217,7 +221,7 @@ func (p *TextProgressBar) onDone() {
 
 func (p *TextProgressBar) showProgress() {
 	now := time.Now()
-	if p.lastUpdateTime != nil && now.Sub(*p.lastUpdateTime) < 500*time.Millisecond {
+	if p.lastUpdateTime != nil && now.Sub(*p.lastUpdateTime) < 200*time.Millisecond {
 		return
 	}
 	p.lastUpdateTime = &now

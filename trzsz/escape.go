@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2022 Lonny Wong
+Copyright (c) 2023 Lonny Wong
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@ package trzsz
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -33,6 +34,8 @@ import (
 )
 
 type unicode string
+
+type EscapeArray [][]byte
 
 func (s unicode) MarshalJSON() ([]byte, error) {
 	b := new(bytes.Buffer)
@@ -60,6 +63,10 @@ func getEscapeChars(escapeAll bool) [][]unicode {
 		}
 	}
 	return escapeChars
+}
+
+func isEscapeByte(b byte) bool {
+	return b == '\xee'
 }
 
 func escapeCharsToCodes(escapeChars []interface{}) ([][]byte, error) {
@@ -101,6 +108,16 @@ func escapeCharsToCodes(escapeChars []interface{}) ([][]byte, error) {
 		escapeCodes[i][2] = cc[1]
 	}
 	return escapeCodes, nil
+}
+
+func (c *EscapeArray) UnmarshalJSON(data []byte) error {
+	var codes []interface{}
+	if err := json.Unmarshal(data, &codes); err != nil {
+		return err
+	}
+	var err error
+	*c, err = escapeCharsToCodes(codes)
+	return err
 }
 
 func escapeData(data []byte, escapeCodes [][]byte) []byte {

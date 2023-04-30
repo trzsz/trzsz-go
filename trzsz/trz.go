@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2022 Lonny Wong
+Copyright (c) 2023 Lonny Wong
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -55,35 +55,23 @@ func recvFiles(transfer *TrzszTransfer, args *TrzArgs, tmuxMode TmuxMode, tmuxPa
 		return err
 	}
 
-	confirm := false
-	if v, ok := action["confirm"].(bool); ok {
-		confirm = v
-	}
-	if !confirm {
+	if !action.Confirm {
 		transfer.serverExit("Cancelled")
 		return nil
 	}
 
 	// check if the client doesn't support binary mode
-	binary := true
-	if v, ok := action["binary"].(bool); ok {
-		binary = v
-	}
-	if args.Binary && !binary {
+	if args.Binary && !action.SupportBinary {
 		args.Binary = false
 	}
 
 	// check if the client doesn't support transfer directory
-	supportDir := false
-	if v, ok := action["support_dir"].(bool); ok {
-		supportDir = v
-	}
-	if args.Directory && !supportDir {
+	if args.Directory && !action.SupportDirectory {
 		return newTrzszError("The client doesn't support transfer directory")
 	}
 
 	escapeChars := getEscapeChars(args.Escape)
-	if err := transfer.sendConfig(&args.Args, escapeChars, tmuxMode, tmuxPaneWidth); err != nil {
+	if err := transfer.sendConfig(&args.Args, action, escapeChars, tmuxMode, tmuxPaneWidth); err != nil {
 		return err
 	}
 
@@ -164,7 +152,7 @@ func TrzMain() int {
 	}
 	defer func() { _ = term.Restore(int(os.Stdin.Fd()), state) }()
 
-	transfer := NewTransfer(realStdout, state)
+	transfer := NewTransfer(realStdout, state, false)
 	defer func() {
 		if err := recover(); err != nil {
 			transfer.serverError(NewTrzszError(fmt.Sprintf("%v", err), "panic", true))
