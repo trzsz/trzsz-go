@@ -23,9 +23,9 @@ sudo apt install trzsz
 ```
 sudo apt install curl gpg
 curl -s 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x7074ce75da7cc691c1ae1a7c7e51d1ad956055ca' \
-	| gpg --dearmor -o /usr/share/keyrings/trzsz.gpg
+    | gpg --dearmor -o /usr/share/keyrings/trzsz.gpg
 echo 'deb [signed-by=/usr/share/keyrings/trzsz.gpg] https://ppa.launchpadcontent.net/trzsz/ppa/ubuntu jammy main' \
-	| sudo tee /etc/apt/sources.list.d/trzsz.list
+    | sudo tee /etc/apt/sources.list.d/trzsz.list
 sudo apt update
 sudo apt install trzsz
 ```
@@ -82,7 +82,7 @@ sudo make install
 
 ## Usage
 
-### on Local
+### on the local computer
 
 Add `trzsz` before the shell to support trzsz ( trz / tsz ), e.g.:
 
@@ -100,7 +100,18 @@ trzsz --dragfile ssh x.x.x.x
 ```
 
 
-### on Server
+### on the jump server
+
+If using `tmux` on the jump server, use `trzsz --relay ssh` to login to the remote server, e.g.:
+
+```sh
+tmux
+trzsz -r ssh x.x.x.x
+trzsz --relay ssh x.x.x.x
+```
+
+
+### on the remote server
 
 Similar to lrzsz ( rz / sz ), command `trz` to upload files, command `tsz /path/to/file` to download files.
 
