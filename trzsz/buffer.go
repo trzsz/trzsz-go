@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2022 Lonny Wong
+Copyright (c) 2023 Lonny Wong
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -34,11 +34,11 @@ type TrzszBuffer struct {
 	stopCh  chan bool
 	nextBuf []byte
 	nextIdx int
-	readBuf *bytes.Buffer
+	readBuf bytes.Buffer
 }
 
 func NewTrzszBuffer() *TrzszBuffer {
-	return &TrzszBuffer{make(chan []byte, 10), make(chan bool, 1), nil, 0, new(bytes.Buffer)}
+	return &TrzszBuffer{bufCh: make(chan []byte, 100), stopCh: make(chan bool, 1)}
 }
 
 func (b *TrzszBuffer) addBuffer(buf []byte) {
@@ -62,6 +62,23 @@ func (b *TrzszBuffer) drainBuffer() {
 	}
 }
 
+func (b *TrzszBuffer) popBuffer() []byte {
+	if b.nextBuf != nil && b.nextIdx < len(b.nextBuf) {
+		buf := b.nextBuf[b.nextIdx:]
+		b.nextBuf = nil
+		b.nextIdx = 0
+		return buf
+	}
+	select {
+	case buf := <-b.bufCh:
+		return buf
+	default:
+		b.nextBuf = nil
+		b.nextIdx = 0
+		return nil
+	}
+}
+
 func (b *TrzszBuffer) nextBuffer(timeout <-chan time.Time) ([]byte, error) {
 	if b.nextBuf != nil && b.nextIdx < len(b.nextBuf) {
 		return b.nextBuf[b.nextIdx:], nil
@@ -77,7 +94,7 @@ func (b *TrzszBuffer) nextBuffer(timeout <-chan time.Time) ([]byte, error) {
 	}
 }
 
-func (b *TrzszBuffer) readLine(timeout <-chan time.Time) ([]byte, error) {
+func (b *TrzszBuffer) readLine(mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
 	b.readBuf.Reset()
 	for {
 		buf, err := b.nextBuffer(timeout)
@@ -96,6 +113,10 @@ func (b *TrzszBuffer) readLine(timeout <-chan time.Time) ([]byte, error) {
 		}
 		b.readBuf.Write(buf)
 		if newLineIdx >= 0 {
+			if mayHasJunk && b.readBuf.Len() > 0 && b.readBuf.Bytes()[b.readBuf.Len()-1] == '\r' {
+				b.readBuf.Truncate(b.readBuf.Len() - 1)
+				continue
+			}
 			return b.readBuf.Bytes(), nil
 		}
 	}
@@ -155,6 +176,9 @@ func (b *TrzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error
 		newLineIdx := bytes.IndexByte(buf, '!')
 		if newLineIdx >= 0 {
 			b.nextIdx += newLineIdx + 1 // +1 to ignroe the newline
+			if b.nextIdx < len(buf) && buf[b.nextIdx] == '\n' {
+				b.nextIdx++
+			}
 			buf = buf[0:newLineIdx]
 		} else {
 			b.nextIdx += len(buf)

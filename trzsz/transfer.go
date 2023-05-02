@@ -71,15 +71,15 @@ type TrzszTransfer struct {
 	buffer          *TrzszBuffer
 	writer          PtyIO
 	stopped         bool
-	lastInputTime   int64
+	lastInputTime   atomic.Int64
 	cleanTimeout    time.Duration
 	maxChunkTime    time.Duration
 	stdinState      *term.State
 	fileNameMap     map[int]string
 	remoteIsWindows bool
 	flushInTime     bool
-	bufferSize      int64
-	savedSteps      int64
+	bufferSize      atomic.Int64
+	savedSteps      atomic.Int64
 	transferConfig  TransferConfig
 }
 
@@ -98,27 +98,28 @@ func minInt64(a, b int64) int64 {
 }
 
 func NewTransfer(writer PtyIO, stdinState *term.State, flushInTime bool) *TrzszTransfer {
-	return &TrzszTransfer{
+	t := &TrzszTransfer{
 		buffer:       NewTrzszBuffer(),
 		writer:       writer,
 		cleanTimeout: 100 * time.Millisecond,
 		stdinState:   stdinState,
 		fileNameMap:  make(map[int]string),
 		flushInTime:  flushInTime,
-		bufferSize:   1024,
 		transferConfig: TransferConfig{
 			Timeout:    20,
 			Newline:    "\n",
 			MaxBufSize: 10 * 1024 * 1024,
 		},
 	}
+	t.bufferSize.Store(1024)
+	return t
 }
 
 func (t *TrzszTransfer) addReceivedData(buf []byte) {
 	if !t.stopped {
 		t.buffer.addBuffer(buf)
 	}
-	atomic.StoreInt64(&t.lastInputTime, time.Now().UnixMilli())
+	t.lastInputTime.Store(time.Now().UnixMilli())
 }
 
 func (t *TrzszTransfer) stopTransferringFiles() {
@@ -130,9 +131,9 @@ func (t *TrzszTransfer) stopTransferringFiles() {
 func (t *TrzszTransfer) cleanInput(timeoutDuration time.Duration) {
 	t.stopped = true
 	t.buffer.drainBuffer()
-	atomic.StoreInt64(&t.lastInputTime, time.Now().UnixMilli())
+	t.lastInputTime.Store(time.Now().UnixMilli())
 	for {
-		sleepDuration := timeoutDuration - time.Now().Sub(time.UnixMilli(atomic.LoadInt64(&t.lastInputTime)))
+		sleepDuration := timeoutDuration - time.Now().Sub(time.UnixMilli(t.lastInputTime.Load()))
 		if sleepDuration <= 0 {
 			return
 		}
@@ -141,19 +142,10 @@ func (t *TrzszTransfer) cleanInput(timeoutDuration time.Duration) {
 }
 
 func (t *TrzszTransfer) writeAll(buf []byte) error {
-	if gTrzszArgs != nil && gTrzszArgs.TraceLog {
-		writeTraceLog(buf, false)
+	if gTrzszArgs.TraceLog {
+		writeTraceLog(buf, "tosvr")
 	}
-	written := 0
-	length := len(buf)
-	for written < length {
-		n, err := t.writer.Write(buf[written:])
-		if err != nil {
-			return newTrzszError(fmt.Sprintf("Write to io error: %v", err))
-		}
-		written += n
-	}
-	return nil
+	return writeAll(t.writer, buf)
 }
 
 func (t *TrzszTransfer) sendLine(typ string, buf string) error {
@@ -177,25 +169,12 @@ func (t *TrzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 		return line, nil
 	}
 
-	line, err := t.buffer.readLine(timeout)
+	line, err := t.buffer.readLine(t.transferConfig.TmuxOutputJunk || mayHasJunk, timeout)
 	if err != nil {
 		return nil, err
 	}
 
 	if t.transferConfig.TmuxOutputJunk || mayHasJunk {
-		if len(line) > 0 && line[len(line)-1] == '\r' {
-			buf := bytes.NewBuffer(make([]byte, 0, len(line)<<2))
-			buf.Write(line)
-			for buf.Bytes()[buf.Len()-1] == '\r' {
-				line, err := t.buffer.readLine(timeout)
-				if err != nil {
-					return nil, err
-				}
-				buf.Truncate(buf.Len() - 1)
-				buf.Write(line)
-			}
-			line = buf.Bytes()
-		}
 		idx := bytes.LastIndex(line, []byte("#"+expectType+":"))
 		if idx >= 0 {
 			line = line[idx:]

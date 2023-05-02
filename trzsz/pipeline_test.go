@@ -132,6 +132,7 @@ func TestBase64Reader(t *testing.T) {
 	// read multiple times from one data
 	dataChan <- []byte{1, 2, 3, 4, 5, 6}
 	assertReadSucc := func(data []byte) {
+		t.Helper()
 		buf := make([]byte, len(data))
 		n, err := base64Reader.Read(buf)
 		assert.Nil(err)
@@ -172,10 +173,11 @@ func TestBase64Reader(t *testing.T) {
 func TestBase64Writer(t *testing.T) {
 	assert := assert.New(t)
 	transfer := NewTransfer(nil, nil, false)
-	transfer.bufferSize = 4
+	transfer.bufferSize.Store(4)
 	dataChan := make(chan TrzszData, 3)
 	base64Writer := NewBase64Writer(transfer, NewPipelineContext(), dataChan)
 	assertWriteSucc := func(data []byte) {
+		t.Helper()
 		n, err := base64Writer.Write(data)
 		assert.Equal(len(data), n)
 		assert.Nil(err)
@@ -198,15 +200,15 @@ func TestBase64Writer(t *testing.T) {
 	n, err := base64Writer.Write([]byte("ZZ"))
 	assert.Equal(0, n)
 	assert.ErrorIs(err, context.Canceled)
-	base64Writer.ctx = NewPipelineContext()                                     // reset context
-	base64Writer.buffer = bytes.NewBuffer(make([]byte, 0, transfer.bufferSize)) // reset buffer
+	base64Writer.ctx = NewPipelineContext()                                            // reset context
+	base64Writer.buffer = bytes.NewBuffer(make([]byte, 0, transfer.bufferSize.Load())) // reset buffer
 	assertChannel(t, TrzszData{4, []byte("#DATA:ABCD\n")}, dataChan)
 	assertChannel(t, TrzszData{4, []byte("#DATA:1234\n")}, dataChan)
 	assertChannel(t, TrzszData{4, []byte("#DATA:abcd\n")}, dataChan)
 	assert.Empty(dataChan)
 
 	// change buffer size
-	transfer.bufferSize = 5
+	transfer.bufferSize.Store(5)
 	assertWriteSucc([]byte("XY"))
 	assert.Empty(dataChan)
 	assertWriteSucc([]byte("MN"))
@@ -278,7 +280,7 @@ func TestPipelineReadData(t *testing.T) {
 	select {
 	case <-ctx.Done():
 		assert.ErrorIs(ctx.Err(), context.Canceled)
-		assert.Equal("File size 8492 but read 8292", context.Cause(ctx).Error())
+		assert.EqualError(context.Cause(ctx), "File size 8492 but read 8292")
 	case <-time.After(time.Second):
 		assert.Fail("Context timeout")
 	}
@@ -296,7 +298,7 @@ func TestPipelineEncodeAndDecode(t *testing.T) {
 	assert := assert.New(t)
 
 	transfer := NewTransfer(nil, nil, false)
-	transfer.bufferSize = 4
+	transfer.bufferSize.Store(4)
 	ctx := NewPipelineContext()
 	srcDataChan := make(chan []byte, 100)
 	sendDataChan := transfer.pipelineEncodeData(ctx, srcDataChan)
@@ -327,7 +329,7 @@ func TestPipelineEscapeData(t *testing.T) {
 
 	fileDataChan := make(chan []byte, 100)
 	transfer := NewTransfer(nil, nil, false)
-	transfer.bufferSize = 4
+	transfer.bufferSize.Store(4)
 	sendDataChan := transfer.pipelineEscapeData(NewPipelineContext(), fileDataChan)
 
 	// buffering
@@ -349,7 +351,7 @@ func TestPipelineEscapeData(t *testing.T) {
 
 	// change buffer size
 	time.Sleep(100 * time.Millisecond)
-	transfer.bufferSize = 5
+	transfer.bufferSize.Store(5)
 	fileDataChan <- []byte("ABCDEFGHI")
 	assertChannel(t, TrzszData{4, []byte("#DATA:4\nZZAB")}, sendDataChan)
 	assertChannel(t, TrzszData{5, []byte("#DATA:5\nCDEFG")}, sendDataChan)

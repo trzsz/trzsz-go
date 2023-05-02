@@ -39,7 +39,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/ncruces/zenity"
 	"golang.org/x/term"
@@ -48,22 +47,23 @@ import (
 type TrzszArgs struct {
 	Help     bool
 	Version  bool
+	Relay    bool
 	TraceLog bool
 	DragFile bool
 	Name     string
 	Args     []string
 }
 
-var gTrzszArgs *TrzszArgs
-var gTraceLog *os.File = nil
-var gTraceBuf *bytes.Buffer = nil
-var gDragging int32 = 0
-var gDragHasDir int32 = 0
+var gTrzszArgs TrzszArgs
+var gTraceLogFile atomic.Pointer[os.File]
+var gTraceLogChan atomic.Pointer[chan []byte]
+var gDragging atomic.Bool
+var gDragHasDir atomic.Bool
 var gDragMutex sync.Mutex
-var gDragFiles []string = nil
-var gInterrupting int32 = 0
-var gSkipTrzCommand int32 = 0
-var gTransfer *TrzszTransfer = nil
+var gDragFiles []string
+var gInterrupting atomic.Bool
+var gSkipTrzCommand atomic.Bool
+var gTransfer atomic.Pointer[TrzszTransfer]
 var gUniqueIDMap = make(map[string]int)
 var parentWindowID = getParentWindowID()
 var trzszRegexp = regexp.MustCompile("::TRZSZ:TRANSFER:([SRD]):(\\d+\\.\\d+\\.\\d+)(:\\d+)?")
@@ -73,19 +73,19 @@ func printVersion() {
 }
 
 func printHelp() {
-	fmt.Print("usage: trzsz [-h] [-v] [-t] [-d] command line\n\n" +
+	fmt.Print("usage: trzsz [-h] [-v] [-r] [-t] [-d] command line\n\n" +
 		"Wrapping command line to support trzsz ( trz / tsz ).\n\n" +
 		"positional arguments:\n" +
 		"  command line       the original command line\n\n" +
 		"optional arguments:\n" +
 		"  -h, --help         show this help message and exit\n" +
 		"  -v, --version      show version number and exit\n" +
+		"  -r, --relay        run as a trzsz relay server\n" +
 		"  -t, --tracelog     eanble trace log for debugging\n" +
 		"  -d, --dragfile     enable drag file(s) to upload\n")
 }
 
 func parseTrzszArgs() {
-	gTrzszArgs = &TrzszArgs{false, false, false, false, "", nil}
 	var i int
 	for i = 1; i < len(os.Args); i++ {
 		if os.Args[i] == "-h" || os.Args[i] == "--help" {
@@ -94,6 +94,8 @@ func parseTrzszArgs() {
 		} else if os.Args[i] == "-v" || os.Args[i] == "--version" {
 			gTrzszArgs.Version = true
 			return
+		} else if os.Args[i] == "-r" || os.Args[i] == "--relay" {
+			gTrzszArgs.Relay = true
 		} else if os.Args[i] == "-t" || os.Args[i] == "--tracelog" {
 			gTrzszArgs.TraceLog = true
 		} else if os.Args[i] == "-d" || os.Args[i] == "--dragfile" {
@@ -197,7 +199,7 @@ func chooseDownloadPath() (string, error) {
 }
 
 func chooseUploadPaths(directory bool) ([]string, error) {
-	if atomic.LoadInt32(&gDragging) != 0 {
+	if gDragging.Load() == true {
 		files := resetDragFiles()
 		return files, nil
 	}
@@ -318,9 +320,9 @@ func uploadFiles(pty *TrzszPty, transfer *TrzszTransfer, directory, remoteIsWind
 func handleTrzsz(pty *TrzszPty, mode byte, remoteIsWindows bool) {
 	transfer := NewTransfer(pty.Stdin, nil, IsWindows() || remoteIsWindows)
 
-	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&gTransfer)), unsafe.Pointer(transfer))
+	gTransfer.Store(transfer)
 	defer func() {
-		atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&gTransfer)), unsafe.Pointer(nil))
+		gTransfer.Store(nil)
 	}()
 
 	defer func() {
@@ -344,13 +346,13 @@ func handleTrzsz(pty *TrzszPty, mode byte, remoteIsWindows bool) {
 }
 
 func resetDragFiles() []string {
-	if atomic.LoadInt32(&gDragging) == 0 {
+	if gDragging.Load() == false {
 		return nil
 	}
 	gDragMutex.Lock()
 	defer gDragMutex.Unlock()
-	atomic.StoreInt32(&gDragging, 0)
-	atomic.StoreInt32(&gDragHasDir, 0)
+	gDragging.Store(false)
+	gDragHasDir.Store(false)
 	dragFiles := gDragFiles
 	gDragFiles = nil
 	return dragFiles
@@ -359,9 +361,9 @@ func resetDragFiles() []string {
 func addDragFiles(dragFiles []string, hasDir bool) bool {
 	gDragMutex.Lock()
 	defer gDragMutex.Unlock()
-	atomic.StoreInt32(&gDragging, 1)
+	gDragging.Store(true)
 	if hasDir {
-		atomic.StoreInt32(&gDragHasDir, 1)
+		gDragHasDir.Store(true)
 	}
 	if gDragFiles == nil {
 		gDragFiles = dragFiles
@@ -373,18 +375,18 @@ func addDragFiles(dragFiles []string, hasDir bool) bool {
 
 func uploadDragFiles(pty *TrzszPty) {
 	time.Sleep(300 * time.Millisecond)
-	if atomic.LoadInt32(&gDragging) == 0 {
+	if gDragging.Load() == false {
 		return
 	}
-	atomic.StoreInt32(&gInterrupting, 1)
-	pty.Stdin.Write([]byte{0x03})
+	gInterrupting.Store(true)
+	writeAll(pty.Stdin, []byte{0x03})
 	time.Sleep(200 * time.Millisecond)
-	atomic.StoreInt32(&gInterrupting, 0)
-	atomic.StoreInt32(&gSkipTrzCommand, 1)
-	if atomic.LoadInt32(&gDragHasDir) != 0 {
-		pty.Stdin.Write([]byte("trz -d\r"))
+	gInterrupting.Store(false)
+	gSkipTrzCommand.Store(true)
+	if gDragHasDir.Load() == true {
+		writeAll(pty.Stdin, []byte("trz -d\r"))
 	} else {
-		pty.Stdin.Write([]byte("trz\r"))
+		writeAll(pty.Stdin, []byte("trz\r"))
 	}
 	time.Sleep(time.Second)
 	resetDragFiles()
@@ -401,41 +403,43 @@ func uploadDragFiles(pty *TrzszPty) {
  * │ Linux and macOS    │ echo -e '<ENABLE_TRZSZ_TRACE_LOG\x3E'     │ echo -e '<DISABLE_TRZSZ_TRACE_LOG\x3E'     │
  * └────────────────────┴───────────────────────────────────────────┴────────────────────────────────────────────┘
  */
-func writeTraceLog(buf []byte, output bool) []byte {
-	if gTraceLog != nil {
-		if output && bytes.Contains(buf, []byte("<DISABLE_TRZSZ_TRACE_LOG>")) {
-			msg := fmt.Sprintf("Closed trace log at %s", gTraceLog.Name())
-			gTraceLog.Write(gTraceBuf.Bytes())
-			gTraceLog.Close()
-			gTraceLog = nil
-			gTraceBuf = nil
+func writeTraceLog(buf []byte, typ string) []byte {
+	if ch, file := gTraceLogChan.Load(), gTraceLogFile.Load(); ch != nil && file != nil {
+		if typ == "svrout" && bytes.Contains(buf, []byte("<DISABLE_TRZSZ_TRACE_LOG>")) {
+			msg := fmt.Sprintf("Closed trace log at %s", file.Name())
+			close(*ch)
+			gTraceLogChan.Store(nil)
+			gTraceLogFile.Store(nil)
 			return bytes.ReplaceAll(buf, []byte("<DISABLE_TRZSZ_TRACE_LOG>"), []byte(msg))
 		}
-		typ := "in"
-		if output {
-			typ = "out"
-		}
-		gTraceBuf.WriteString(fmt.Sprintf("[%s]%s\n", typ, encodeBytes(buf)))
-		if gTraceBuf.Len() >= 10*1024*1024 {
-			go func(bytes []byte) {
-				gTraceLog.Write(bytes)
-			}(gTraceBuf.Bytes())
-			gTraceBuf = new(bytes.Buffer)
-			gTraceBuf.Grow(20 * 1024 * 1024)
-		}
+		*ch <- []byte(fmt.Sprintf("[%s]%s\n", typ, encodeBytes(buf)))
 		return buf
 	}
-	if output && bytes.Contains(buf, []byte("<ENABLE_TRZSZ_TRACE_LOG>")) {
-		var err error
+	if typ == "svrout" && bytes.Contains(buf, []byte("<ENABLE_TRZSZ_TRACE_LOG>")) {
 		var msg string
-		gTraceLog, err = os.CreateTemp("", "trzsz_*.log")
+		file, err := os.CreateTemp("", "trzsz_*.log")
 		if err != nil {
 			msg = fmt.Sprintf("Create log file error: %v", err)
 		} else {
-			msg = fmt.Sprintf("Writing trace log to %s", gTraceLog.Name())
+			msg = fmt.Sprintf("Writing trace log to %s", file.Name())
 		}
-		gTraceBuf = new(bytes.Buffer)
-		gTraceBuf.Grow(20 * 1024 * 1024)
+		ch := make(chan []byte, 10000)
+		gTraceLogChan.Store(&ch)
+		gTraceLogFile.Store(file)
+		go func() {
+			for {
+				select {
+				case buf, ok := <-ch:
+					if !ok {
+						file.Close()
+						return
+					}
+					writeAll(file, buf)
+				case <-time.After(3 * time.Second):
+					file.Sync()
+				}
+			}
+		}()
 		return bytes.ReplaceAll(buf, []byte("<ENABLE_TRZSZ_TRACE_LOG>"), []byte(msg))
 	}
 	return buf
@@ -443,9 +447,9 @@ func writeTraceLog(buf []byte, output bool) []byte {
 
 func sendInput(pty *TrzszPty, buf []byte) {
 	if gTrzszArgs.TraceLog {
-		buf = writeTraceLog(buf, false)
+		writeTraceLog(buf, "stdin")
 	}
-	if transfer := (*TrzszTransfer)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&gTransfer)))); transfer != nil {
+	if transfer := gTransfer.Load(); transfer != nil {
 		if buf[0] == '\x03' { // `ctrl + c` to stop transferring files
 			transfer.stopTransferringFiles()
 		}
@@ -463,12 +467,12 @@ func sendInput(pty *TrzszPty, buf []byte) {
 			resetDragFiles()
 		}
 	}
-	pty.Stdin.Write(buf)
+	writeAll(pty.Stdin, buf)
 
 }
 
 func wrapInput(pty *TrzszPty) {
-	buffer := make([]byte, 10240)
+	buffer := make([]byte, 32*1024)
 	for {
 		n, err := os.Stdin.Read(buffer)
 		if n > 0 {
@@ -486,38 +490,38 @@ func wrapInput(pty *TrzszPty) {
 }
 
 func wrapOutput(pty *TrzszPty) {
-	const bufSize = 10240
+	const bufSize = 32 * 1024
 	buffer := make([]byte, bufSize)
 	for {
 		n, err := pty.Stdout.Read(buffer)
 		if n > 0 {
 			buf := buffer[0:n]
 			if gTrzszArgs.TraceLog {
-				buf = writeTraceLog(buf, true)
+				buf = writeTraceLog(buf, "svrout")
 			}
-			if transfer := (*TrzszTransfer)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&gTransfer)))); transfer != nil {
+			if transfer := gTransfer.Load(); transfer != nil {
 				transfer.addReceivedData(buf)
 				buffer = make([]byte, bufSize)
 				continue
 			}
 			mode, remoteIsWindows := detectTrzsz(buf)
 			if mode != nil {
-				os.Stdout.Write(bytes.Replace(buf, []byte("TRZSZ"), []byte("TRZSZGO"), 1))
+				writeAll(os.Stdout, bytes.Replace(buf, []byte("TRZSZ"), []byte("TRZSZGO"), 1))
 				go handleTrzsz(pty, *mode, remoteIsWindows)
 				continue
 			}
-			if atomic.LoadInt32(&gInterrupting) != 0 {
+			if gInterrupting.Load() == true {
 				continue
 			}
-			if atomic.LoadInt32(&gSkipTrzCommand) != 0 {
-				atomic.StoreInt32(&gSkipTrzCommand, 0)
+			if gSkipTrzCommand.Load() == true {
+				gSkipTrzCommand.Store(false)
 				output := strings.TrimRight(string(trimVT100(buf)), "\r\n")
 				if output == "trz" || output == "trz -d" {
 					os.Stdout.WriteString("\r\n")
 					continue
 				}
 			}
-			os.Stdout.Write(buf)
+			writeAll(os.Stdout, buf)
 		}
 		if err == io.EOF {
 			os.Stdout.Close()
@@ -539,7 +543,7 @@ func handleSignal(pty *TrzszPty) {
 	go func() {
 		for {
 			<-sigint
-			if transfer := (*TrzszTransfer)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&gTransfer)))); transfer != nil {
+			if transfer := gTransfer.Load(); transfer != nil {
 				transfer.stopTransferringFiles()
 			}
 		}
@@ -572,12 +576,16 @@ func TrzszMain() int {
 		defer func() { _ = term.Restore(int(os.Stdin.Fd()), state) }()
 	}
 
-	// wrap input and output
-	go wrapInput(pty)
-	go wrapOutput(pty)
-
-	// handle signal
-	go handleSignal(pty)
+	if gTrzszArgs.Relay {
+		// run as relay
+		go runAsRelay(pty)
+	} else {
+		// wrap input and output
+		go wrapInput(pty)
+		go wrapOutput(pty)
+		// handle signal
+		go handleSignal(pty)
+	}
 
 	// wait for exit
 	pty.Wait()

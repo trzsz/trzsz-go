@@ -211,9 +211,9 @@ func (p *TextProgressBar) onStep(step int64) {
 func (p *TextProgressBar) onDone() {
 	if !p.firstWrite {
 		if p.tmuxPaneColumns > 0 {
-			p.writer.Write([]byte(fmt.Sprintf("\x1b[%dD", p.columns)))
+			writeAll(p.writer, []byte(fmt.Sprintf("\x1b[%dD", p.columns)))
 		} else {
-			p.writer.Write([]byte("\r"))
+			writeAll(p.writer, []byte("\r"))
 		}
 		p.firstWrite = true
 	}
@@ -238,14 +238,14 @@ func (p *TextProgressBar) showProgress() {
 
 	if p.firstWrite {
 		p.firstWrite = false
-		p.writer.Write([]byte(progressText))
+		writeAll(p.writer, []byte(progressText))
 		return
 	}
 
 	if p.tmuxPaneColumns > 0 {
-		p.writer.Write([]byte(fmt.Sprintf("\x1b[%dD%s", p.columns, progressText)))
+		writeAll(p.writer, []byte(fmt.Sprintf("\x1b[%dD%s", p.columns, progressText)))
 	} else {
-		p.writer.Write([]byte(fmt.Sprintf("\r%s", progressText)))
+		writeAll(p.writer, []byte(fmt.Sprintf("\r%s", progressText)))
 	}
 }
 

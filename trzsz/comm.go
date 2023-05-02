@@ -380,7 +380,7 @@ func getTerminalColumns() int {
 }
 
 func wrapStdinInput(transfer *TrzszTransfer) {
-	const bufSize = 10240
+	const bufSize = 32 * 1024
 	buffer := make([]byte, bufSize)
 	for {
 		n, err := os.Stdin.Read(buffer)
@@ -438,4 +438,17 @@ func containsString(elems []string, v string) bool {
 		}
 	}
 	return false
+}
+
+func writeAll(dst io.Writer, data []byte) error {
+	m := 0
+	l := len(data)
+	for m < l {
+		n, err := dst.Write(data[m:])
+		if err != nil {
+			return NewTrzszError(fmt.Sprintf("WriteAll error: %v", err), "", true)
+		}
+		m += n
+	}
+	return nil
 }

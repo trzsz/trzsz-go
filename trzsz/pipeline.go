@@ -36,7 +36,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
@@ -126,7 +125,7 @@ func (b *Base64Writer) Write(p []byte) (int, error) {
 			return 0, b.ctx.Err()
 		}
 
-		b.bufSize = atomic.LoadInt64(&b.transfer.bufferSize)
+		b.bufSize = b.transfer.bufferSize.Load()
 		b.buffer = bytes.NewBuffer(make([]byte, 0, b.bufSize))
 		p = p[n:]
 		m += n
@@ -144,7 +143,7 @@ func (b *Base64Writer) Close() error {
 }
 
 func NewBase64Writer(transfer *TrzszTransfer, ctx *PipelineContext, sendDataChan chan<- TrzszData) *Base64Writer {
-	bufSize := atomic.LoadInt64(&transfer.bufferSize)
+	bufSize := transfer.bufferSize.Load()
 	buffer := bytes.NewBuffer(make([]byte, 0, bufSize))
 	return &Base64Writer{transfer, ctx, sendDataChan, buffer, bufSize}
 }
@@ -256,19 +255,14 @@ func (t *TrzszTransfer) pipelineEncodeData(ctx *PipelineContext, fileDataChan <-
 		}()
 
 		for data := range fileDataChan {
-			written := 0
-			length := len(data)
-			for written < length {
-				n, err := z.Write(data[written:])
-				if err != nil {
-					ctx.cancel(newTrzszError(fmt.Sprintf("Write to zstd error: %v", err)))
-					return
-				}
-				written += n
+			if err := writeAll(z, data); err != nil {
+				ctx.cancel(newTrzszError(fmt.Sprintf("Write to zstd error: %v", err)))
+				return
 			}
 			if t.flushInTime {
 				if err := z.Flush(); err != nil {
 					ctx.cancel(newTrzszError(fmt.Sprintf("Flush to zstd error: %v", err)))
+					return
 				}
 			}
 			if ctx.Err() != nil {
@@ -294,7 +288,7 @@ func (t *TrzszTransfer) pipelineEscapeData(ctx *PipelineContext, fileDataChan <-
 	}
 	go func() {
 		defer close(sendDataChan)
-		bufSize := int(atomic.LoadInt64(&t.bufferSize))
+		bufSize := int(t.bufferSize.Load())
 		buffer := new(bytes.Buffer)
 		for data := range fileDataChan {
 			buf := escapeData(data, t.transferConfig.EscapeCodes)
@@ -310,7 +304,7 @@ func (t *TrzszTransfer) pipelineEscapeData(ctx *PipelineContext, fileDataChan <-
 					return
 				}
 				buffer = bytes.NewBuffer(b[bufSize:])
-				bufSize = int(atomic.LoadInt64(&t.bufferSize))
+				bufSize = int(t.bufferSize.Load())
 			}
 			if ctx.Err() != nil {
 				return
@@ -420,13 +414,11 @@ func (t *TrzszTransfer) pipelineSendData(ctx *PipelineContext, size int64, sendD
 			}
 
 			chunkTime := time.Now().Sub(beginTime)
-			bufSize := atomic.LoadInt64(&t.bufferSize)
+			bufSize := t.bufferSize.Load()
 			if length == bufSize && chunkTime < 500*time.Millisecond && bufSize < t.transferConfig.MaxBufSize {
-				bufSize = minInt64(bufSize*2, t.transferConfig.MaxBufSize)
-				atomic.StoreInt64(&t.bufferSize, bufSize)
+				t.bufferSize.Store(minInt64(bufSize*2, t.transferConfig.MaxBufSize))
 			} else if chunkTime >= 2*time.Second && bufSize > 1024 {
-				bufSize = 1024
-				atomic.StoreInt64(&t.bufferSize, bufSize)
+				t.bufferSize.Store(1024)
 			}
 			if chunkTime > t.maxChunkTime {
 				t.maxChunkTime = chunkTime
@@ -522,14 +514,14 @@ func (t *TrzszTransfer) pipelineRecvBinaryData() ([]byte, error) {
 }
 
 func (t *TrzszTransfer) pipelineSendCurrentAck(length int) error {
-	step := atomic.LoadInt64(&t.savedSteps)
+	step := t.savedSteps.Load()
 	return t.writeAll([]byte(fmt.Sprintf("#SUCC:%d/%d%s", length, step, t.transferConfig.Newline)))
 }
 
 func (t *TrzszTransfer) pipelineSendFinalAck(ctx *PipelineContext, size int64, ackStepChan <-chan struct{}) {
 	go func() {
 		for ctx.Err() == nil {
-			step := atomic.LoadInt64(&t.savedSteps)
+			step := t.savedSteps.Load()
 			if err := t.sendInteger("SUCC", step); err != nil {
 				ctx.cancel(err)
 				return
@@ -559,7 +551,7 @@ func (t *TrzszTransfer) pipelineRecvData(ctx *PipelineContext, size int64, ackSt
 	recvDataChan := make(chan []byte, 100)
 	go func() {
 		defer close(recvDataChan)
-		atomic.StoreInt64(&t.savedSteps, 0)
+		t.savedSteps.Store(0)
 		for ctx.Err() == nil {
 			beginTime := time.Now()
 			var err error
@@ -710,6 +702,7 @@ func (t *TrzszTransfer) pipelineSaveData(ctx *PipelineContext, file *os.File, si
 		progressChan = make(chan int64, 100)
 	}
 	go func() {
+		defer close(ackStepChan)
 		if showProgress {
 			defer close(progressChan)
 		}
@@ -720,7 +713,7 @@ func (t *TrzszTransfer) pipelineSaveData(ctx *PipelineContext, file *os.File, si
 				return
 			}
 			step += int64(len(data))
-			atomic.StoreInt64(&t.savedSteps, step)
+			t.savedSteps.Store(step)
 			if showProgress {
 				select {
 				case progressChan <- step:
@@ -752,7 +745,6 @@ func (t *TrzszTransfer) recvFileDataV2(file *os.File, size int64, progress Progr
 	defer close(ctx.succ)
 
 	ackStepChan := make(chan struct{}, 1)
-	defer close(ackStepChan)
 	recvDataChan := t.pipelineRecvData(ctx, size, ackStepChan)
 
 	var fileDataChan <-chan []byte
