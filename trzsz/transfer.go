@@ -525,6 +525,9 @@ func (t *TrzszTransfer) sendFileSize(file *os.File, progress ProgressCallback) (
 
 func (t *TrzszTransfer) sendFileData(file *os.File, size int64, progress ProgressCallback) ([]byte, error) {
 	step := int64(0)
+	if progress != nil && !reflect.ValueOf(progress).IsNil() {
+		progress.onStep(step)
+	}
 	bufSize := int64(1024)
 	buffer := make([]byte, bufSize)
 	hasher := md5.New()
@@ -780,6 +783,9 @@ func (t *TrzszTransfer) recvFileSize(progress ProgressCallback) (int64, error) {
 func (t *TrzszTransfer) recvFileData(file *os.File, size int64, progress ProgressCallback) ([]byte, error) {
 	defer file.Close()
 	step := int64(0)
+	if progress != nil && !reflect.ValueOf(progress).IsNil() {
+		progress.onStep(step)
+	}
 	hasher := md5.New()
 	for step < size {
 		beginTime := time.Now()
