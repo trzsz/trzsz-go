@@ -39,25 +39,25 @@ import (
 	"time"
 )
 
-type PipelineContext struct {
+type pipelineContext struct {
 	context.Context
 	cancel context.CancelCauseFunc
 	succ   chan struct{}
 }
 
-type TrzszData struct {
+type trzszData struct {
 	length int
 	buffer []byte
 }
 
-type Base64Reader struct {
+type base64Reader struct {
 	dataChan <-chan []byte
-	ctx      *PipelineContext
+	ctx      *pipelineContext
 	buf      []byte
 	eof      bool
 }
 
-func (r *Base64Reader) Read(p []byte) (int, error) {
+func (r *base64Reader) Read(p []byte) (int, error) {
 	if r.eof {
 		return 0, io.EOF
 	}
@@ -78,32 +78,32 @@ func (r *Base64Reader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func NewBase64Reader(ctx *PipelineContext, dataChan <-chan []byte) *Base64Reader {
-	return &Base64Reader{ctx: ctx, dataChan: dataChan}
+func newBase64Reader(ctx *pipelineContext, dataChan <-chan []byte) *base64Reader {
+	return &base64Reader{ctx: ctx, dataChan: dataChan}
 }
 
-type Base64Writer struct {
-	transfer     *TrzszTransfer
-	ctx          *PipelineContext
-	sendDataChan chan<- TrzszData
+type base64Writer struct {
+	transfer     *trzszTransfer
+	ctx          *pipelineContext
+	sendDataChan chan<- trzszData
 	buffer       *bytes.Buffer
 	bufSize      int64
 }
 
-func (b *Base64Writer) deliver(data []byte) bool {
+func (b *base64Writer) deliver(data []byte) bool {
 	buffer := bytes.NewBuffer(make([]byte, 0, len(data)+0x10))
 	buffer.Write([]byte("#DATA:"))
 	buffer.Write(data)
 	buffer.Write([]byte(b.transfer.transferConfig.Newline))
 	select {
-	case b.sendDataChan <- TrzszData{len(data), buffer.Bytes()}:
+	case b.sendDataChan <- trzszData{len(data), buffer.Bytes()}:
 		return true
 	case <-b.ctx.Done():
 		return false
 	}
 }
 
-func (b *Base64Writer) Write(p []byte) (int, error) {
+func (b *base64Writer) Write(p []byte) (int, error) {
 	m := 0
 	for {
 		space := b.buffer.Cap() - b.buffer.Len()
@@ -132,7 +132,7 @@ func (b *Base64Writer) Write(p []byte) (int, error) {
 	}
 }
 
-func (b *Base64Writer) Close() error {
+func (b *base64Writer) Close() error {
 	if b.buffer.Len() > 0 {
 		if !b.deliver(b.buffer.Bytes()) {
 			return b.ctx.Err()
@@ -142,22 +142,22 @@ func (b *Base64Writer) Close() error {
 	return nil
 }
 
-func NewBase64Writer(transfer *TrzszTransfer, ctx *PipelineContext, sendDataChan chan<- TrzszData) *Base64Writer {
+func newBase64Writer(transfer *trzszTransfer, ctx *pipelineContext, sendDataChan chan<- trzszData) *base64Writer {
 	bufSize := transfer.bufferSize.Load()
 	buffer := bytes.NewBuffer(make([]byte, 0, bufSize))
-	return &Base64Writer{transfer, ctx, sendDataChan, buffer, bufSize}
+	return &base64Writer{transfer, ctx, sendDataChan, buffer, bufSize}
 }
 
-type CompressedWriter struct {
-	base64Writer  *Base64Writer
+type compressedWriter struct {
+	base64Writer  *base64Writer
 	base64Encoder io.WriteCloser
 }
 
-func (c *CompressedWriter) Write(p []byte) (int, error) {
+func (c *compressedWriter) Write(p []byte) (int, error) {
 	return c.base64Encoder.Write(p)
 }
 
-func (c *CompressedWriter) Close() error {
+func (c *compressedWriter) Close() error {
 	err := c.base64Encoder.Close()
 	if err != nil {
 		return err
@@ -165,20 +165,20 @@ func (c *CompressedWriter) Close() error {
 	return c.base64Writer.Close()
 }
 
-func NewCompressedWriter(transfer *TrzszTransfer, ctx *PipelineContext, sendDataChan chan<- TrzszData) *CompressedWriter {
-	writer := NewBase64Writer(transfer, ctx, sendDataChan)
+func newCompressedWriter(transfer *trzszTransfer, ctx *pipelineContext, sendDataChan chan<- trzszData) *compressedWriter {
+	writer := newBase64Writer(transfer, ctx, sendDataChan)
 	encoder := base64.NewEncoder(base64.StdEncoding, writer)
-	return &CompressedWriter{writer, encoder}
+	return &compressedWriter{writer, encoder}
 }
 
-func (t *TrzszTransfer) pipelineCalculateMD5(ctx *PipelineContext, md5SourceChan <-chan []byte) <-chan []byte {
+func (t *trzszTransfer) pipelineCalculateMD5(ctx *pipelineContext, md5SourceChan <-chan []byte) <-chan []byte {
 	md5DigestChan := make(chan []byte, 1)
 	go func() {
 		defer close(md5DigestChan)
 		hasher := md5.New()
 		for buf := range md5SourceChan {
 			if _, err := hasher.Write(buf); err != nil {
-				ctx.cancel(newTrzszError(fmt.Sprintf("MD5 write error: %v", err)))
+				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("MD5 write error: %v", err)))
 				return
 			}
 		}
@@ -190,7 +190,7 @@ func (t *TrzszTransfer) pipelineCalculateMD5(ctx *PipelineContext, md5SourceChan
 	return md5DigestChan
 }
 
-func (t *TrzszTransfer) pipelineReadData(ctx *PipelineContext, file *os.File, size int64) (<-chan []byte, <-chan []byte) {
+func (t *trzszTransfer) pipelineReadData(ctx *pipelineContext, file *os.File, size int64) (<-chan []byte, <-chan []byte) {
 	fileDataChan := make(chan []byte, 100)
 	md5SourceChan := make(chan []byte, 100)
 	go func() {
@@ -217,11 +217,11 @@ func (t *TrzszTransfer) pipelineReadData(ctx *PipelineContext, file *os.File, si
 				if length == size {
 					return
 				}
-				ctx.cancel(newTrzszError(fmt.Sprintf("File size %d but read %d", size, length)))
+				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("File size %d but read %d", size, length)))
 				return
 			}
 			if err != nil {
-				ctx.cancel(newTrzszError(fmt.Sprintf("Read file error: %v", err)))
+				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("Read file error: %v", err)))
 				return
 			}
 		}
@@ -229,39 +229,39 @@ func (t *TrzszTransfer) pipelineReadData(ctx *PipelineContext, file *os.File, si
 	return fileDataChan, md5SourceChan
 }
 
-func (t *TrzszTransfer) pipelineEncodeData(ctx *PipelineContext, fileDataChan <-chan []byte) <-chan TrzszData {
-	sendDataChan := make(chan TrzszData, 1)
+func (t *trzszTransfer) pipelineEncodeData(ctx *pipelineContext, fileDataChan <-chan []byte) <-chan trzszData {
+	sendDataChan := make(chan trzszData, 1)
 	go func() {
 		defer close(sendDataChan)
 
-		c := NewCompressedWriter(t, ctx, sendDataChan)
+		c := newCompressedWriter(t, ctx, sendDataChan)
 		defer func() {
 			err := c.Close()
 			if err != nil {
-				ctx.cancel(newTrzszError(fmt.Sprintf("Close compressed writer error: %v", err)))
+				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("Close compressed writer error: %v", err)))
 			}
 		}()
 
 		z, err := zstd.NewWriter(c)
 		if err != nil {
-			ctx.cancel(newTrzszError(fmt.Sprintf("New zstd writer error: %v", err)))
+			ctx.cancel(newSimpleTrzszError(fmt.Sprintf("New zstd writer error: %v", err)))
 			return
 		}
 		defer func() {
 			err := z.Close()
 			if err != nil {
-				ctx.cancel(newTrzszError(fmt.Sprintf("Close zstd writer error: %v", err)))
+				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("Close zstd writer error: %v", err)))
 			}
 		}()
 
 		for data := range fileDataChan {
 			if err := writeAll(z, data); err != nil {
-				ctx.cancel(newTrzszError(fmt.Sprintf("Write to zstd error: %v", err)))
+				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("Write to zstd error: %v", err)))
 				return
 			}
 			if t.flushInTime {
 				if err := z.Flush(); err != nil {
-					ctx.cancel(newTrzszError(fmt.Sprintf("Flush to zstd error: %v", err)))
+					ctx.cancel(newSimpleTrzszError(fmt.Sprintf("Flush to zstd error: %v", err)))
 					return
 				}
 			}
@@ -273,14 +273,14 @@ func (t *TrzszTransfer) pipelineEncodeData(ctx *PipelineContext, fileDataChan <-
 	return sendDataChan
 }
 
-func (t *TrzszTransfer) pipelineEscapeData(ctx *PipelineContext, fileDataChan <-chan []byte) <-chan TrzszData {
-	sendDataChan := make(chan TrzszData, 1)
+func (t *trzszTransfer) pipelineEscapeData(ctx *pipelineContext, fileDataChan <-chan []byte) <-chan trzszData {
+	sendDataChan := make(chan trzszData, 1)
 	deliver := func(data []byte) bool {
 		buffer := bytes.NewBuffer(make([]byte, 0, len(data)+0x20))
 		buffer.Write([]byte(fmt.Sprintf("#DATA:%d\n", len(data))))
 		buffer.Write(data)
 		select {
-		case sendDataChan <- TrzszData{len(data), buffer.Bytes()}:
+		case sendDataChan <- trzszData{len(data), buffer.Bytes()}:
 			return true
 		case <-ctx.Done():
 			return false
@@ -323,7 +323,7 @@ func (t *TrzszTransfer) pipelineEscapeData(ctx *PipelineContext, fileDataChan <-
 	return sendDataChan
 }
 
-func (t *TrzszTransfer) pipelineRecvCurrentAck() (int64, int64, error) {
+func (t *trzszTransfer) pipelineRecvCurrentAck() (int64, int64, error) {
 	timeout := t.getNewTimeout()
 	resp, err := t.recvCheck("SUCC", false, timeout)
 	if err != nil {
@@ -332,23 +332,23 @@ func (t *TrzszTransfer) pipelineRecvCurrentAck() (int64, int64, error) {
 
 	tokens := strings.Split(resp, "/")
 	if len(tokens) != 2 {
-		return 0, 0, newTrzszError(fmt.Sprintf("Response number is not 2 but %d", len(tokens)))
+		return 0, 0, newSimpleTrzszError(fmt.Sprintf("Response number is not 2 but %d", len(tokens)))
 	}
 
 	length, err := strconv.ParseInt(tokens[0], 10, 64)
 	if err != nil {
-		return 0, 0, newTrzszError(fmt.Sprintf("Parse int from %s error: %v", tokens[0], err))
+		return 0, 0, newSimpleTrzszError(fmt.Sprintf("Parse int from %s error: %v", tokens[0], err))
 	}
 
 	step, err := strconv.ParseInt(tokens[1], 10, 64)
 	if err != nil {
-		return 0, 0, newTrzszError(fmt.Sprintf("Parse int from %s error: %v", tokens[1], err))
+		return 0, 0, newSimpleTrzszError(fmt.Sprintf("Parse int from %s error: %v", tokens[1], err))
 	}
 
 	return length, step, nil
 }
 
-func (t *TrzszTransfer) pipelineRecvFinalAck(ctx *PipelineContext, size int64, progressChan chan<- int64) {
+func (t *trzszTransfer) pipelineRecvFinalAck(ctx *pipelineContext, size int64, progressChan chan<- int64) {
 	for ctx.Err() == nil {
 		timeout := t.getNewTimeout()
 		step, err := t.recvInteger("SUCC", false, timeout)
@@ -358,7 +358,7 @@ func (t *TrzszTransfer) pipelineRecvFinalAck(ctx *PipelineContext, size int64, p
 		}
 
 		if step > size {
-			ctx.cancel(newTrzszError(fmt.Sprintf("RecvFinalAck expected step %d but was %d", size, step)))
+			ctx.cancel(newSimpleTrzszError(fmt.Sprintf("RecvFinalAck expected step %d but was %d", size, step)))
 			return
 		}
 
@@ -379,7 +379,7 @@ func (t *TrzszTransfer) pipelineRecvFinalAck(ctx *PipelineContext, size int64, p
 	}
 }
 
-func (t *TrzszTransfer) pipelineSendData(ctx *PipelineContext, size int64, sendDataChan <-chan TrzszData, showProgress bool) <-chan int64 {
+func (t *trzszTransfer) pipelineSendData(ctx *pipelineContext, size int64, sendDataChan <-chan trzszData, showProgress bool) <-chan int64 {
 	var progressChan chan int64
 	if showProgress {
 		progressChan = make(chan int64, 100)
@@ -401,7 +401,7 @@ func (t *TrzszTransfer) pipelineSendData(ctx *PipelineContext, size int64, sendD
 				return
 			}
 			if length != int64(data.length) {
-				ctx.cancel(newTrzszError(fmt.Sprintf("SendData length check [%d] <> [%d]", length, data.length)))
+				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("SendData length check [%d] <> [%d]", length, data.length)))
 				return
 			}
 
@@ -413,7 +413,7 @@ func (t *TrzszTransfer) pipelineSendData(ctx *PipelineContext, size int64, sendD
 				}
 			}
 
-			chunkTime := time.Now().Sub(beginTime)
+			chunkTime := time.Since(beginTime)
 			bufSize := t.bufferSize.Load()
 			if length == bufSize && chunkTime < 500*time.Millisecond && bufSize < t.transferConfig.MaxBufSize {
 				t.bufferSize.Store(minInt64(bufSize*2, t.transferConfig.MaxBufSize))
@@ -435,7 +435,7 @@ func (t *TrzszTransfer) pipelineSendData(ctx *PipelineContext, size int64, sendD
 	return progressChan
 }
 
-func (t *TrzszTransfer) pipelineShowProgress(ctx *PipelineContext, progress ProgressCallback, progressChan <-chan int64) {
+func (t *trzszTransfer) pipelineShowProgress(ctx *pipelineContext, progress progressCallback, progressChan <-chan int64) {
 	go func() {
 		for step := range progressChan {
 			progress.onStep(step)
@@ -446,9 +446,9 @@ func (t *TrzszTransfer) pipelineShowProgress(ctx *PipelineContext, progress Prog
 	}()
 }
 
-func (t *TrzszTransfer) sendFileDataV2(file *os.File, size int64, progress ProgressCallback) ([]byte, error) {
+func (t *trzszTransfer) sendFileDataV2(file *os.File, size int64, progress progressCallback) ([]byte, error) {
 	c, cancel := context.WithCancelCause(context.Background())
-	ctx := &PipelineContext{c, cancel, make(chan struct{}, 1)}
+	ctx := &pipelineContext{c, cancel, make(chan struct{}, 1)}
 	defer ctx.cancel(nil)
 	defer close(ctx.succ)
 
@@ -456,7 +456,7 @@ func (t *TrzszTransfer) sendFileDataV2(file *os.File, size int64, progress Progr
 
 	md5DigestChan := t.pipelineCalculateMD5(ctx, md5SourceChan)
 
-	var sendDataChan <-chan TrzszData
+	var sendDataChan <-chan trzszData
 	if t.transferConfig.Binary {
 		sendDataChan = t.pipelineEscapeData(ctx, fileDataChan)
 	} else {
@@ -478,7 +478,7 @@ func (t *TrzszTransfer) sendFileDataV2(file *os.File, size int64, progress Progr
 	}
 }
 
-func (t *TrzszTransfer) pipelineRecvBase64Data() ([]byte, error) {
+func (t *trzszTransfer) pipelineRecvBase64Data() ([]byte, error) {
 	timeout := t.getNewTimeout()
 	line, err := t.recvLine("DATA", false, timeout)
 	if err != nil {
@@ -487,19 +487,19 @@ func (t *TrzszTransfer) pipelineRecvBase64Data() ([]byte, error) {
 
 	idx := bytes.IndexByte(line, ':')
 	if idx < 1 {
-		return nil, NewTrzszError(encodeBytes(line), "colon", true)
+		return nil, newTrzszError(encodeBytes(line), "colon", true)
 	}
 
 	typ := line[1:idx]
 	buf := line[idx+1:]
-	if bytes.Compare(typ, []byte("DATA")) != 0 {
-		return nil, NewTrzszError(string(buf), string(typ), true)
+	if bytes.Compare(typ, []byte("DATA")) != 0 { // nolint:all
+		return nil, newTrzszError(string(buf), string(typ), true)
 	}
 
 	return buf, nil
 }
 
-func (t *TrzszTransfer) pipelineRecvBinaryData() ([]byte, error) {
+func (t *trzszTransfer) pipelineRecvBinaryData() ([]byte, error) {
 	timeout := t.getNewTimeout()
 	size, err := t.recvInteger("DATA", false, timeout)
 	if err != nil {
@@ -513,12 +513,12 @@ func (t *TrzszTransfer) pipelineRecvBinaryData() ([]byte, error) {
 	return t.buffer.readBinary(int(size), timeout)
 }
 
-func (t *TrzszTransfer) pipelineSendCurrentAck(length int) error {
+func (t *trzszTransfer) pipelineSendCurrentAck(length int) error {
 	step := t.savedSteps.Load()
 	return t.writeAll([]byte(fmt.Sprintf("#SUCC:%d/%d%s", length, step, t.transferConfig.Newline)))
 }
 
-func (t *TrzszTransfer) pipelineSendFinalAck(ctx *PipelineContext, size int64, ackStepChan <-chan struct{}) {
+func (t *trzszTransfer) pipelineSendFinalAck(ctx *pipelineContext, size int64, ackStepChan <-chan struct{}) {
 	go func() {
 		for ctx.Err() == nil {
 			step := t.savedSteps.Load()
@@ -528,7 +528,7 @@ func (t *TrzszTransfer) pipelineSendFinalAck(ctx *PipelineContext, size int64, a
 			}
 
 			if step > size {
-				ctx.cancel(newTrzszError(fmt.Sprintf("SendFinalAck expected step %d but was %d", size, step)))
+				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("SendFinalAck expected step %d but was %d", size, step)))
 				return
 			}
 
@@ -547,7 +547,7 @@ func (t *TrzszTransfer) pipelineSendFinalAck(ctx *PipelineContext, size int64, a
 	}()
 }
 
-func (t *TrzszTransfer) pipelineRecvData(ctx *PipelineContext, size int64, ackStepChan <-chan struct{}) <-chan []byte {
+func (t *trzszTransfer) pipelineRecvData(ctx *pipelineContext, size int64, ackStepChan <-chan struct{}) <-chan []byte {
 	recvDataChan := make(chan []byte, 100)
 	go func() {
 		defer close(recvDataChan)
@@ -571,7 +571,7 @@ func (t *TrzszTransfer) pipelineRecvData(ctx *PipelineContext, size int64, ackSt
 				return
 			}
 
-			chunkTime := time.Now().Sub(beginTime)
+			chunkTime := time.Since(beginTime)
 			if chunkTime > t.maxChunkTime {
 				t.maxChunkTime = chunkTime
 			}
@@ -593,15 +593,15 @@ func (t *TrzszTransfer) pipelineRecvData(ctx *PipelineContext, size int64, ackSt
 	return recvDataChan
 }
 
-func (t *TrzszTransfer) pipelineDecodeData(ctx *PipelineContext, recvDataChan <-chan []byte) (<-chan []byte, <-chan []byte) {
+func (t *trzszTransfer) pipelineDecodeData(ctx *pipelineContext, recvDataChan <-chan []byte) (<-chan []byte, <-chan []byte) {
 	fileDataChan := make(chan []byte, 100)
 	md5SourceChan := make(chan []byte, 100)
 	go func() {
 		defer close(fileDataChan)
 		defer close(md5SourceChan)
-		z, err := zstd.NewReader(base64.NewDecoder(base64.StdEncoding, NewBase64Reader(ctx, recvDataChan)))
+		z, err := zstd.NewReader(base64.NewDecoder(base64.StdEncoding, newBase64Reader(ctx, recvDataChan)))
 		if err != nil {
-			ctx.cancel(newTrzszError(fmt.Sprintf("New zstd reader error: %v", err)))
+			ctx.cancel(newSimpleTrzszError(fmt.Sprintf("New zstd reader error: %v", err)))
 			return
 		}
 		defer z.Close()
@@ -624,7 +624,7 @@ func (t *TrzszTransfer) pipelineDecodeData(ctx *PipelineContext, recvDataChan <-
 				break
 			}
 			if err != nil {
-				ctx.cancel(newTrzszError(fmt.Sprintf("Read from zstd error: %v", err)))
+				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("Read from zstd error: %v", err)))
 				return
 			}
 		}
@@ -632,7 +632,7 @@ func (t *TrzszTransfer) pipelineDecodeData(ctx *PipelineContext, recvDataChan <-
 	return fileDataChan, md5SourceChan
 }
 
-func (t *TrzszTransfer) pipelineUnescapeData(ctx *PipelineContext, recvDataChan <-chan []byte) (<-chan []byte, <-chan []byte) {
+func (t *trzszTransfer) pipelineUnescapeData(ctx *pipelineContext, recvDataChan <-chan []byte) (<-chan []byte, <-chan []byte) {
 	fileDataChan := make(chan []byte, 100)
 	md5SourceChan := make(chan []byte, 100)
 	deliver := func(data []byte) bool {
@@ -696,7 +696,7 @@ func (t *TrzszTransfer) pipelineUnescapeData(ctx *PipelineContext, recvDataChan 
 	return fileDataChan, md5SourceChan
 }
 
-func (t *TrzszTransfer) pipelineSaveData(ctx *PipelineContext, file *os.File, size int64, fileDataChan <-chan []byte, ackStepChan chan<- struct{}, showProgress bool) <-chan int64 {
+func (t *trzszTransfer) pipelineSaveData(ctx *pipelineContext, file *os.File, size int64, fileDataChan <-chan []byte, ackStepChan chan<- struct{}, showProgress bool) <-chan int64 {
 	var progressChan chan int64
 	if showProgress {
 		progressChan = make(chan int64, 100)
@@ -709,7 +709,7 @@ func (t *TrzszTransfer) pipelineSaveData(ctx *PipelineContext, file *os.File, si
 		step := int64(0)
 		for data := range fileDataChan {
 			if _, err := file.Write(data); err != nil {
-				ctx.cancel(newTrzszError(fmt.Sprintf("Write file error: %v", err)))
+				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("Write file error: %v", err)))
 				return
 			}
 			step += int64(len(data))
@@ -729,7 +729,7 @@ func (t *TrzszTransfer) pipelineSaveData(ctx *PipelineContext, file *os.File, si
 			return
 		}
 		if step != size {
-			ctx.cancel(newTrzszError(fmt.Sprintf("SaveFile expected step %d but was %d", size, step)))
+			ctx.cancel(newSimpleTrzszError(fmt.Sprintf("SaveFile expected step %d but was %d", size, step)))
 			return
 		}
 		ackStepChan <- struct{}{}
@@ -737,10 +737,10 @@ func (t *TrzszTransfer) pipelineSaveData(ctx *PipelineContext, file *os.File, si
 	return progressChan
 }
 
-func (t *TrzszTransfer) recvFileDataV2(file *os.File, size int64, progress ProgressCallback) ([]byte, error) {
+func (t *trzszTransfer) recvFileDataV2(file *os.File, size int64, progress progressCallback) ([]byte, error) {
 	defer file.Close()
 	c, cancel := context.WithCancelCause(context.Background())
-	ctx := &PipelineContext{c, cancel, make(chan struct{}, 1)}
+	ctx := &pipelineContext{c, cancel, make(chan struct{}, 1)}
 	defer ctx.cancel(nil)
 	defer close(ctx.succ)
 

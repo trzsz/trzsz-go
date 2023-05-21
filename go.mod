@@ -2,8 +2,6 @@ module github.com/trzsz/trzsz-go
 
 go 1.20
 
-replace github.com/trzsz/trzsz-go/trzsz => ../../trzsz
-
 require (
 	github.com/UserExistsError/conpty v0.1.0
 	github.com/alexflint/go-arg v1.4.3
@@ -27,5 +25,7 @@ require (
 	golang.org/x/image v0.7.0 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c // indirect
 )
+
+replace github.com/trzsz/trzsz-go => ../..
 
 replace github.com/alexflint/go-arg v1.4.3 => github.com/trzsz/go-arg v1.4.4-0.20220722153732-ac5a9f75703f

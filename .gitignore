@@ -21,3 +21,4 @@ debian/files
 
 dist/
 vendor/
+examples/ssh_client

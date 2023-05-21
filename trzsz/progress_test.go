@@ -59,22 +59,7 @@ func getProgressLength(text string) int {
 	return getDisplayLength(text)
 }
 
-type ProgressWriter struct {
-	t      *testing.T
-	buffer []string
-}
-
-func (w *ProgressWriter) Write(text []byte) (n int, err error) {
-	w.buffer = append(w.buffer, string(text))
-	return len(text), nil
-}
-
-func (w *ProgressWriter) assertBufferCount(count int) {
-	w.t.Helper()
-	require.Equal(w.t, count, len(w.buffer))
-}
-
-func (w *ProgressWriter) assertBufferText(idx int, size int, expected []string) {
+func (w *testWriter) assertProgressText(idx int, size int, expected []string) {
 	w.t.Helper()
 	require.Less(w.t, idx, len(w.buffer))
 	assert.Equal(w.t, size, getProgressLength(w.buffer[idx]))
@@ -83,16 +68,12 @@ func (w *ProgressWriter) assertBufferText(idx int, size int, expected []string) 
 	}
 }
 
-func NewProgressWriter(t *testing.T) *ProgressWriter {
-	return &ProgressWriter{t, nil}
-}
-
 func TestProgressWithEmptyFile(t *testing.T) {
 	assert := assert.New(t)
-	writer := NewProgressWriter(t)
+	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135000})
 
-	progress := NewTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(0)
@@ -100,15 +81,15 @@ func TestProgressWithEmptyFile(t *testing.T) {
 
 	assert.Equal(2, *callTimeNowCount)
 	writer.assertBufferCount(1)
-	writer.assertBufferText(0, 100, []string{"中文😀test.txt [", "] 100% | 0.00 B | --- B/s | --- ETA"})
+	writer.assertProgressText(0, 100, []string{"中文😀test.txt [", "] 100% | 0.00 B | --- B/s | --- ETA"})
 }
 
 func TestProgressZeroStep(t *testing.T) {
 	assert := assert.New(t)
-	writer := NewProgressWriter(t)
+	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135100})
 
-	progress := NewTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(100)
@@ -116,15 +97,15 @@ func TestProgressZeroStep(t *testing.T) {
 
 	assert.Equal(2, *callTimeNowCount)
 	writer.assertBufferCount(1)
-	writer.assertBufferText(0, 100, []string{"中文😀test.txt [", "] 0% | 0.00 B | --- B/s | --- ETA"})
+	writer.assertProgressText(0, 100, []string{"中文😀test.txt [", "] 0% | 0.00 B | --- B/s | --- ETA"})
 }
 
 func TestProgressLastStep(t *testing.T) {
 	assert := assert.New(t)
-	writer := NewProgressWriter(t)
+	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135200})
 
-	progress := NewTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(100)
@@ -132,15 +113,15 @@ func TestProgressLastStep(t *testing.T) {
 
 	assert.Equal(2, *callTimeNowCount)
 	writer.assertBufferCount(1)
-	writer.assertBufferText(0, 100, []string{"中文😀test.txt [", "] 100% | 100 B | 500 B/s | 00:00 ETA"})
+	writer.assertProgressText(0, 100, []string{"中文😀test.txt [", "] 100% | 100 B | 500 B/s | 00:00 ETA"})
 }
 
 func TestProgressWithSpeedAndEta(t *testing.T) {
 	assert := assert.New(t)
-	writer := NewProgressWriter(t)
+	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135100})
 
-	progress := NewTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(100)
@@ -148,12 +129,12 @@ func TestProgressWithSpeedAndEta(t *testing.T) {
 
 	assert.Equal(2, *callTimeNowCount)
 	writer.assertBufferCount(1)
-	writer.assertBufferText(0, 100, []string{"中文😀test.txt [", "] 1% | 1.00 B | 10.0 B/s | 00:10 ETA"})
+	writer.assertProgressText(0, 100, []string{"中文😀test.txt [", "] 1% | 1.00 B | 10.0 B/s | 00:10 ETA"})
 }
 
 func TestProgressNewestSpeed(t *testing.T) {
 	assert := assert.New(t)
-	writer := NewProgressWriter(t)
+	writer := newTestWriter(t)
 	now := int64(1646564135000)
 	var mockTimes []int64
 	for i := 0; i < 101; i++ {
@@ -161,7 +142,7 @@ func TestProgressNewestSpeed(t *testing.T) {
 	}
 	callTimeNowCount := mockTimeNow(mockTimes)
 
-	progress := NewTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(100000)
@@ -210,17 +191,17 @@ func TestProgressNewestSpeed(t *testing.T) {
 		}
 
 		text := fmt.Sprintf("] %s%% | %s | %s B/s | %s:%s ETA", percentageStr, totalStr, speedStr, minuteStr, secondStr)
-		writer.assertBufferText(i, 100, []string{"中文😀test.txt [", text})
+		writer.assertProgressText(i, 100, []string{"中文😀test.txt [", text})
 	}
 
 }
 
 func TestProgressReduceOutput(t *testing.T) {
 	assert := assert.New(t)
-	writer := NewProgressWriter(t)
+	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135001, 1646564135099})
 
-	progress := NewTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(100)
@@ -229,15 +210,15 @@ func TestProgressReduceOutput(t *testing.T) {
 
 	assert.Equal(3, *callTimeNowCount)
 	writer.assertBufferCount(1)
-	writer.assertBufferText(0, 100, []string{"中文😀test.txt [", "] 1% | 1.00 B | 1000 B/s | 00:00 ETA"})
+	writer.assertProgressText(0, 100, []string{"中文😀test.txt [", "] 1% | 1.00 B | 1000 B/s | 00:00 ETA"})
 }
 
 func TestProgressFastSpeed(t *testing.T) {
 	assert := assert.New(t)
-	writer := NewProgressWriter(t)
+	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000})
 
-	progress := NewTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(1125899906842624)
@@ -245,15 +226,15 @@ func TestProgressFastSpeed(t *testing.T) {
 
 	assert.Equal(2, *callTimeNowCount)
 	writer.assertBufferCount(1)
-	writer.assertBufferText(0, 100, []string{"中文😀test.txt [", "] 1% | 10.1 TB | 10.1 TB/s | 01:40 ETA"})
+	writer.assertProgressText(0, 100, []string{"中文😀test.txt [", "] 1% | 10.1 TB | 10.1 TB/s | 01:40 ETA"})
 }
 
 func TestProgressSlowSpeed(t *testing.T) {
 	assert := assert.New(t)
-	writer := NewProgressWriter(t)
+	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000})
 
-	progress := NewTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(1024 * 1024)
@@ -261,15 +242,15 @@ func TestProgressSlowSpeed(t *testing.T) {
 
 	assert.Equal(2, *callTimeNowCount)
 	writer.assertBufferCount(1)
-	writer.assertBufferText(0, 100, []string{"中文😀test.txt [", "] 0% | 1.00 B | 1.00 B/s | 291:16:15 ETA"})
+	writer.assertProgressText(0, 100, []string{"中文😀test.txt [", "] 0% | 1.00 B | 1.00 B/s | 291:16:15 ETA"})
 }
 
 func TestProgressLongFileName(t *testing.T) {
 	assert := assert.New(t)
-	writer := NewProgressWriter(t)
+	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000})
 
-	progress := NewTextProgressBar(writer, 110, 0)
+	progress := newTextProgressBar(writer, 110, 0)
 	progress.onNum(1)
 	progress.onName("中文😀非常长非常长非常长非常长非常长非常长非常长非常长.txt")
 	progress.onSize(1024 * 1024)
@@ -279,18 +260,18 @@ func TestProgressLongFileName(t *testing.T) {
 
 	assert.Equal(3, *callTimeNowCount)
 	writer.assertBufferCount(2)
-	writer.assertBufferText(0, 110, []string{
+	writer.assertProgressText(0, 110, []string{
 		"中文😀非常长非常长非常长非常长非常长非常长非常... [", "] 10% | 100 KB | 100 KB/s | 00:09 ETA"})
-	writer.assertBufferText(1, 100, []string{
+	writer.assertProgressText(1, 100, []string{
 		"中文😀非常长非常长非常长非常长非常长... [", "] 20% | 200 KB | 66.7 KB/s | 00:12 ETA"})
 }
 
 func TestProgressWithoutTotalSize(t *testing.T) {
 	assert := assert.New(t)
-	writer := NewProgressWriter(t)
+	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000})
 
-	progress := NewTextProgressBar(writer, 95, 0)
+	progress := newTextProgressBar(writer, 95, 0)
 	progress.onNum(1)
 	progress.onName("中文😀非常长非常长非常长非常长非常长非常长非常长非常长.txt")
 	progress.onSize(1000 * 1024 * 1024 * 1024)
@@ -300,16 +281,16 @@ func TestProgressWithoutTotalSize(t *testing.T) {
 
 	assert.Equal(3, *callTimeNowCount)
 	writer.assertBufferCount(2)
-	writer.assertBufferText(0, 95, []string{"中文😀非常长非常长非常长非常长非常长... [", "] 0% | 100 MB/s | 2:50:39 ETA"})
-	writer.assertBufferText(1, 85, []string{"中文😀非常长非常长非常长非... [", "] 20% | 66.7 GB/s | 00:12 ETA"})
+	writer.assertProgressText(0, 95, []string{"中文😀非常长非常长非常长非常长非常长... [", "] 0% | 100 MB/s | 2:50:39 ETA"})
+	writer.assertProgressText(1, 85, []string{"中文😀非常长非常长非常长非... [", "] 20% | 66.7 GB/s | 00:12 ETA"})
 }
 
 func TestProgressWithoutSpeedOrEta(t *testing.T) {
 	assert := assert.New(t)
-	writer := NewProgressWriter(t)
+	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000})
 
-	progress := NewTextProgressBar(writer, 70, 0)
+	progress := newTextProgressBar(writer, 70, 0)
 	progress.onNum(1)
 	progress.onName("中文😀longlonglonglonglonglongname.txt")
 	progress.onSize(1000)
@@ -319,16 +300,16 @@ func TestProgressWithoutSpeedOrEta(t *testing.T) {
 
 	assert.Equal(3, *callTimeNowCount)
 	writer.assertBufferCount(2)
-	writer.assertBufferText(0, 70, []string{"中文😀longlonglonglonglongl... [", "] 10% | 00:09 ETA"})
-	writer.assertBufferText(1, 60, []string{"中文😀longlonglonglonglongl... [", "] 20%"})
+	writer.assertProgressText(0, 70, []string{"中文😀longlonglonglonglongl... [", "] 10% | 00:09 ETA"})
+	writer.assertProgressText(1, 60, []string{"中文😀longlonglonglonglongl... [", "] 20%"})
 }
 
 func TestProgressWithoutFileName(t *testing.T) {
 	assert := assert.New(t)
-	writer := NewProgressWriter(t)
+	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000})
 
-	progress := NewTextProgressBar(writer, 48, 0)
+	progress := newTextProgressBar(writer, 48, 0)
 	progress.onNum(1)
 	progress.onName("中文😀llong文件名.txt")
 	progress.onSize(1000)
@@ -338,17 +319,17 @@ func TestProgressWithoutFileName(t *testing.T) {
 
 	assert.Equal(3, *callTimeNowCount)
 	writer.assertBufferCount(2)
-	writer.assertBufferText(0, 48, []string{"中文😀llong文件名... [", "] 10%"})
-	writer.assertBufferText(1, 30, []string{"] 20%"})
+	writer.assertProgressText(0, 48, []string{"中文😀llong文件名... [", "] 10%"})
+	writer.assertProgressText(1, 30, []string{"] 20%"})
 	assert.NotContains(writer.buffer[1], "中文")
 }
 
 func TestProgressWithoutBar(t *testing.T) {
 	assert := assert.New(t)
-	writer := NewProgressWriter(t)
+	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000})
 
-	progress := NewTextProgressBar(writer, 10, 0)
+	progress := newTextProgressBar(writer, 10, 0)
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(1000)
@@ -361,10 +342,10 @@ func TestProgressWithoutBar(t *testing.T) {
 
 func TestProgressWithMultiFiles(t *testing.T) {
 	assert := assert.New(t)
-	writer := NewProgressWriter(t)
+	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564137000, 1646564139000})
 
-	progress := NewTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(2)
 	progress.onName("中文😀test.txt")
 	progress.onSize(1000)
@@ -378,18 +359,18 @@ func TestProgressWithMultiFiles(t *testing.T) {
 
 	assert.Equal(4, *callTimeNowCount)
 	writer.assertBufferCount(4)
-	writer.assertBufferText(0, 100, []string{"(1/2) 中文😀test.txt [", "] 10% | 100 B | 100 B/s | 00:09 ETA"})
+	writer.assertProgressText(0, 100, []string{"(1/2) 中文😀test.txt [", "] 10% | 100 B | 100 B/s | 00:09 ETA"})
 	assert.Equal("\r", writer.buffer[1])
-	writer.assertBufferText(2, 80, []string{"(2/2) 英文😀test.txt [", "] 15% | 300 B | 150 B/s | 00:11 ETA"})
+	writer.assertProgressText(2, 80, []string{"(2/2) 英文😀test.txt [", "] 15% | 300 B | 150 B/s | 00:11 ETA"})
 	assert.Equal("\r", writer.buffer[3])
 }
 
 func TestProgressInTmuxPane(t *testing.T) {
 	assert := assert.New(t)
-	writer := NewProgressWriter(t)
+	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564137000, 1646564138000, 1646564139000})
 
-	progress := NewTextProgressBar(writer, 100, 80)
+	progress := newTextProgressBar(writer, 100, 80)
 	progress.onNum(2)
 	progress.onName("中文😀test.txt")
 	progress.onSize(1000)
@@ -404,17 +385,17 @@ func TestProgressInTmuxPane(t *testing.T) {
 
 	assert.Equal(5, *callTimeNowCount)
 	writer.assertBufferCount(5)
-	writer.assertBufferText(0, 79, []string{"(1/2) 中文😀test.txt [", "] 10% | 100 B | 100 B/s | 00:09 ETA"})
+	writer.assertProgressText(0, 79, []string{"(1/2) 中文😀test.txt [", "] 10% | 100 B | 100 B/s | 00:09 ETA"})
 	assert.NotContains(writer.buffer[0], "\r")
 	assert.NotContains(writer.buffer[0], "\x1b[79D")
 
-	writer.assertBufferText(1, 79, []string{"\x1b[79D", "(1/2) 中文😀test.txt [", "] 20% | 200 B | 100 B/s | 00:08 ETA"})
+	writer.assertProgressText(1, 79, []string{"\x1b[79D", "(1/2) 中文😀test.txt [", "] 20% | 200 B | 100 B/s | 00:08 ETA"})
 	assert.NotContains(writer.buffer[1], "\r")
 
 	assert.NotContains(writer.buffer[2], "\r")
 	assert.Contains(writer.buffer[2], "\x1b[79D")
 
-	writer.assertBufferText(3, 120, []string{"(2/2) 中文😀test2.txt [", "] 30% | 300 B | 300 B/s | 00:02 ETA"})
+	writer.assertProgressText(3, 120, []string{"(2/2) 中文😀test2.txt [", "] 30% | 300 B | 300 B/s | 00:02 ETA"})
 
 	assert.Contains(writer.buffer[4], "\r")
 	assert.NotContains(writer.buffer[4], "\x1b[79D")

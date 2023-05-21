@@ -40,32 +40,28 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
+	"time"
 )
 
 var isLinux bool = (runtime.GOOS == "linux")
 var isMacOS bool = (runtime.GOOS == "darwin")
 var isWindows bool = (runtime.GOOS == "windows")
 
-func IsLinux() bool {
+func isRunningOnLinux() bool {
 	return isLinux
 }
 
-func IsMacOS() bool {
+func isRunningOnMacOS() bool {
 	return isMacOS
 }
 
-func IsWindows() bool {
+func isRunningOnWindows() bool {
 	return isWindows
 }
 
-type PtyIO interface {
-	Read(b []byte) (n int, err error)
-	Write(p []byte) (n int, err error)
-	Close() error
-}
-
-type ProgressCallback interface {
+type progressCallback interface {
 	onNum(num int64)
 	onName(name string)
 	onSize(size int64)
@@ -73,23 +69,23 @@ type ProgressCallback interface {
 	onDone()
 }
 
-type BufferSize struct {
+type bufferSize struct {
 	Size int64
 }
 
-type Args struct {
+type baseArgs struct {
 	Quiet     bool       `arg:"-q" help:"quiet (hide progress bar)"`
 	Overwrite bool       `arg:"-y" help:"yes, overwrite existing file(s)"`
 	Binary    bool       `arg:"-b" help:"binary transfer mode, faster for binary files"`
 	Escape    bool       `arg:"-e" help:"escape all known control characters"`
 	Directory bool       `arg:"-d" help:"transfer directories and files"`
-	Bufsize   BufferSize `arg:"-B" placeholder:"N" default:"10M" help:"max buffer chunk size (1K<=N<=1G). (default: 10M)"`
+	Bufsize   bufferSize `arg:"-B" placeholder:"N" default:"10M" help:"max buffer chunk size (1K<=N<=1G). (default: 10M)"`
 	Timeout   int        `arg:"-t" placeholder:"N" default:"20" help:"timeout ( N seconds ) for each buffer chunk.\nN <= 0 means never timeout. (default: 20)"`
 }
 
-var sizeRegexp = regexp.MustCompile("(?i)^(\\d+)(b|k|m|g|kb|mb|gb)?$")
+var sizeRegexp = regexp.MustCompile(`(?i)^(\d+)(b|k|m|g|kb|mb|gb)?$`)
 
-func (b *BufferSize) UnmarshalText(buf []byte) error {
+func (b *bufferSize) UnmarshalText(buf []byte) error {
 	str := string(buf)
 	match := sizeRegexp.FindStringSubmatch(str)
 	if len(match) < 2 {
@@ -126,7 +122,7 @@ func (b *BufferSize) UnmarshalText(buf []byte) error {
 func encodeBytes(buf []byte) string {
 	b := bytes.NewBuffer(make([]byte, 0, len(buf)+0x10))
 	z := zlib.NewWriter(b)
-	z.Write([]byte(buf))
+	_ = writeAll(z, []byte(buf))
 	z.Close()
 	return base64.StdEncoding.EncodeToString(b.Bytes())
 }
@@ -152,13 +148,13 @@ func decodeString(str string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-type TrzszError struct {
+type trzszError struct {
 	message string
 	errType string
 	trace   bool
 }
 
-func NewTrzszError(message string, errType string, trace bool) *TrzszError {
+func newTrzszError(message string, errType string, trace bool) *trzszError {
 	if errType == "fail" || errType == "FAIL" || errType == "EXIT" {
 		msg, err := decodeString(message)
 		if err != nil {
@@ -169,68 +165,68 @@ func NewTrzszError(message string, errType string, trace bool) *TrzszError {
 	} else if len(errType) > 0 {
 		message = fmt.Sprintf("[TrzszError] %s: %s", errType, message)
 	}
-	err := &TrzszError{message, errType, trace}
+	err := &trzszError{message, errType, trace}
 	if err.isTraceBack() {
 		err.message = fmt.Sprintf("%s\n%s", err.message, string(debug.Stack()))
 	}
 	return err
 }
 
-func newTrzszError(message string) *TrzszError {
-	return NewTrzszError(message, "", false)
+func newSimpleTrzszError(message string) *trzszError {
+	return newTrzszError(message, "", false)
 }
 
-func (e *TrzszError) Error() string {
+func (e *trzszError) Error() string {
 	return e.message
 }
 
-func (e *TrzszError) isTraceBack() bool {
+func (e *trzszError) isTraceBack() bool {
 	if e.errType == "fail" || e.errType == "EXIT" {
 		return false
 	}
 	return e.trace
 }
 
-func (e *TrzszError) isRemoteExit() bool {
+func (e *trzszError) isRemoteExit() bool {
 	return e.errType == "EXIT"
 }
 
-func (e *TrzszError) isRemoteFail() bool {
+func (e *trzszError) isRemoteFail() bool {
 	return e.errType == "fail" || e.errType == "FAIL"
 }
 
 func checkPathWritable(path string) error {
 	info, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return newTrzszError(fmt.Sprintf("No such directory: %s", path))
+		return newSimpleTrzszError(fmt.Sprintf("No such directory: %s", path))
 	} else if err != nil {
 		return err
 	}
 	if !info.IsDir() {
-		return newTrzszError(fmt.Sprintf("Not a directory: %s", path))
+		return newSimpleTrzszError(fmt.Sprintf("Not a directory: %s", path))
 	}
 	if syscallAccessWok(path) != nil {
-		return newTrzszError(fmt.Sprintf("No permission to write: %s", path))
+		return newSimpleTrzszError(fmt.Sprintf("No permission to write: %s", path))
 	}
 	return nil
 }
 
-type TrzszFile struct {
+type trzszFile struct {
 	PathID  int      `json:"path_id"`
 	AbsPath string   `json:"-"`
 	RelPath []string `json:"path_name"`
 	IsDir   bool     `json:"is_dir"`
 }
 
-func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*TrzszFile, relPath []string, visitedDir map[string]bool) error {
+func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*trzszFile, relPath []string, visitedDir map[string]bool) error {
 	if !info.IsDir() {
 		if !info.Mode().IsRegular() {
-			return newTrzszError(fmt.Sprintf("Not a regular file: %s", path))
+			return newSimpleTrzszError(fmt.Sprintf("Not a regular file: %s", path))
 		}
 		if syscallAccessRok(path) != nil {
-			return newTrzszError(fmt.Sprintf("No permission to read: %s", path))
+			return newSimpleTrzszError(fmt.Sprintf("No permission to read: %s", path))
 		}
-		*list = append(*list, &TrzszFile{pathID, path, relPath, false})
+		*list = append(*list, &trzszFile{pathID, path, relPath, false})
 		return nil
 	}
 	realPath, err := filepath.EvalSymlinks(path)
@@ -238,17 +234,17 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*Trzsz
 		return err
 	}
 	if _, ok := visitedDir[realPath]; ok {
-		return newTrzszError(fmt.Sprintf("Duplicate link: %s", path))
+		return newSimpleTrzszError(fmt.Sprintf("Duplicate link: %s", path))
 	}
 	visitedDir[realPath] = true
-	*list = append(*list, &TrzszFile{pathID, path, relPath, true})
+	*list = append(*list, &trzszFile{pathID, path, relPath, true})
 	f, err := os.Open(path)
 	if err != nil {
-		return newTrzszError(fmt.Sprintf("Open [%s] error: %v", path, err))
+		return newSimpleTrzszError(fmt.Sprintf("Open [%s] error: %v", path, err))
 	}
 	files, err := f.Readdir(-1)
 	if err != nil {
-		return newTrzszError(fmt.Sprintf("Readdir [%s] error: %v", path, err))
+		return newSimpleTrzszError(fmt.Sprintf("Readdir [%s] error: %v", path, err))
 	}
 	for _, file := range files {
 		p := filepath.Join(path, file.Name())
@@ -266,8 +262,8 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*Trzsz
 	return nil
 }
 
-func checkPathsReadable(paths []string, directory bool) ([]*TrzszFile, error) {
-	var list []*TrzszFile
+func checkPathsReadable(paths []string, directory bool) ([]*trzszFile, error) {
+	var list []*trzszFile
 	for i, p := range paths {
 		path, err := filepath.Abs(p)
 		if err != nil {
@@ -275,12 +271,12 @@ func checkPathsReadable(paths []string, directory bool) ([]*TrzszFile, error) {
 		}
 		info, err := os.Stat(path)
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, newTrzszError(fmt.Sprintf("No such file: %s", path))
+			return nil, newSimpleTrzszError(fmt.Sprintf("No such file: %s", path))
 		} else if err != nil {
 			return nil, err
 		}
 		if !directory && info.IsDir() {
-			return nil, newTrzszError(fmt.Sprintf("Is a directory: %s", path))
+			return nil, newSimpleTrzszError(fmt.Sprintf("Is a directory: %s", path))
 		}
 		visitedDir := make(map[string]bool)
 		if err := checkPathReadable(i, path, info, &list, []string{info.Name()}, visitedDir); err != nil {
@@ -290,12 +286,12 @@ func checkPathsReadable(paths []string, directory bool) ([]*TrzszFile, error) {
 	return list, nil
 }
 
-func checkDuplicateNames(list []*TrzszFile) error {
+func checkDuplicateNames(list []*trzszFile) error {
 	m := make(map[string]bool)
 	for _, f := range list {
 		p := filepath.Join(f.RelPath...)
 		if _, ok := m[p]; ok {
-			return newTrzszError(fmt.Sprintf("Duplicate name: %s", p))
+			return newSimpleTrzszError(fmt.Sprintf("Duplicate name: %s", p))
 		}
 		m[p] = true
 	}
@@ -312,20 +308,20 @@ func getNewName(path, name string) (string, error) {
 			return newName, nil
 		}
 	}
-	return "", newTrzszError("Fail to assign new file name")
+	return "", newSimpleTrzszError("Fail to assign new file name")
 }
 
-type TmuxMode int
+type tmuxModeType int
 
 const (
-	NoTmux = iota
-	TmuxNormalMode
-	TmuxControlMode
+	noTmuxMode = iota
+	tmuxNormalMode
+	tmuxControlMode
 )
 
-func checkTmux() (TmuxMode, *os.File, int, error) {
+func checkTmux() (tmuxModeType, *os.File, int, error) {
 	if _, tmux := os.LookupEnv("TMUX"); !tmux {
-		return NoTmux, os.Stdout, -1, nil
+		return noTmuxMode, os.Stdout, -1, nil
 	}
 
 	cmd := exec.Command("tmux", "display-message", "-p", "#{client_tty}:#{client_control_mode}:#{pane_width}")
@@ -343,10 +339,10 @@ func checkTmux() (TmuxMode, *os.File, int, error) {
 	tmuxTty, controlMode, paneWidth := tokens[0], tokens[1], tokens[2]
 
 	if controlMode == "1" || tmuxTty[0] != '/' {
-		return TmuxControlMode, os.Stdout, -1, nil
+		return tmuxControlMode, os.Stdout, -1, nil
 	}
 	if _, err := os.Stat(tmuxTty); errors.Is(err, os.ErrNotExist) {
-		return TmuxControlMode, os.Stdout, -1, nil
+		return tmuxControlMode, os.Stdout, -1, nil
 	}
 
 	tmuxStdout, err := os.OpenFile(tmuxTty, os.O_WRONLY, 0)
@@ -360,7 +356,7 @@ func checkTmux() (TmuxMode, *os.File, int, error) {
 			return 0, nil, -1, err
 		}
 	}
-	return TmuxNormalMode, tmuxStdout, tmuxPaneWidth, nil
+	return tmuxNormalMode, tmuxStdout, tmuxPaneWidth, nil
 }
 
 func getTerminalColumns() int {
@@ -379,7 +375,7 @@ func getTerminalColumns() int {
 	return cols
 }
 
-func wrapStdinInput(transfer *TrzszTransfer) {
+func wrapStdinInput(transfer *trzszTransfer) {
 	const bufSize = 32 * 1024
 	buffer := make([]byte, bufSize)
 	for {
@@ -395,7 +391,7 @@ func wrapStdinInput(transfer *TrzszTransfer) {
 	}
 }
 
-func handleServerSignal(transfer *TrzszTransfer) {
+func handleServerSignal(transfer *trzszTransfer) {
 	sigstop := make(chan os.Signal, 1)
 	signal.Notify(sigstop, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -446,9 +442,119 @@ func writeAll(dst io.Writer, data []byte) error {
 	for m < l {
 		n, err := dst.Write(data[m:])
 		if err != nil {
-			return NewTrzszError(fmt.Sprintf("WriteAll error: %v", err), "", true)
+			return newTrzszError(fmt.Sprintf("WriteAll error: %v", err), "", true)
 		}
 		m += n
 	}
 	return nil
+}
+
+type trzszDetector struct {
+	uniqueIDMap map[string]int
+}
+
+func newTrzszDetector() *trzszDetector {
+	return &trzszDetector{make(map[string]int)}
+}
+
+var trzszRegexp = regexp.MustCompile(`::TRZSZ:TRANSFER:([SRD]):(\d+\.\d+\.\d+)(:\d+)?`)
+
+func (detector *trzszDetector) detectTrzsz(output []byte) (*byte, bool) {
+	if len(output) < 24 {
+		return nil, false
+	}
+	idx := bytes.LastIndex(output, []byte("::TRZSZ:TRANSFER:"))
+	if idx < 0 {
+		return nil, false
+	}
+	match := trzszRegexp.FindSubmatch(output[idx:])
+	if len(match) < 2 {
+		return nil, false
+	}
+	uniqueID := ""
+	if len(match) > 3 {
+		uniqueID = string(match[3])
+	}
+	if len(uniqueID) >= 8 && (isRunningOnWindows() || !(len(uniqueID) == 14 && strings.HasSuffix(uniqueID, "00"))) {
+		if _, ok := detector.uniqueIDMap[uniqueID]; ok {
+			return nil, false
+		}
+		if len(detector.uniqueIDMap) > 100 {
+			m := make(map[string]int)
+			for k, v := range detector.uniqueIDMap {
+				if v >= 50 {
+					m[k] = v - 50
+				}
+			}
+			detector.uniqueIDMap = m
+		}
+		detector.uniqueIDMap[uniqueID] = len(detector.uniqueIDMap)
+	}
+	remoteIsWindows := false
+	if uniqueID == ":1" || (len(uniqueID) == 14 && strings.HasSuffix(uniqueID, "10")) {
+		remoteIsWindows = true
+	}
+	return &match[1][0], remoteIsWindows
+}
+
+type traceLogger struct {
+	traceLogFile atomic.Pointer[os.File]
+	traceLogChan atomic.Pointer[chan []byte]
+}
+
+func newTraceLogger() *traceLogger {
+	return &traceLogger{}
+}
+
+/**
+ * ┌────────────────────┬───────────────────────────────────────────┬────────────────────────────────────────────┐
+ * │                    │ Enable trace log                          │ Disable trace log                          │
+ * ├────────────────────┼───────────────────────────────────────────┼────────────────────────────────────────────┤
+ * │ Windows cmd        │ echo ^<ENABLE_TRZSZ_TRACE_LOG^>           │ echo ^<DISABLE_TRZSZ_TRACE_LOG^>           │
+ * ├────────────────────┼───────────────────────────────────────────┼────────────────────────────────────────────┤
+ * │ Windows PowerShell │ echo "<ENABLE_TRZSZ_TRACE_LOG$([char]62)" │ echo "<DISABLE_TRZSZ_TRACE_LOG$([char]62)" │
+ * ├────────────────────┼───────────────────────────────────────────┼────────────────────────────────────────────┤
+ * │ Linux and macOS    │ echo -e '<ENABLE_TRZSZ_TRACE_LOG\x3E'     │ echo -e '<DISABLE_TRZSZ_TRACE_LOG\x3E'     │
+ * └────────────────────┴───────────────────────────────────────────┴────────────────────────────────────────────┘
+ */
+func (logger *traceLogger) writeTraceLog(buf []byte, typ string) []byte {
+	if ch, file := logger.traceLogChan.Load(), logger.traceLogFile.Load(); ch != nil && file != nil {
+		if typ == "svrout" && bytes.Contains(buf, []byte("<DISABLE_TRZSZ_TRACE_LOG>")) {
+			msg := fmt.Sprintf("Closed trace log at %s", file.Name())
+			close(*ch)
+			logger.traceLogChan.Store(nil)
+			logger.traceLogFile.Store(nil)
+			return bytes.ReplaceAll(buf, []byte("<DISABLE_TRZSZ_TRACE_LOG>"), []byte(msg))
+		}
+		*ch <- []byte(fmt.Sprintf("[%s]%s\n", typ, encodeBytes(buf)))
+		return buf
+	}
+	if typ == "svrout" && bytes.Contains(buf, []byte("<ENABLE_TRZSZ_TRACE_LOG>")) {
+		var msg string
+		file, err := os.CreateTemp("", "trzsz_*.log")
+		if err != nil {
+			msg = fmt.Sprintf("Create log file error: %v", err)
+		} else {
+			msg = fmt.Sprintf("Writing trace log to %s", file.Name())
+		}
+		ch := make(chan []byte, 10000)
+		logger.traceLogChan.Store(&ch)
+		logger.traceLogFile.Store(file)
+		go func() {
+			for {
+				select {
+				case buf, ok := <-ch:
+					if !ok {
+						file.Close()
+						return
+					}
+					_ = writeAll(file, buf)
+				case <-time.After(3 * time.Second):
+					_ = file.Sync()
+				}
+			}
+		}()
+		return bytes.ReplaceAll(buf, []byte("<ENABLE_TRZSZ_TRACE_LOG>"), []byte(msg))
+	}
+	return buf
 }

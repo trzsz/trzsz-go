@@ -35,7 +35,7 @@ import (
 
 func TestBufferReadLine(t *testing.T) {
 	assert := assert.New(t)
-	tb := NewTrzszBuffer()
+	tb := newTrzszBuffer()
 	assertReadSucc := func(data []byte) {
 		t.Helper()
 		line, err := tb.readLine(false, nil)
@@ -53,7 +53,7 @@ func TestBufferReadLine(t *testing.T) {
 	go func() {
 		beginTime := time.Now()
 		assertReadSucc([]byte("test message"))
-		assert.GreaterOrEqual(time.Now().Sub(beginTime), 100*time.Millisecond)
+		assert.GreaterOrEqual(time.Since(beginTime), 100*time.Millisecond)
 		wg.Done()
 	}()
 	time.Sleep(100 * time.Millisecond)
@@ -91,7 +91,7 @@ func TestBufferReadLine(t *testing.T) {
 
 func TestBufferReadJunk(t *testing.T) {
 	assert := assert.New(t)
-	tb := NewTrzszBuffer()
+	tb := newTrzszBuffer()
 	assertReadSucc := func(data []byte) {
 		t.Helper()
 		line, err := tb.readLine(true, nil)
@@ -117,7 +117,7 @@ func TestBufferReadJunk(t *testing.T) {
 
 func TestBufferReadBinary(t *testing.T) {
 	assert := assert.New(t)
-	tb := NewTrzszBuffer()
+	tb := newTrzszBuffer()
 	assertReadSucc := func(size int, data []byte) {
 		t.Helper()
 		buf, err := tb.readBinary(size, nil)
@@ -141,7 +141,7 @@ func TestBufferReadBinary(t *testing.T) {
 		beginTime := time.Now()
 		assertReadSucc(100, data[:100])
 		assertReadSucc(200, data[100:])
-		assert.GreaterOrEqual(time.Now().Sub(beginTime), 100*time.Millisecond)
+		assert.GreaterOrEqual(time.Since(beginTime), 100*time.Millisecond)
 		wg.Done()
 	}()
 	time.Sleep(100 * time.Millisecond)
@@ -159,7 +159,7 @@ func TestBufferReadBinary(t *testing.T) {
 
 func TestBufferReadOnWin(t *testing.T) {
 	assert := assert.New(t)
-	tb := NewTrzszBuffer()
+	tb := newTrzszBuffer()
 	assertReadSucc := func(data []byte) {
 		t.Helper()
 		line, err := tb.readLineOnWindows(nil)
@@ -209,7 +209,7 @@ func TestBufferReadOnWin(t *testing.T) {
 
 func TestBufferOthers(t *testing.T) {
 	assert := assert.New(t)
-	tb := NewTrzszBuffer()
+	tb := newTrzszBuffer()
 	assertReadSucc := func(data []byte) {
 		t.Helper()
 		line, err := tb.readLine(false, nil)
@@ -227,7 +227,7 @@ func TestBufferOthers(t *testing.T) {
 	beginTime := time.Now()
 	_, err := tb.readLine(false, timeout)
 	assert.EqualError(err, "Receive data timeout")
-	assert.GreaterOrEqual(time.Now().Sub(beginTime), 100*time.Millisecond)
+	assert.GreaterOrEqual(time.Since(beginTime), 100*time.Millisecond)
 
 	// read line interrupted
 	tb.addBuffer([]byte("test\x03message\n"))

@@ -158,6 +158,11 @@ DefaultDownloadPath = /Users/username/Downloads/
   * On the Windows Terminal, drag files to the top left where shows `Paste path to file`.
 
 
+## Development
+
+Want to write your own ssh client that supports trzsz? Please check the [go ssh client example](examples/ssh_client.go).
+
+
 ## Screenshot
 
 #### Windows

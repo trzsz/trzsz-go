@@ -29,7 +29,7 @@ import (
 	"time"
 )
 
-type TrzszBuffer struct {
+type trzszBuffer struct {
 	bufCh   chan []byte
 	stopCh  chan bool
 	nextBuf []byte
@@ -37,22 +37,22 @@ type TrzszBuffer struct {
 	readBuf bytes.Buffer
 }
 
-func NewTrzszBuffer() *TrzszBuffer {
-	return &TrzszBuffer{bufCh: make(chan []byte, 100), stopCh: make(chan bool, 1)}
+func newTrzszBuffer() *trzszBuffer {
+	return &trzszBuffer{bufCh: make(chan []byte, 100), stopCh: make(chan bool, 1)}
 }
 
-func (b *TrzszBuffer) addBuffer(buf []byte) {
+func (b *trzszBuffer) addBuffer(buf []byte) {
 	b.bufCh <- buf
 }
 
-func (b *TrzszBuffer) stopBuffer() {
+func (b *trzszBuffer) stopBuffer() {
 	select {
 	case b.stopCh <- true:
 	default:
 	}
 }
 
-func (b *TrzszBuffer) drainBuffer() {
+func (b *trzszBuffer) drainBuffer() {
 	for {
 		select {
 		case <-b.bufCh:
@@ -62,7 +62,7 @@ func (b *TrzszBuffer) drainBuffer() {
 	}
 }
 
-func (b *TrzszBuffer) popBuffer() []byte {
+func (b *trzszBuffer) popBuffer() []byte {
 	if b.nextBuf != nil && b.nextIdx < len(b.nextBuf) {
 		buf := b.nextBuf[b.nextIdx:]
 		b.nextBuf = nil
@@ -79,7 +79,7 @@ func (b *TrzszBuffer) popBuffer() []byte {
 	}
 }
 
-func (b *TrzszBuffer) nextBuffer(timeout <-chan time.Time) ([]byte, error) {
+func (b *trzszBuffer) nextBuffer(timeout <-chan time.Time) ([]byte, error) {
 	if b.nextBuf != nil && b.nextIdx < len(b.nextBuf) {
 		return b.nextBuf[b.nextIdx:], nil
 	}
@@ -88,13 +88,13 @@ func (b *TrzszBuffer) nextBuffer(timeout <-chan time.Time) ([]byte, error) {
 		b.nextIdx = 0
 		return b.nextBuf, nil
 	case <-b.stopCh:
-		return nil, newTrzszError("Stopped")
+		return nil, newSimpleTrzszError("Stopped")
 	case <-timeout:
-		return nil, newTrzszError("Receive data timeout")
+		return nil, newSimpleTrzszError("Receive data timeout")
 	}
 }
 
-func (b *TrzszBuffer) readLine(mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
+func (b *trzszBuffer) readLine(mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
 	b.readBuf.Reset()
 	for {
 		buf, err := b.nextBuffer(timeout)
@@ -109,7 +109,7 @@ func (b *TrzszBuffer) readLine(mayHasJunk bool, timeout <-chan time.Time) ([]byt
 			b.nextIdx += len(buf)
 		}
 		if bytes.IndexByte(buf, '\x03') >= 0 { // `ctrl + c` to interrupt
-			return nil, newTrzszError("Interrupted")
+			return nil, newSimpleTrzszError("Interrupted")
 		}
 		b.readBuf.Write(buf)
 		if newLineIdx >= 0 {
@@ -122,7 +122,7 @@ func (b *TrzszBuffer) readLine(mayHasJunk bool, timeout <-chan time.Time) ([]byt
 	}
 }
 
-func (b *TrzszBuffer) readBinary(size int, timeout <-chan time.Time) ([]byte, error) {
+func (b *trzszBuffer) readBinary(size int, timeout <-chan time.Time) ([]byte, error) {
 	b.readBuf.Reset()
 	if b.readBuf.Cap() < size {
 		b.readBuf.Grow(size)
@@ -160,7 +160,7 @@ func isTrzszLetter(b byte) bool {
 	return false
 }
 
-func (b *TrzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error) {
+func (b *trzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error) {
 	b.readBuf.Reset()
 	lastByte := byte('\x1b')
 	skipVT100 := false
@@ -186,7 +186,7 @@ func (b *TrzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error
 		for i := 0; i < len(buf); i++ {
 			c := buf[i]
 			if c == '\x03' { // `ctrl + c` to interrupt
-				return nil, newTrzszError("Interrupted")
+				return nil, newSimpleTrzszError("Interrupted")
 			}
 			if c == '\n' {
 				hasNewline = true

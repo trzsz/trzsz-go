@@ -36,20 +36,20 @@ import (
 	"golang.org/x/term"
 )
 
-type TrzArgs struct {
-	Args
+type trzArgs struct {
+	baseArgs
 	Path string `arg:"positional" default:"." help:"path to save file(s). (default: current directory)"`
 }
 
-func (TrzArgs) Description() string {
+func (trzArgs) Description() string {
 	return "Receive file(s), similar to rz and compatible with tmux.\n"
 }
 
-func (TrzArgs) Version() string {
+func (trzArgs) Version() string {
 	return fmt.Sprintf("trz (trzsz) go %s", kTrzszVersion)
 }
 
-func recvFiles(transfer *TrzszTransfer, args *TrzArgs, tmuxMode TmuxMode, tmuxPaneWidth int) error {
+func recvFiles(transfer *trzszTransfer, args *trzArgs, tmuxMode tmuxModeType, tmuxPaneWidth int) error {
 	action, err := transfer.recvAction()
 	if err != nil {
 		return err
@@ -67,11 +67,11 @@ func recvFiles(transfer *TrzszTransfer, args *TrzArgs, tmuxMode TmuxMode, tmuxPa
 
 	// check if the client doesn't support transfer directory
 	if args.Directory && !action.SupportDirectory {
-		return newTrzszError("The client doesn't support transfer directory")
+		return newSimpleTrzszError("The client doesn't support transfer directory")
 	}
 
 	escapeChars := getEscapeChars(args.Escape)
-	if err := transfer.sendConfig(&args.Args, action, escapeChars, tmuxMode, tmuxPaneWidth); err != nil {
+	if err := transfer.sendConfig(&args.baseArgs, action, escapeChars, tmuxMode, tmuxPaneWidth); err != nil {
 		return err
 	}
 
@@ -88,9 +88,9 @@ func recvFiles(transfer *TrzszTransfer, args *TrzArgs, tmuxMode TmuxMode, tmuxPa
 	return nil
 }
 
-// TrzMain entry of recevie files from client
+// TrzMain is the main function of `trz` binary.
 func TrzMain() int {
-	var args TrzArgs
+	var args trzArgs
 	arg.MustParse(&args)
 
 	var err error
@@ -110,23 +110,23 @@ func TrzMain() int {
 		return -3
 	}
 
-	if args.Binary && tmuxMode != NoTmux {
+	if args.Binary && tmuxMode != noTmuxMode {
 		os.Stdout.WriteString("Binary upload in tmux is not supported, auto switch to base64 mode.\n")
 		args.Binary = false
 	}
-	if args.Binary && IsWindows() {
+	if args.Binary && isRunningOnWindows() {
 		os.Stdout.WriteString("Binary upload on Windows is not supported, auto switch to base64 mode.\n")
 		args.Binary = false
 	}
 
 	uniqueID := strconv.FormatInt(time.Now().UnixMilli()%10e10, 10)
-	if IsWindows() {
+	if isRunningOnWindows() {
 		if inMode, outMode, err := enableVirtualTerminal(); err == nil {
-			defer resetVirtualTerminal(inMode, outMode)
+			defer resetVirtualTerminal(inMode, outMode) // nolint:all
 		}
 		setupConsoleOutput()
 		uniqueID += "10"
-	} else if tmuxMode == TmuxNormalMode {
+	} else if tmuxMode == tmuxNormalMode {
 		columns := getTerminalColumns()
 		if columns > 0 && columns < 40 {
 			os.Stdout.WriteString("\n\n\x1b[2A\x1b[0J")
@@ -152,10 +152,10 @@ func TrzMain() int {
 	}
 	defer func() { _ = term.Restore(int(os.Stdin.Fd()), state) }()
 
-	transfer := NewTransfer(realStdout, state, false)
+	transfer := newTransfer(realStdout, state, false, nil)
 	defer func() {
 		if err := recover(); err != nil {
-			transfer.serverError(NewTrzszError(fmt.Sprintf("%v", err), "panic", true))
+			transfer.serverError(newTrzszError(fmt.Sprintf("%v", err), "panic", true))
 		}
 	}()
 

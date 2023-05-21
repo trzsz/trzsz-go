@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2022 Lonny Wong
+Copyright (c) 2023 Lonny Wong
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@ package trzsz
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -36,9 +37,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-type TrzszPty struct {
-	Stdin     PtyIO
-	Stdout    PtyIO
+type trzszPty struct {
+	Stdin     io.ReadWriteCloser
+	Stdout    io.ReadWriteCloser
 	cpty      *conpty.ConPty
 	inCP      uint32
 	outCP     uint32
@@ -133,7 +134,7 @@ func resetVirtualTerminal(inMode, outMode uint32) error {
 	return nil
 }
 
-func Spawn(name string, args ...string) (*TrzszPty, error) {
+func spawn(name string, args ...string) (*trzszPty, error) {
 	// get pty size
 	width, height, err := getConsoleSize()
 	if err != nil {
@@ -168,17 +169,17 @@ func Spawn(name string, args ...string) (*TrzszPty, error) {
 		return nil, err
 	}
 
-	return &TrzszPty{cpty, cpty, cpty, inCP, outCP, inMode, outMode, width, height, false, nil, time.Now()}, nil
+	return &trzszPty{cpty, cpty, cpty, inCP, outCP, inMode, outMode, width, height, false, nil, time.Now()}, nil
 }
 
-func (t *TrzszPty) OnResize(cb func(int)) {
+func (t *trzszPty) OnResize(cb func(int)) {
 }
 
-func (t *TrzszPty) GetColumns() (int, error) {
+func (t *trzszPty) GetColumns() (int, error) {
 	return t.width, nil
 }
 
-func (t *TrzszPty) Close() {
+func (t *trzszPty) Close() {
 	if t.closed {
 		return
 	}
@@ -195,16 +196,16 @@ func (t *TrzszPty) Close() {
 	}
 }
 
-func (t *TrzszPty) Wait() {
+func (t *trzszPty) Wait() {
 	code, _ := t.cpty.Wait(context.Background())
 	t.exitCode = &code
 }
 
-func (t *TrzszPty) Terminate() {
+func (t *trzszPty) Terminate() {
 	t.Close()
 }
 
-func (t *TrzszPty) ExitCode() int {
+func (t *trzszPty) ExitCode() int {
 	if t.exitCode == nil {
 		return 0
 	}

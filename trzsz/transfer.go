@@ -30,6 +30,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -43,7 +44,7 @@ import (
 	"golang.org/x/term"
 )
 
-type TransferAction struct {
+type transferAction struct {
 	Lang             string `json:"lang"`
 	Version          string `json:"version"`
 	Confirm          bool   `json:"confirm"`
@@ -53,7 +54,7 @@ type TransferAction struct {
 	SupportDirectory bool   `json:"support_dir"`
 }
 
-type TransferConfig struct {
+type transferConfig struct {
 	Quiet           bool        `json:"quiet"`
 	Binary          bool        `json:"binary"`
 	Directory       bool        `json:"directory"`
@@ -62,25 +63,26 @@ type TransferConfig struct {
 	Newline         string      `json:"newline"`
 	Protocol        int         `json:"protocol"`
 	MaxBufSize      int64       `json:"bufsize"`
-	EscapeCodes     EscapeArray `json:"escape_chars"`
+	EscapeCodes     escapeArray `json:"escape_chars"`
 	TmuxPaneColumns int         `json:"tmux_pane_width"`
 	TmuxOutputJunk  bool        `json:"tmux_output_junk"`
 }
 
-type TrzszTransfer struct {
-	buffer          *TrzszBuffer
-	writer          PtyIO
+type trzszTransfer struct {
+	buffer          *trzszBuffer
+	writer          io.Writer
 	stopped         bool
 	lastInputTime   atomic.Int64
 	cleanTimeout    time.Duration
 	maxChunkTime    time.Duration
 	stdinState      *term.State
 	fileNameMap     map[int]string
-	remoteIsWindows bool
+	windowsProtocol bool
 	flushInTime     bool
 	bufferSize      atomic.Int64
 	savedSteps      atomic.Int64
-	transferConfig  TransferConfig
+	transferConfig  transferConfig
+	logger          *traceLogger
 }
 
 func maxDuration(a, b time.Duration) time.Duration {
@@ -97,43 +99,44 @@ func minInt64(a, b int64) int64 {
 	return b
 }
 
-func NewTransfer(writer PtyIO, stdinState *term.State, flushInTime bool) *TrzszTransfer {
-	t := &TrzszTransfer{
-		buffer:       NewTrzszBuffer(),
+func newTransfer(writer io.Writer, stdinState *term.State, flushInTime bool, logger *traceLogger) *trzszTransfer {
+	t := &trzszTransfer{
+		buffer:       newTrzszBuffer(),
 		writer:       writer,
 		cleanTimeout: 100 * time.Millisecond,
 		stdinState:   stdinState,
 		fileNameMap:  make(map[int]string),
 		flushInTime:  flushInTime,
-		transferConfig: TransferConfig{
+		transferConfig: transferConfig{
 			Timeout:    20,
 			Newline:    "\n",
 			MaxBufSize: 10 * 1024 * 1024,
 		},
+		logger: logger,
 	}
 	t.bufferSize.Store(1024)
 	return t
 }
 
-func (t *TrzszTransfer) addReceivedData(buf []byte) {
+func (t *trzszTransfer) addReceivedData(buf []byte) {
 	if !t.stopped {
 		t.buffer.addBuffer(buf)
 	}
 	t.lastInputTime.Store(time.Now().UnixMilli())
 }
 
-func (t *TrzszTransfer) stopTransferringFiles() {
+func (t *trzszTransfer) stopTransferringFiles() {
 	t.cleanTimeout = maxDuration(t.maxChunkTime*2, 500*time.Millisecond)
 	t.stopped = true
 	t.buffer.stopBuffer()
 }
 
-func (t *TrzszTransfer) cleanInput(timeoutDuration time.Duration) {
+func (t *trzszTransfer) cleanInput(timeoutDuration time.Duration) {
 	t.stopped = true
 	t.buffer.drainBuffer()
 	t.lastInputTime.Store(time.Now().UnixMilli())
 	for {
-		sleepDuration := timeoutDuration - time.Now().Sub(time.UnixMilli(t.lastInputTime.Load()))
+		sleepDuration := timeoutDuration - time.Since(time.UnixMilli(t.lastInputTime.Load()))
 		if sleepDuration <= 0 {
 			return
 		}
@@ -141,23 +144,23 @@ func (t *TrzszTransfer) cleanInput(timeoutDuration time.Duration) {
 	}
 }
 
-func (t *TrzszTransfer) writeAll(buf []byte) error {
-	if gTrzszArgs.TraceLog {
-		writeTraceLog(buf, "tosvr")
+func (t *trzszTransfer) writeAll(buf []byte) error {
+	if t.logger != nil {
+		t.logger.writeTraceLog(buf, "tosvr")
 	}
 	return writeAll(t.writer, buf)
 }
 
-func (t *TrzszTransfer) sendLine(typ string, buf string) error {
+func (t *trzszTransfer) sendLine(typ string, buf string) error {
 	return t.writeAll([]byte(fmt.Sprintf("#%s:%s%s", typ, buf, t.transferConfig.Newline)))
 }
 
-func (t *TrzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
+func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
 	if t.stopped {
-		return nil, newTrzszError("Stopped")
+		return nil, newSimpleTrzszError("Stopped")
 	}
 
-	if IsWindows() || t.remoteIsWindows {
+	if isRunningOnWindows() || t.windowsProtocol {
 		line, err := t.buffer.readLineOnWindows(timeout)
 		if err != nil {
 			return nil, err
@@ -184,7 +187,7 @@ func (t *TrzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 	return line, nil
 }
 
-func (t *TrzszTransfer) recvCheck(expectType string, mayHasJunk bool, timeout <-chan time.Time) (string, error) {
+func (t *trzszTransfer) recvCheck(expectType string, mayHasJunk bool, timeout <-chan time.Time) (string, error) {
 	line, err := t.recvLine(expectType, mayHasJunk, timeout)
 	if err != nil {
 		return "", err
@@ -192,23 +195,23 @@ func (t *TrzszTransfer) recvCheck(expectType string, mayHasJunk bool, timeout <-
 
 	idx := bytes.IndexByte(line, ':')
 	if idx < 1 {
-		return "", NewTrzszError(encodeBytes(line), "colon", true)
+		return "", newTrzszError(encodeBytes(line), "colon", true)
 	}
 
 	typ := string(line[1:idx])
 	buf := string(line[idx+1:])
 	if typ != expectType {
-		return "", NewTrzszError(buf, typ, true)
+		return "", newTrzszError(buf, typ, true)
 	}
 
 	return buf, nil
 }
 
-func (t *TrzszTransfer) sendInteger(typ string, val int64) error {
+func (t *trzszTransfer) sendInteger(typ string, val int64) error {
 	return t.sendLine(typ, strconv.FormatInt(val, 10))
 }
 
-func (t *TrzszTransfer) recvInteger(typ string, mayHasJunk bool, timeout <-chan time.Time) (int64, error) {
+func (t *trzszTransfer) recvInteger(typ string, mayHasJunk bool, timeout <-chan time.Time) (int64, error) {
 	buf, err := t.recvCheck(typ, mayHasJunk, timeout)
 	if err != nil {
 		return 0, err
@@ -216,22 +219,22 @@ func (t *TrzszTransfer) recvInteger(typ string, mayHasJunk bool, timeout <-chan 
 	return strconv.ParseInt(buf, 10, 64)
 }
 
-func (t *TrzszTransfer) checkInteger(expect int64) error {
+func (t *trzszTransfer) checkInteger(expect int64) error {
 	result, err := t.recvInteger("SUCC", false, nil)
 	if err != nil {
 		return err
 	}
 	if result != expect {
-		return NewTrzszError(fmt.Sprintf("Integer check [%d] <> [%d]", result, expect), "", true)
+		return newTrzszError(fmt.Sprintf("Integer check [%d] <> [%d]", result, expect), "", true)
 	}
 	return nil
 }
 
-func (t *TrzszTransfer) sendString(typ string, str string) error {
+func (t *trzszTransfer) sendString(typ string, str string) error {
 	return t.sendLine(typ, encodeString(str))
 }
 
-func (t *TrzszTransfer) recvString(typ string, mayHasJunk bool) (string, error) {
+func (t *trzszTransfer) recvString(typ string, mayHasJunk bool) (string, error) {
 	buf, err := t.recvCheck(typ, mayHasJunk, nil)
 	if err != nil {
 		return "", err
@@ -243,22 +246,22 @@ func (t *TrzszTransfer) recvString(typ string, mayHasJunk bool) (string, error) 
 	return string(b), nil
 }
 
-func (t *TrzszTransfer) checkString(expect string) error {
+func (t *trzszTransfer) checkString(expect string) error { // nolint:all
 	result, err := t.recvString("SUCC", false)
 	if err != nil {
 		return err
 	}
 	if result != expect {
-		return NewTrzszError(fmt.Sprintf("String check [%s] <> [%s]", result, expect), "", true)
+		return newTrzszError(fmt.Sprintf("String check [%s] <> [%s]", result, expect), "", true)
 	}
 	return nil
 }
 
-func (t *TrzszTransfer) sendBinary(typ string, buf []byte) error {
+func (t *trzszTransfer) sendBinary(typ string, buf []byte) error {
 	return t.sendLine(typ, encodeBytes(buf))
 }
 
-func (t *TrzszTransfer) recvBinary(typ string, mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
+func (t *trzszTransfer) recvBinary(typ string, mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
 	buf, err := t.recvCheck(typ, mayHasJunk, timeout)
 	if err != nil {
 		return nil, err
@@ -266,18 +269,18 @@ func (t *TrzszTransfer) recvBinary(typ string, mayHasJunk bool, timeout <-chan t
 	return decodeString(buf)
 }
 
-func (t *TrzszTransfer) checkBinary(expect []byte) error {
+func (t *trzszTransfer) checkBinary(expect []byte) error {
 	result, err := t.recvBinary("SUCC", false, nil)
 	if err != nil {
 		return err
 	}
-	if bytes.Compare(result, expect) != 0 {
-		return NewTrzszError(fmt.Sprintf("Binary check [%v] <> [%v]", result, expect), "", true)
+	if bytes.Compare(result, expect) != 0 { // nolint:all
+		return newTrzszError(fmt.Sprintf("Binary check [%v] <> [%v]", result, expect), "", true)
 	}
 	return nil
 }
 
-func (t *TrzszTransfer) sendData(data []byte) error {
+func (t *trzszTransfer) sendData(data []byte) error {
 	if !t.transferConfig.Binary {
 		return t.sendBinary("DATA", data)
 	}
@@ -288,14 +291,14 @@ func (t *TrzszTransfer) sendData(data []byte) error {
 	return t.writeAll(buf)
 }
 
-func (t *TrzszTransfer) getNewTimeout() <-chan time.Time {
+func (t *trzszTransfer) getNewTimeout() <-chan time.Time {
 	if t.transferConfig.Timeout > 0 {
 		return time.NewTimer(time.Duration(t.transferConfig.Timeout) * time.Second).C
 	}
 	return nil
 }
 
-func (t *TrzszTransfer) recvData() ([]byte, error) {
+func (t *trzszTransfer) recvData() ([]byte, error) {
 	timeout := t.getNewTimeout()
 	if !t.transferConfig.Binary {
 		return t.recvBinary("DATA", false, timeout)
@@ -311,8 +314,8 @@ func (t *TrzszTransfer) recvData() ([]byte, error) {
 	return unescapeData(data, t.transferConfig.EscapeCodes), nil
 }
 
-func (t *TrzszTransfer) sendAction(confirm, remoteIsWindows bool) error {
-	action := &TransferAction{
+func (t *trzszTransfer) sendAction(confirm, remoteIsWindows bool) error {
+	action := &transferAction{
 		Lang:             "go",
 		Version:          kTrzszVersion,
 		Confirm:          confirm,
@@ -321,7 +324,7 @@ func (t *TrzszTransfer) sendAction(confirm, remoteIsWindows bool) error {
 		SupportBinary:    true,
 		SupportDirectory: true,
 	}
-	if IsWindows() || remoteIsWindows {
+	if isRunningOnWindows() || remoteIsWindows {
 		action.Newline = "!\n"
 		action.SupportBinary = false
 	}
@@ -330,18 +333,18 @@ func (t *TrzszTransfer) sendAction(confirm, remoteIsWindows bool) error {
 		return err
 	}
 	if remoteIsWindows {
-		t.remoteIsWindows = true
+		t.windowsProtocol = true
 		t.transferConfig.Newline = "!\n"
 	}
 	return t.sendString("ACT", string(actStr))
 }
 
-func (t *TrzszTransfer) recvAction() (*TransferAction, error) {
+func (t *trzszTransfer) recvAction() (*transferAction, error) {
 	actStr, err := t.recvString("ACT", false)
 	if err != nil {
 		return nil, err
 	}
-	action := &TransferAction{
+	action := &transferAction{
 		Newline:       "\n",
 		SupportBinary: true,
 	}
@@ -352,7 +355,7 @@ func (t *TrzszTransfer) recvAction() (*TransferAction, error) {
 	return action, nil
 }
 
-func (t *TrzszTransfer) sendConfig(args *Args, action *TransferAction, escapeChars [][]unicode, tmuxMode TmuxMode, tmuxPaneWidth int) error {
+func (t *trzszTransfer) sendConfig(args *baseArgs, action *transferAction, escapeChars [][]unicode, tmuxMode tmuxModeType, tmuxPaneWidth int) error {
 	cfgMap := map[string]interface{}{
 		"lang": "go",
 	}
@@ -371,7 +374,7 @@ func (t *TrzszTransfer) sendConfig(args *Args, action *TransferAction, escapeCha
 	if args.Overwrite {
 		cfgMap["overwrite"] = true
 	}
-	if tmuxMode == TmuxNormalMode {
+	if tmuxMode == tmuxNormalMode {
 		cfgMap["tmux_output_junk"] = true
 		cfgMap["tmux_pane_width"] = tmuxPaneWidth
 	}
@@ -388,7 +391,7 @@ func (t *TrzszTransfer) sendConfig(args *Args, action *TransferAction, escapeCha
 	return t.sendString("CFG", string(cfgStr))
 }
 
-func (t *TrzszTransfer) recvConfig() (*TransferConfig, error) {
+func (t *trzszTransfer) recvConfig() (*transferConfig, error) {
 	cfgStr, err := t.recvString("CFG", true)
 	if err != nil {
 		return nil, err
@@ -399,20 +402,20 @@ func (t *TrzszTransfer) recvConfig() (*TransferConfig, error) {
 	return &t.transferConfig, nil
 }
 
-func (t *TrzszTransfer) clientExit(msg string) error {
+func (t *trzszTransfer) clientExit(msg string) error {
 	return t.sendString("EXIT", msg)
 }
 
-func (t *TrzszTransfer) recvExit() (string, error) {
+func (t *trzszTransfer) recvExit() (string, error) {
 	return t.recvString("EXIT", false)
 }
 
-func (t *TrzszTransfer) serverExit(msg string) {
+func (t *trzszTransfer) serverExit(msg string) {
 	t.cleanInput(500 * time.Millisecond)
 	if t.stdinState != nil {
-		term.Restore(int(os.Stdin.Fd()), t.stdinState)
+		_ = term.Restore(int(os.Stdin.Fd()), t.stdinState)
 	}
-	if IsWindows() {
+	if isRunningOnWindows() {
 		msg = strings.ReplaceAll(msg, "\n", "\r\n")
 		os.Stdout.WriteString("\x1b[H\x1b[2J\x1b[?1049l")
 	} else {
@@ -422,11 +425,11 @@ func (t *TrzszTransfer) serverExit(msg string) {
 	os.Stdout.WriteString("\r\n")
 }
 
-func (t *TrzszTransfer) clientError(err error) {
+func (t *trzszTransfer) clientError(err error) {
 	t.cleanInput(t.cleanTimeout)
 
 	trace := true
-	if e, ok := err.(*TrzszError); ok {
+	if e, ok := err.(*trzszError); ok {
 		trace = e.isTraceBack()
 		if e.isRemoteExit() || e.isRemoteFail() {
 			return
@@ -440,11 +443,11 @@ func (t *TrzszTransfer) clientError(err error) {
 	_ = t.sendString(typ, err.Error())
 }
 
-func (t *TrzszTransfer) serverError(err error) {
+func (t *trzszTransfer) serverError(err error) {
 	t.cleanInput(t.cleanTimeout)
 
 	trace := true
-	if e, ok := err.(*TrzszError); ok {
+	if e, ok := err.(*trzszError); ok {
 		trace = e.isTraceBack()
 		if e.isRemoteExit() || e.isRemoteFail() {
 			t.serverExit(e.Error())
@@ -461,7 +464,7 @@ func (t *TrzszTransfer) serverError(err error) {
 	t.serverExit(err.Error())
 }
 
-func (t *TrzszTransfer) sendFileNum(num int64, progress ProgressCallback) error {
+func (t *trzszTransfer) sendFileNum(num int64, progress progressCallback) error {
 	if err := t.sendInteger("NUM", num); err != nil {
 		return err
 	}
@@ -474,7 +477,7 @@ func (t *TrzszTransfer) sendFileNum(num int64, progress ProgressCallback) error 
 	return nil
 }
 
-func (t *TrzszTransfer) sendFileName(f *TrzszFile, progress ProgressCallback) (*os.File, string, error) {
+func (t *trzszTransfer) sendFileName(f *trzszFile, progress progressCallback) (*os.File, string, error) {
 	var fileName string
 	if t.transferConfig.Directory {
 		jsonName, err := json.Marshal(f)
@@ -505,7 +508,7 @@ func (t *TrzszTransfer) sendFileName(f *TrzszFile, progress ProgressCallback) (*
 	return file, remoteName, nil
 }
 
-func (t *TrzszTransfer) sendFileSize(file *os.File, progress ProgressCallback) (int64, error) {
+func (t *trzszTransfer) sendFileSize(file *os.File, progress progressCallback) (int64, error) {
 	stat, err := file.Stat()
 	if err != nil {
 		return 0, err
@@ -523,7 +526,7 @@ func (t *TrzszTransfer) sendFileSize(file *os.File, progress ProgressCallback) (
 	return size, nil
 }
 
-func (t *TrzszTransfer) sendFileData(file *os.File, size int64, progress ProgressCallback) ([]byte, error) {
+func (t *trzszTransfer) sendFileData(file *os.File, size int64, progress progressCallback) ([]byte, error) {
 	step := int64(0)
 	if progress != nil && !reflect.ValueOf(progress).IsNil() {
 		progress.onStep(step)
@@ -552,7 +555,7 @@ func (t *TrzszTransfer) sendFileData(file *os.File, size int64, progress Progres
 		if progress != nil && !reflect.ValueOf(progress).IsNil() {
 			progress.onStep(step)
 		}
-		chunkTime := time.Now().Sub(beginTime)
+		chunkTime := time.Since(beginTime)
 		if length == bufSize && chunkTime < 500*time.Millisecond && bufSize < t.transferConfig.MaxBufSize {
 			bufSize = minInt64(bufSize*2, t.transferConfig.MaxBufSize)
 			buffer = make([]byte, bufSize)
@@ -567,7 +570,7 @@ func (t *TrzszTransfer) sendFileData(file *os.File, size int64, progress Progres
 	return hasher.Sum(nil), nil
 }
 
-func (t *TrzszTransfer) sendFileMD5(digest []byte, progress ProgressCallback) error {
+func (t *trzszTransfer) sendFileMD5(digest []byte, progress progressCallback) error {
 	if err := t.sendBinary("MD5", digest); err != nil {
 		return err
 	}
@@ -580,7 +583,7 @@ func (t *TrzszTransfer) sendFileMD5(digest []byte, progress ProgressCallback) er
 	return nil
 }
 
-func (t *TrzszTransfer) sendFiles(files []*TrzszFile, progress ProgressCallback) ([]string, error) {
+func (t *trzszTransfer) sendFiles(files []*trzszFile, progress progressCallback) ([]string, error) {
 	if err := t.sendFileNum(int64(len(files)), progress); err != nil {
 		return nil, err
 	}
@@ -625,7 +628,7 @@ func (t *TrzszTransfer) sendFiles(files []*TrzszFile, progress ProgressCallback)
 	return remoteNames, nil
 }
 
-func (t *TrzszTransfer) recvFileNum(progress ProgressCallback) (int64, error) {
+func (t *trzszTransfer) recvFileNum(progress progressCallback) (int64, error) {
 	num, err := t.recvInteger("NUM", false, nil)
 	if err != nil {
 		return 0, err
@@ -639,24 +642,24 @@ func (t *TrzszTransfer) recvFileNum(progress ProgressCallback) (int64, error) {
 	return num, nil
 }
 
-func doCreateFile(path string) (*os.File, error) {
+func (t *trzszTransfer) doCreateFile(path string) (*os.File, error) {
 	file, err := os.Create(path)
 	if err != nil {
 		if e, ok := err.(*fs.PathError); ok {
 			if errno, ok := e.Unwrap().(syscall.Errno); ok {
-				if (!IsWindows() && errno == 13) || (IsWindows() && errno == 5) {
-					return nil, newTrzszError(fmt.Sprintf("No permission to write: %s", path))
-				} else if (!IsWindows() && errno == 21) || (IsWindows() && errno == 0x2000002a) {
-					return nil, newTrzszError(fmt.Sprintf("Is a directory: %s", path))
+				if (!isRunningOnWindows() && errno == 13) || (isRunningOnWindows() && errno == 5) {
+					return nil, newSimpleTrzszError(fmt.Sprintf("No permission to write: %s", path))
+				} else if (!isRunningOnWindows() && errno == 21) || (isRunningOnWindows() && errno == 0x2000002a) {
+					return nil, newSimpleTrzszError(fmt.Sprintf("Is a directory: %s", path))
 				}
 			}
 		}
-		return nil, newTrzszError(fmt.Sprintf("%v", err))
+		return nil, newSimpleTrzszError(fmt.Sprintf("%v", err))
 	}
 	return file, nil
 }
 
-func doCreateDirectory(path string) error {
+func (t *trzszTransfer) doCreateDirectory(path string) error {
 	stat, err := os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return os.MkdirAll(path, 0755)
@@ -664,12 +667,12 @@ func doCreateDirectory(path string) error {
 		return err
 	}
 	if !stat.IsDir() {
-		return newTrzszError(fmt.Sprintf("Not a directory: %s", path))
+		return newSimpleTrzszError(fmt.Sprintf("Not a directory: %s", path))
 	}
 	return nil
 }
 
-func (t *TrzszTransfer) createFile(path, fileName string) (*os.File, string, error) {
+func (t *trzszTransfer) createFile(path, fileName string) (*os.File, string, error) {
 	var localName string
 	if t.transferConfig.Overwrite {
 		localName = fileName
@@ -680,20 +683,20 @@ func (t *TrzszTransfer) createFile(path, fileName string) (*os.File, string, err
 			return nil, "", err
 		}
 	}
-	file, err := doCreateFile(filepath.Join(path, localName))
+	file, err := t.doCreateFile(filepath.Join(path, localName))
 	if err != nil {
 		return nil, "", err
 	}
 	return file, localName, nil
 }
 
-func (t *TrzszTransfer) createDirOrFile(path, name string) (*os.File, string, string, error) {
-	var f TrzszFile
+func (t *trzszTransfer) createDirOrFile(path, name string) (*os.File, string, string, error) {
+	var f trzszFile
 	if err := json.Unmarshal([]byte(name), &f); err != nil {
 		return nil, "", "", err
 	}
 	if len(f.RelPath) < 1 {
-		return nil, "", "", newTrzszError(fmt.Sprintf("Invalid name: %s", name))
+		return nil, "", "", newSimpleTrzszError(fmt.Sprintf("Invalid name: %s", name))
 	}
 
 	fileName := f.RelPath[len(f.RelPath)-1]
@@ -717,7 +720,7 @@ func (t *TrzszTransfer) createDirOrFile(path, name string) (*os.File, string, st
 	var fullPath string
 	if len(f.RelPath) > 1 {
 		p := filepath.Join(append([]string{path, localName}, f.RelPath[1:len(f.RelPath)-1]...)...)
-		if err := doCreateDirectory(p); err != nil {
+		if err := t.doCreateDirectory(p); err != nil {
 			return nil, "", "", err
 		}
 		fullPath = filepath.Join(p, fileName)
@@ -726,20 +729,20 @@ func (t *TrzszTransfer) createDirOrFile(path, name string) (*os.File, string, st
 	}
 
 	if f.IsDir {
-		if err := doCreateDirectory(fullPath); err != nil {
+		if err := t.doCreateDirectory(fullPath); err != nil {
 			return nil, "", "", err
 		}
 		return nil, localName, fileName, nil
 	}
 
-	file, err := doCreateFile(fullPath)
+	file, err := t.doCreateFile(fullPath)
 	if err != nil {
 		return nil, "", "", err
 	}
 	return file, localName, fileName, nil
 }
 
-func (t *TrzszTransfer) recvFileName(path string, progress ProgressCallback) (*os.File, string, error) {
+func (t *trzszTransfer) recvFileName(path string, progress progressCallback) (*os.File, string, error) {
 	fileName, err := t.recvString("NAME", false)
 	if err != nil {
 		return nil, "", err
@@ -766,7 +769,7 @@ func (t *TrzszTransfer) recvFileName(path string, progress ProgressCallback) (*o
 	return file, localName, nil
 }
 
-func (t *TrzszTransfer) recvFileSize(progress ProgressCallback) (int64, error) {
+func (t *trzszTransfer) recvFileSize(progress progressCallback) (int64, error) {
 	size, err := t.recvInteger("SIZE", false, nil)
 	if err != nil {
 		return 0, err
@@ -780,7 +783,7 @@ func (t *TrzszTransfer) recvFileSize(progress ProgressCallback) (int64, error) {
 	return size, nil
 }
 
-func (t *TrzszTransfer) recvFileData(file *os.File, size int64, progress ProgressCallback) ([]byte, error) {
+func (t *trzszTransfer) recvFileData(file *os.File, size int64, progress progressCallback) ([]byte, error) {
 	defer file.Close()
 	step := int64(0)
 	if progress != nil && !reflect.ValueOf(progress).IsNil() {
@@ -807,7 +810,7 @@ func (t *TrzszTransfer) recvFileData(file *os.File, size int64, progress Progres
 		if _, err := hasher.Write(data); err != nil {
 			return nil, err
 		}
-		chunkTime := time.Now().Sub(beginTime)
+		chunkTime := time.Since(beginTime)
 		if chunkTime > t.maxChunkTime {
 			t.maxChunkTime = chunkTime
 		}
@@ -815,13 +818,13 @@ func (t *TrzszTransfer) recvFileData(file *os.File, size int64, progress Progres
 	return hasher.Sum(nil), nil
 }
 
-func (t *TrzszTransfer) recvFileMD5(digest []byte, progress ProgressCallback) error {
+func (t *trzszTransfer) recvFileMD5(digest []byte, progress progressCallback) error {
 	expectDigest, err := t.recvBinary("MD5", false, nil)
 	if err != nil {
 		return err
 	}
-	if bytes.Compare(digest, expectDigest) != 0 {
-		return newTrzszError("Check MD5 failed")
+	if bytes.Compare(digest, expectDigest) != 0 { // nolint:all
+		return newSimpleTrzszError("Check MD5 failed")
 	}
 	if err := t.sendBinary("SUCC", digest); err != nil {
 		return err
@@ -832,7 +835,7 @@ func (t *TrzszTransfer) recvFileMD5(digest []byte, progress ProgressCallback) er
 	return nil
 }
 
-func (t *TrzszTransfer) recvFiles(path string, progress ProgressCallback) ([]string, error) {
+func (t *trzszTransfer) recvFiles(path string, progress progressCallback) ([]string, error) {
 	num, err := t.recvFileNum(progress)
 	if err != nil {
 		return nil, err

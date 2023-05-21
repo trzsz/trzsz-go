@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2022 Lonny Wong
+Copyright (c) 2023 Lonny Wong
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -33,11 +33,11 @@ import (
 )
 
 func detectDragFiles(buf []byte) ([]string, bool, bool) {
-	if IsLinux() {
+	if isRunningOnLinux() {
 		return detectDragFilesOnLinux(buf)
-	} else if IsMacOS() {
+	} else if isRunningOnMacOS() {
 		return detectDragFilesOnMacOS(buf)
-	} else if IsWindows() {
+	} else if isRunningOnWindows() {
 		return detectDragFilesOnWindows(buf)
 	}
 	return nil, false, false
@@ -132,7 +132,7 @@ func detectDragFilesOnMacOS(buf []byte) ([]string, bool, bool) {
 	pathBuf := new(bytes.Buffer)
 	for i := 0; i < length; i++ {
 		if buf[i] == ' ' {
-			path := string(pathBuf.Bytes())
+			path := pathBuf.String()
 			if !detectFilePath(path, &dragFiles, &hasDir) {
 				return nil, false, false
 			}

@@ -40,21 +40,22 @@ const (
 	kRelayTransferring
 )
 
-type TrzszRelay struct {
-	pty             *TrzszPty
+type trzszRelay struct {
+	pty             *trzszPty
 	osStdinChan     chan []byte
 	osStdoutChan    chan []byte
 	bypassTmuxChan  chan []byte
 	bufferLock      sync.Mutex
-	stdinBuffer     *TrzszBuffer
-	stdoutBuffer    *TrzszBuffer
+	stdinBuffer     *trzszBuffer
+	stdoutBuffer    *trzszBuffer
 	tmuxPaneWidth   int
 	clientIsWindows bool
 	serverIsWindows bool
 	relayStatus     atomic.Int32
+	logger          *traceLogger
 }
 
-func (r *TrzszRelay) addHandshakeBuffer(buffer *TrzszBuffer, data []byte) (int32, bool) {
+func (r *trzszRelay) addHandshakeBuffer(buffer *trzszBuffer, data []byte) (int32, bool) {
 	r.bufferLock.Lock()
 	defer r.bufferLock.Unlock()
 	status := r.relayStatus.Load()
@@ -65,7 +66,7 @@ func (r *TrzszRelay) addHandshakeBuffer(buffer *TrzszBuffer, data []byte) (int32
 	return status, true
 }
 
-func (r *TrzszRelay) flushHandshakeBuffer(confirm bool) {
+func (r *trzszRelay) flushHandshakeBuffer(confirm bool) {
 	r.bufferLock.Lock()
 	defer r.bufferLock.Unlock()
 
@@ -99,13 +100,13 @@ func (r *TrzszRelay) flushHandshakeBuffer(confirm bool) {
 func decodeRelayBufferString(expectType string, line []byte) (string, error) {
 	idx := bytes.IndexByte(line, ':')
 	if idx < 1 {
-		return "", NewTrzszError(encodeBytes(line), "colon", true)
+		return "", newTrzszError(encodeBytes(line), "colon", true)
 	}
 
 	typ := string(line[1:idx])
 	buf := string(line[idx+1:])
 	if typ != expectType {
-		return "", NewTrzszError(buf, typ, true)
+		return "", newTrzszError(buf, typ, true)
 	}
 
 	data, err := decodeString(buf)
@@ -115,7 +116,7 @@ func decodeRelayBufferString(expectType string, line []byte) (string, error) {
 	return string(data), nil
 }
 
-func recvStringFromBuffer(buffer *TrzszBuffer, expectType string, mayHasJunk bool) (string, error) {
+func recvStringFromBuffer(buffer *trzszBuffer, expectType string, mayHasJunk bool) (string, error) {
 	line, err := buffer.readLine(mayHasJunk, nil)
 	if err != nil {
 		return "", err
@@ -131,7 +132,7 @@ func recvStringFromBuffer(buffer *TrzszBuffer, expectType string, mayHasJunk boo
 	return decodeRelayBufferString(expectType, line)
 }
 
-func recvStringForWindows(buffer *TrzszBuffer, expectType string) (string, error) {
+func recvStringForWindows(buffer *trzszBuffer, expectType string) (string, error) {
 	line, err := buffer.readLineOnWindows(nil)
 	if err != nil {
 		return "", err
@@ -143,21 +144,21 @@ func recvStringForWindows(buffer *TrzszBuffer, expectType string) (string, error
 	return decodeRelayBufferString(expectType, line)
 }
 
-func (r *TrzszRelay) recvStringFromClient(expectType string) (string, error) {
+func (r *trzszRelay) recvStringFromClient(expectType string) (string, error) {
 	if r.serverIsWindows {
 		return recvStringForWindows(r.stdinBuffer, expectType)
 	}
 	return recvStringFromBuffer(r.stdinBuffer, expectType, false)
 }
 
-func (r *TrzszRelay) recvStringFromServer(expectType string) (string, error) {
+func (r *trzszRelay) recvStringFromServer(expectType string) (string, error) {
 	if r.clientIsWindows || r.serverIsWindows {
 		return recvStringForWindows(r.stdoutBuffer, expectType)
 	}
 	return recvStringFromBuffer(r.stdoutBuffer, expectType, true)
 }
 
-func (r *TrzszRelay) sendStringToClient(typ string, str string) error {
+func (r *trzszRelay) sendStringToClient(typ string, str string) error {
 	newline := "\n"
 	if r.clientIsWindows || r.serverIsWindows {
 		newline = "!\n"
@@ -166,7 +167,7 @@ func (r *TrzszRelay) sendStringToClient(typ string, str string) error {
 	return nil
 }
 
-func (r *TrzszRelay) sendStringToServer(typ string, str string) error {
+func (r *trzszRelay) sendStringToServer(typ string, str string) error {
 	newline := "\n"
 	if r.serverIsWindows {
 		newline = "!\n"
@@ -175,12 +176,12 @@ func (r *TrzszRelay) sendStringToServer(typ string, str string) error {
 	return nil
 }
 
-func (r *TrzszRelay) recvAction() (*TransferAction, error) {
+func (r *trzszRelay) recvAction() (*transferAction, error) {
 	actStr, err := r.recvStringFromClient("ACT")
 	if err != nil {
 		return nil, err
 	}
-	action := &TransferAction{
+	action := &transferAction{
 		Newline:       "\n",
 		SupportBinary: true,
 	}
@@ -190,7 +191,7 @@ func (r *TrzszRelay) recvAction() (*TransferAction, error) {
 	return action, nil
 }
 
-func (r *TrzszRelay) sendAction(action *TransferAction) error {
+func (r *trzszRelay) sendAction(action *transferAction) error {
 	actStr, err := json.Marshal(action)
 	if err != nil {
 		return err
@@ -198,12 +199,12 @@ func (r *TrzszRelay) sendAction(action *TransferAction) error {
 	return r.sendStringToServer("ACT", string(actStr))
 }
 
-func (r *TrzszRelay) recvConfig() (*TransferConfig, error) {
+func (r *trzszRelay) recvConfig() (*transferConfig, error) {
 	cfgStr, err := r.recvStringFromServer("CFG")
 	if err != nil {
 		return nil, err
 	}
-	config := &TransferConfig{
+	config := &transferConfig{
 		Timeout:    20,
 		Newline:    "\n",
 		MaxBufSize: 10 * 1024 * 1024,
@@ -217,7 +218,7 @@ func (r *TrzszRelay) recvConfig() (*TransferConfig, error) {
 	return config, nil
 }
 
-func (r *TrzszRelay) sendConfig(config *TransferConfig) error {
+func (r *trzszRelay) sendConfig(config *transferConfig) error {
 	cfgStr, err := json.Marshal(config)
 	if err != nil {
 		return err
@@ -225,12 +226,12 @@ func (r *TrzszRelay) sendConfig(config *TransferConfig) error {
 	return r.sendStringToClient("CFG", string(cfgStr))
 }
 
-func (r *TrzszRelay) sendError(err error) {
-	r.sendStringToClient("FAIL", err.Error())
-	r.sendStringToServer("FAIL", err.Error())
+func (r *trzszRelay) sendError(err error) {
+	_ = r.sendStringToClient("FAIL", err.Error())
+	_ = r.sendStringToServer("FAIL", err.Error())
 }
 
-func (r *TrzszRelay) handshake() {
+func (r *trzszRelay) handshake() {
 	confirm := false
 	var err error = nil
 	defer func() {
@@ -242,7 +243,7 @@ func (r *TrzszRelay) handshake() {
 
 	action, err := r.recvAction()
 	if err != nil {
-		err = newTrzszError(fmt.Sprintf("Relay recv action error: %v", err))
+		err = newSimpleTrzszError(fmt.Sprintf("Relay recv action error: %v", err))
 		return
 	}
 	r.clientIsWindows = action.Newline == "!\n"
@@ -251,8 +252,8 @@ func (r *TrzszRelay) handshake() {
 	if action.Protocol > 2 {
 		action.Protocol = 2
 	}
-	if err := r.sendAction(action); err != nil {
-		err = newTrzszError(fmt.Sprintf("Relay send action error: %v", err))
+	if e := r.sendAction(action); e != nil {
+		err = newSimpleTrzszError(fmt.Sprintf("Relay send action error: %v", e))
 		return
 	}
 
@@ -262,7 +263,7 @@ func (r *TrzszRelay) handshake() {
 
 	config, err := r.recvConfig()
 	if err != nil {
-		err = newTrzszError(fmt.Sprintf("Relay recv config error: %v", err))
+		err = newSimpleTrzszError(fmt.Sprintf("Relay recv config error: %v", err))
 		return
 	}
 
@@ -270,23 +271,23 @@ func (r *TrzszRelay) handshake() {
 	if config.TmuxPaneColumns <= 0 {
 		config.TmuxPaneColumns = r.tmuxPaneWidth
 	}
-	if err := r.sendConfig(config); err != nil {
-		err = newTrzszError(fmt.Sprintf("Relay send config error: %v", err))
+	if e := r.sendConfig(config); e != nil {
+		err = newSimpleTrzszError(fmt.Sprintf("Relay send config error: %v", e))
 		return
 	}
 
 	confirm = true
 }
 
-func (r *TrzszRelay) wrapInput() {
+func (r *trzszRelay) wrapInput() {
 	defer close(r.osStdinChan)
 	for {
 		buffer := make([]byte, 32*1024)
 		n, err := os.Stdin.Read(buffer)
 		if n > 0 {
 			buf := buffer[:n]
-			if gTrzszArgs.TraceLog {
-				writeTraceLog(buf, "stdin")
+			if r.logger != nil {
+				r.logger.writeTraceLog(buf, "stdin")
 			}
 
 			status := r.relayStatus.Load()
@@ -315,16 +316,17 @@ func (r *TrzszRelay) wrapInput() {
 	}
 }
 
-func (r *TrzszRelay) wrapOutput() {
+func (r *trzszRelay) wrapOutput() {
 	defer close(r.osStdoutChan)
 	defer close(r.bypassTmuxChan)
+	detector := newTrzszDetector()
 	for {
 		buffer := make([]byte, 32*1024)
 		n, err := r.pty.Stdout.Read(buffer)
 		if n > 0 {
 			buf := buffer[:n]
-			if gTrzszArgs.TraceLog {
-				buf = writeTraceLog(buf, "svrout")
+			if r.logger != nil {
+				buf = r.logger.writeTraceLog(buf, "svrout")
 			}
 
 			status := r.relayStatus.Load()
@@ -346,10 +348,10 @@ func (r *TrzszRelay) wrapOutput() {
 				continue
 			}
 
-			var mode *byte
-			mode, r.serverIsWindows = detectTrzsz(buf)
+			mode, serverIsWindows := detector.detectTrzsz(buf)
 			if mode != nil {
 				r.relayStatus.Store(kRelayHandshaking) // store status before send to client
+				r.serverIsWindows = serverIsWindows
 				go r.handshake()
 			}
 
@@ -361,49 +363,50 @@ func (r *TrzszRelay) wrapOutput() {
 	}
 }
 
-func NewTrzszRelay(pty *TrzszPty, bypassTmuxOut *os.File, tmuxPaneWidth int) *TrzszRelay {
+func newTrzszRelay(pty *trzszPty, bypassTmuxOut *os.File, tmuxPaneWidth int, logger *traceLogger) *trzszRelay {
 	osStdinChan := make(chan []byte, 10)
 	go func() {
 		for buffer := range osStdinChan {
-			if gTrzszArgs.TraceLog {
-				writeTraceLog(buffer, "tosvr")
+			if logger != nil {
+				logger.writeTraceLog(buffer, "tosvr")
 			}
-			writeAll(pty.Stdin, buffer)
+			_ = writeAll(pty.Stdin, buffer)
 		}
 	}()
 
 	osStdoutChan := make(chan []byte, 10)
 	go func() {
 		for buffer := range osStdoutChan {
-			if gTrzszArgs.TraceLog {
-				writeTraceLog(buffer, "stdout")
+			if logger != nil {
+				logger.writeTraceLog(buffer, "stdout")
 			}
-			writeAll(os.Stdout, buffer)
+			_ = writeAll(os.Stdout, buffer)
 		}
 	}()
 
 	bypassTmuxChan := make(chan []byte, 10)
 	go func() {
 		for buffer := range bypassTmuxChan {
-			if gTrzszArgs.TraceLog {
-				writeTraceLog(buffer, "tocli")
+			if logger != nil {
+				logger.writeTraceLog(buffer, "tocli")
 			}
-			writeAll(bypassTmuxOut, buffer)
+			_ = writeAll(bypassTmuxOut, buffer)
 		}
 	}()
 
-	return &TrzszRelay{
+	return &trzszRelay{
 		pty:            pty,
 		osStdinChan:    osStdinChan,
 		osStdoutChan:   osStdoutChan,
 		bypassTmuxChan: bypassTmuxChan,
-		stdinBuffer:    NewTrzszBuffer(),
-		stdoutBuffer:   NewTrzszBuffer(),
+		stdinBuffer:    newTrzszBuffer(),
+		stdoutBuffer:   newTrzszBuffer(),
 		tmuxPaneWidth:  tmuxPaneWidth,
+		logger:         logger,
 	}
 }
 
-func asyncCopy(src PtyIO, dst PtyIO) {
+func asyncCopy(src io.Reader, dst io.Writer) {
 	bufferChan := make(chan []byte, 10)
 	go func() {
 		defer close(bufferChan)
@@ -420,20 +423,20 @@ func asyncCopy(src PtyIO, dst PtyIO) {
 	}()
 	go func() {
 		for buffer := range bufferChan {
-			writeAll(dst, buffer)
+			_ = writeAll(dst, buffer)
 		}
 	}()
 }
 
-func runAsRelay(pty *TrzszPty) {
+func runAsRelay(pty *trzszPty, logger *traceLogger) {
 	tmuxMode, bypassTmuxOut, tmuxPaneWidth, _ := checkTmux()
-	if tmuxMode != TmuxNormalMode {
+	if tmuxMode != tmuxNormalMode {
 		asyncCopy(os.Stdin, pty.Stdin)
 		asyncCopy(pty.Stdout, os.Stdout)
 		return
 	}
 
-	relay := NewTrzszRelay(pty, bypassTmuxOut, tmuxPaneWidth)
+	relay := newTrzszRelay(pty, bypassTmuxOut, tmuxPaneWidth, logger)
 	go relay.wrapInput()
 	go relay.wrapOutput()
 }

@@ -3,7 +3,7 @@
 /*
 MIT License
 
-Copyright (c) 2022 Lonny Wong
+Copyright (c) 2023 Lonny Wong
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@ SOFTWARE.
 package trzsz
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -37,9 +38,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type TrzszPty struct {
-	Stdin  PtyIO
-	Stdout PtyIO
+type trzszPty struct {
+	Stdin  io.ReadWriteCloser
+	Stdout io.ReadWriteCloser
 	ptmx   *os.File
 	cmd    *exec.Cmd
 	ch     chan os.Signal
@@ -48,7 +49,7 @@ type TrzszPty struct {
 	closed bool
 }
 
-func Spawn(name string, arg ...string) (*TrzszPty, error) {
+func spawn(name string, arg ...string) (*trzszPty, error) {
 	// spawn a pty
 	cmd := exec.Command(name, arg...)
 	ptmx, err := pty.Start(cmd)
@@ -58,11 +59,11 @@ func Spawn(name string, arg ...string) (*TrzszPty, error) {
 
 	// handle pty size
 	ch := make(chan os.Signal, 1)
-	tPty := &TrzszPty{Stdin: ptmx, Stdout: ptmx, ptmx: ptmx, cmd: cmd, ch: ch}
+	tPty := &trzszPty{Stdin: ptmx, Stdout: ptmx, ptmx: ptmx, cmd: cmd, ch: ch}
 	signal.Notify(ch, syscall.SIGWINCH)
 	go func() {
 		for range ch {
-			tPty.Resize()
+			_ = tPty.Resize()
 		}
 	}()
 	ch <- syscall.SIGWINCH
@@ -70,13 +71,13 @@ func Spawn(name string, arg ...string) (*TrzszPty, error) {
 	return tPty, nil
 }
 
-func (t *TrzszPty) OnResize(cb func(int)) {
+func (t *trzszPty) OnResize(cb func(int)) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	t.resize = cb
 }
 
-func (t *TrzszPty) Resize() error {
+func (t *trzszPty) Resize() error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	if t.closed {
@@ -95,7 +96,7 @@ func (t *TrzszPty) Resize() error {
 	return nil
 }
 
-func (t *TrzszPty) GetColumns() (int, error) {
+func (t *trzszPty) GetColumns() (int, error) {
 	size, err := pty.GetsizeFull(os.Stdin)
 	if err != nil {
 		return 0, err
@@ -103,7 +104,7 @@ func (t *TrzszPty) GetColumns() (int, error) {
 	return int(size.Cols), nil
 }
 
-func (t *TrzszPty) Close() {
+func (t *trzszPty) Close() {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	if t.closed {
@@ -115,15 +116,15 @@ func (t *TrzszPty) Close() {
 	t.ptmx.Close()
 }
 
-func (t *TrzszPty) Wait() {
-	t.cmd.Wait()
+func (t *trzszPty) Wait() {
+	_ = t.cmd.Wait()
 }
 
-func (t *TrzszPty) Terminate() {
-	t.cmd.Process.Signal(syscall.SIGTERM)
+func (t *trzszPty) Terminate() {
+	_ = t.cmd.Process.Signal(syscall.SIGTERM)
 }
 
-func (t *TrzszPty) ExitCode() int {
+func (t *trzszPty) ExitCode() int {
 	return t.cmd.ProcessState.ExitCode()
 }
 

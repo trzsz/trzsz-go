@@ -35,7 +35,7 @@ import (
 
 type unicode string
 
-type EscapeArray [][]byte
+type escapeArray [][]byte
 
 func (s unicode) MarshalJSON() ([]byte, error) {
 	b := new(bytes.Buffer)
@@ -75,32 +75,32 @@ func escapeCharsToCodes(escapeChars []interface{}) ([][]byte, error) {
 	for i, v := range escapeChars {
 		a, ok := v.([]interface{})
 		if !ok {
-			return nil, newTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
+			return nil, newSimpleTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
 		}
 		if len(a) != 2 {
-			return nil, newTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
+			return nil, newSimpleTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
 		}
 		b, ok := a[0].(string)
 		if !ok {
-			return nil, newTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
+			return nil, newSimpleTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
 		}
 		bb, err := encoder.Bytes([]byte(b))
 		if err != nil {
 			return nil, err
 		}
 		if len(bb) != 1 {
-			return nil, newTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
+			return nil, newSimpleTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
 		}
 		c, ok := a[1].(string)
 		if !ok {
-			return nil, newTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
+			return nil, newSimpleTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
 		}
 		cc, err := encoder.Bytes([]byte(c))
 		if err != nil {
 			return nil, err
 		}
 		if len(cc) != 2 {
-			return nil, newTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
+			return nil, newSimpleTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
 		}
 		escapeCodes[i] = make([]byte, 3)
 		escapeCodes[i][0] = bb[0]
@@ -110,7 +110,7 @@ func escapeCharsToCodes(escapeChars []interface{}) ([][]byte, error) {
 	return escapeCodes, nil
 }
 
-func (c *EscapeArray) UnmarshalJSON(data []byte) error {
+func (c *escapeArray) UnmarshalJSON(data []byte) error {
 	var codes []interface{}
 	if err := json.Unmarshal(data, &codes); err != nil {
 		return err

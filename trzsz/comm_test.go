@@ -1,3 +1,4 @@
+/*
 MIT License
 
 Copyright (c) 2023 Lonny Wong
@@ -19,3 +20,38 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+*/
+
+package trzsz
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type testWriter struct {
+	t      *testing.T
+	buffer []string
+}
+
+func (w *testWriter) Write(text []byte) (n int, err error) {
+	w.buffer = append(w.buffer, string(text))
+	return len(text), nil
+}
+
+func (w *testWriter) assertBufferCount(count int) {
+	w.t.Helper()
+	require.Equal(w.t, count, len(w.buffer))
+}
+
+func (w *testWriter) assertBufferEqual(idx int, expected string) {
+	w.t.Helper()
+	require.Less(w.t, idx, len(w.buffer))
+	assert.Equal(w.t, expected, w.buffer[idx])
+}
+
+func newTestWriter(t *testing.T) *testWriter {
+	return &testWriter{t, nil}
+}

@@ -38,9 +38,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func NewPipelineContext() *PipelineContext {
+func newPipelineContext() *pipelineContext {
 	c, cancel := context.WithCancelCause(context.Background())
-	return &PipelineContext{c, cancel, make(chan struct{}, 1)}
+	return &pipelineContext{c, cancel, make(chan struct{}, 1)}
 }
 
 func assertClosed(t *testing.T, ch any) {
@@ -57,7 +57,7 @@ func assertClosed(t *testing.T, ch any) {
 			}
 		}
 	}
-	if c, ok := ch.(<-chan TrzszData); ok {
+	if c, ok := ch.(<-chan trzszData); ok {
 		for {
 			select {
 			case _, ok := <-c:
@@ -84,7 +84,7 @@ func assertChannel(t *testing.T, expected any, ch any) {
 		}
 		return
 	}
-	if c, ok := ch.(<-chan TrzszData); ok {
+	if c, ok := ch.(<-chan trzszData); ok {
 		select {
 		case actual, ok := <-c:
 			assert.True(t, ok)
@@ -94,7 +94,7 @@ func assertChannel(t *testing.T, expected any, ch any) {
 		}
 		return
 	}
-	if c, ok := ch.(chan TrzszData); ok {
+	if c, ok := ch.(chan trzszData); ok {
 		select {
 		case actual, ok := <-c:
 			assert.True(t, ok)
@@ -111,7 +111,7 @@ func TestBase64Reader(t *testing.T) {
 	var wg sync.WaitGroup
 	assert := assert.New(t)
 	dataChan := make(chan []byte, 100)
-	base64Reader := NewBase64Reader(NewPipelineContext(), dataChan)
+	base64Reader := newBase64Reader(newPipelineContext(), dataChan)
 
 	// block until new data
 	wg.Add(1)
@@ -122,7 +122,7 @@ func TestBase64Reader(t *testing.T) {
 		assert.Nil(err)
 		assert.Equal(2, n)
 		assert.Equal([]byte{1, 3}, buf)
-		assert.GreaterOrEqual(time.Now().Sub(beginTime), 100*time.Millisecond)
+		assert.GreaterOrEqual(time.Since(beginTime), 100*time.Millisecond)
 		wg.Done()
 	}()
 	time.Sleep(100 * time.Millisecond)
@@ -154,10 +154,10 @@ func TestBase64Reader(t *testing.T) {
 
 	// test cancel
 	base64Reader.ctx.cancel(nil)
-	n, err = base64Reader.Read(buf)
+	_, err = base64Reader.Read(buf)
 	assert.NotNil(err)
 	assert.ErrorIs(err, context.Canceled)
-	base64Reader.ctx = NewPipelineContext() // reset context
+	base64Reader.ctx = newPipelineContext() // reset context
 
 	// test end of file
 	dataChan <- []byte{10, 11}
@@ -172,10 +172,10 @@ func TestBase64Reader(t *testing.T) {
 
 func TestBase64Writer(t *testing.T) {
 	assert := assert.New(t)
-	transfer := NewTransfer(nil, nil, false)
+	transfer := newTransfer(nil, nil, false, nil)
 	transfer.bufferSize.Store(4)
-	dataChan := make(chan TrzszData, 3)
-	base64Writer := NewBase64Writer(transfer, NewPipelineContext(), dataChan)
+	dataChan := make(chan trzszData, 3)
+	base64Writer := newBase64Writer(transfer, newPipelineContext(), dataChan)
 	assertWriteSucc := func(data []byte) {
 		t.Helper()
 		n, err := base64Writer.Write(data)
@@ -192,7 +192,7 @@ func TestBase64Writer(t *testing.T) {
 
 	// buffer just complete
 	assertWriteSucc([]byte("D"))
-	assertChannel(t, TrzszData{4, []byte("#DATA:ABCD\n")}, dataChan)
+	assertChannel(t, trzszData{4, []byte("#DATA:ABCD\n")}, dataChan)
 
 	// buffer complete and more data, and cancel
 	assertWriteSucc([]byte("ABCD1234abcdZZ"))
@@ -200,11 +200,11 @@ func TestBase64Writer(t *testing.T) {
 	n, err := base64Writer.Write([]byte("ZZ"))
 	assert.Equal(0, n)
 	assert.ErrorIs(err, context.Canceled)
-	base64Writer.ctx = NewPipelineContext()                                            // reset context
+	base64Writer.ctx = newPipelineContext()                                            // reset context
 	base64Writer.buffer = bytes.NewBuffer(make([]byte, 0, transfer.bufferSize.Load())) // reset buffer
-	assertChannel(t, TrzszData{4, []byte("#DATA:ABCD\n")}, dataChan)
-	assertChannel(t, TrzszData{4, []byte("#DATA:1234\n")}, dataChan)
-	assertChannel(t, TrzszData{4, []byte("#DATA:abcd\n")}, dataChan)
+	assertChannel(t, trzszData{4, []byte("#DATA:ABCD\n")}, dataChan)
+	assertChannel(t, trzszData{4, []byte("#DATA:1234\n")}, dataChan)
+	assertChannel(t, trzszData{4, []byte("#DATA:abcd\n")}, dataChan)
 	assert.Empty(dataChan)
 
 	// change buffer size
@@ -212,23 +212,23 @@ func TestBase64Writer(t *testing.T) {
 	assertWriteSucc([]byte("XY"))
 	assert.Empty(dataChan)
 	assertWriteSucc([]byte("MN"))
-	assertChannel(t, TrzszData{4, []byte("#DATA:XYMN\n")}, dataChan)
+	assertChannel(t, trzszData{4, []byte("#DATA:XYMN\n")}, dataChan)
 	assertWriteSucc([]byte("ABCDEF"))
-	assertChannel(t, TrzszData{5, []byte("#DATA:ABCDE\n")}, dataChan)
+	assertChannel(t, trzszData{5, []byte("#DATA:ABCDE\n")}, dataChan)
 
 	// close writer
 	assertWriteSucc([]byte("GH"))
 	assert.Empty(dataChan)
 	base64Writer.Close()
-	assertChannel(t, TrzszData{3, []byte("#DATA:FGH\n")}, dataChan)
-	assertChannel(t, TrzszData{0, []byte("#DATA:\n")}, dataChan)
+	assertChannel(t, trzszData{3, []byte("#DATA:FGH\n")}, dataChan)
+	assertChannel(t, trzszData{0, []byte("#DATA:\n")}, dataChan)
 }
 
 func TestPipelineCalculateMD5(t *testing.T) {
 	assert := assert.New(t)
-	transfer := NewTransfer(nil, nil, false)
+	transfer := newTransfer(nil, nil, false, nil)
 	sourceChan := make(chan []byte, 10)
-	digestChan := transfer.pipelineCalculateMD5(NewPipelineContext(), sourceChan)
+	digestChan := transfer.pipelineCalculateMD5(newPipelineContext(), sourceChan)
 	sourceChan <- []byte("123")
 	sourceChan <- []byte("456")
 	sourceChan <- []byte("abc")
@@ -246,17 +246,17 @@ func TestPipelineReadData(t *testing.T) {
 	file, err := os.CreateTemp("", "TestPipelineReadData")
 	assert.Nil(err)
 	defer os.Remove(file.Name())
-	file.Write(bytes.Repeat([]byte{'A'}, 4096))
-	file.Write(bytes.Repeat([]byte{'B'}, 4096))
-	file.Write(bytes.Repeat([]byte{'C'}, 100))
+	_, _ = file.Write(bytes.Repeat([]byte{'A'}, 4096))
+	_, _ = file.Write(bytes.Repeat([]byte{'B'}, 4096))
+	_, _ = file.Write(bytes.Repeat([]byte{'C'}, 100))
 	file.Close()
 	f1, err := os.Open(file.Name())
 	assert.Nil(err)
 	defer f1.Close()
 
 	// read success
-	ctx := NewPipelineContext()
-	transfer := NewTransfer(nil, nil, false)
+	ctx := newPipelineContext()
+	transfer := newTransfer(nil, nil, false, nil)
 	fileDataChan, md5SourceChan := transfer.pipelineReadData(ctx, f1, 4096*2+100)
 
 	assertChannel(t, bytes.Repeat([]byte{'A'}, 4096), fileDataChan)
@@ -272,7 +272,7 @@ func TestPipelineReadData(t *testing.T) {
 	assertClosed(t, md5SourceChan)
 
 	// size incorrect
-	ctx = NewPipelineContext()
+	ctx = newPipelineContext()
 	f2, err := os.Open(file.Name())
 	assert.Nil(err)
 	defer f2.Close()
@@ -297,9 +297,9 @@ func TestPipelineReadData(t *testing.T) {
 func TestPipelineEncodeAndDecode(t *testing.T) {
 	assert := assert.New(t)
 
-	transfer := NewTransfer(nil, nil, false)
+	transfer := newTransfer(nil, nil, false, nil)
 	transfer.bufferSize.Store(4)
-	ctx := NewPipelineContext()
+	ctx := newPipelineContext()
 	srcDataChan := make(chan []byte, 100)
 	sendDataChan := transfer.pipelineEncodeData(ctx, srcDataChan)
 	recvDataChan := make(chan []byte, 100)
@@ -328,9 +328,9 @@ func TestPipelineEscapeData(t *testing.T) {
 	assert := assert.New(t)
 
 	fileDataChan := make(chan []byte, 100)
-	transfer := NewTransfer(nil, nil, false)
+	transfer := newTransfer(nil, nil, false, nil)
 	transfer.bufferSize.Store(4)
-	sendDataChan := transfer.pipelineEscapeData(NewPipelineContext(), fileDataChan)
+	sendDataChan := transfer.pipelineEscapeData(newPipelineContext(), fileDataChan)
 
 	// buffering
 	fileDataChan <- []byte{}
@@ -341,25 +341,25 @@ func TestPipelineEscapeData(t *testing.T) {
 
 	// buffer just complete
 	fileDataChan <- []byte("D")
-	assertChannel(t, TrzszData{4, []byte("#DATA:4\nABCD")}, sendDataChan)
+	assertChannel(t, trzszData{4, []byte("#DATA:4\nABCD")}, sendDataChan)
 
 	// buffer complete and more data
 	fileDataChan <- []byte("ABCD1234abcdZZ")
-	assertChannel(t, TrzszData{4, []byte("#DATA:4\nABCD")}, sendDataChan)
-	assertChannel(t, TrzszData{4, []byte("#DATA:4\n1234")}, sendDataChan)
-	assertChannel(t, TrzszData{4, []byte("#DATA:4\nabcd")}, sendDataChan)
+	assertChannel(t, trzszData{4, []byte("#DATA:4\nABCD")}, sendDataChan)
+	assertChannel(t, trzszData{4, []byte("#DATA:4\n1234")}, sendDataChan)
+	assertChannel(t, trzszData{4, []byte("#DATA:4\nabcd")}, sendDataChan)
 
 	// change buffer size
 	time.Sleep(100 * time.Millisecond)
 	transfer.bufferSize.Store(5)
 	fileDataChan <- []byte("ABCDEFGHI")
-	assertChannel(t, TrzszData{4, []byte("#DATA:4\nZZAB")}, sendDataChan)
-	assertChannel(t, TrzszData{5, []byte("#DATA:5\nCDEFG")}, sendDataChan)
+	assertChannel(t, trzszData{4, []byte("#DATA:4\nZZAB")}, sendDataChan)
+	assertChannel(t, trzszData{5, []byte("#DATA:5\nCDEFG")}, sendDataChan)
 
 	// last buffer
 	close(fileDataChan)
-	assertChannel(t, TrzszData{2, []byte("#DATA:2\nHI")}, sendDataChan)
-	assertChannel(t, TrzszData{0, []byte("#DATA:0\n")}, sendDataChan)
+	assertChannel(t, trzszData{2, []byte("#DATA:2\nHI")}, sendDataChan)
+	assertChannel(t, trzszData{0, []byte("#DATA:0\n")}, sendDataChan)
 	assertClosed(t, sendDataChan)
 
 	// escape data
@@ -370,13 +370,13 @@ func TestPipelineEscapeData(t *testing.T) {
 	assert.Nil(err)
 	err = json.Unmarshal([]byte(cfgStr), &transfer.transferConfig)
 	assert.Nil(err)
-	ctx := NewPipelineContext()
+	ctx := newPipelineContext()
 	fileDataChan = make(chan []byte, 100)
 	sendDataChan = transfer.pipelineEscapeData(ctx, fileDataChan)
 	fileDataChan <- []byte{0xee, 0xee, 0xee}
-	assertChannel(t, TrzszData{5, []byte("#DATA:5\n\xee\xee\xee\xee\xee")}, sendDataChan)
+	assertChannel(t, trzszData{5, []byte("#DATA:5\n\xee\xee\xee\xee\xee")}, sendDataChan)
 	fileDataChan <- []byte{0x7e, 0x7e}
-	assertChannel(t, TrzszData{5, []byte("#DATA:5\n\xee\xee\x31\xee\x31")}, sendDataChan)
+	assertChannel(t, trzszData{5, []byte("#DATA:5\n\xee\xee\x31\xee\x31")}, sendDataChan)
 
 	// cancel
 	fileDataChan <- bytes.Repeat([]byte{0xee}, 4096)
@@ -393,9 +393,10 @@ func TestPipelineUnescapeData(t *testing.T) {
 	}
 	cfgStr, err := json.Marshal(cfgMap)
 	assert.Nil(err)
-	transfer := NewTransfer(nil, nil, false)
+	transfer := newTransfer(nil, nil, false, nil)
 	err = json.Unmarshal([]byte(cfgStr), &transfer.transferConfig)
-	fileDataChan, md5SourceChan := transfer.pipelineUnescapeData(NewPipelineContext(), recvDataChan)
+	assert.Nil(err)
+	fileDataChan, md5SourceChan := transfer.pipelineUnescapeData(newPipelineContext(), recvDataChan)
 
 	// no need to escape
 	recvDataChan <- []byte("123")
