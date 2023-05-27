@@ -10,7 +10,7 @@ require (
 )
 
 require (
-	github.com/UserExistsError/conpty v0.1.0 // indirect
+	github.com/UserExistsError/conpty v0.1.1-0.20230411202500-ce21da718973 // indirect
 	github.com/akavel/rsrc v0.10.2 // indirect
 	github.com/alexflint/go-arg v1.4.3 // indirect
 	github.com/alexflint/go-scalar v1.2.0 // indirect

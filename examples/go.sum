@@ -1,5 +1,5 @@
-github.com/UserExistsError/conpty v0.1.0 h1:irccNCaXUL/QJsAyT17DsGU35W6cxotWAugJ+sdc2C4=
-github.com/UserExistsError/conpty v0.1.0/go.mod h1:qSwznBSBiRYbqlkGadeOQHOYxvTp1dR9qqineUaDoVM=
+github.com/UserExistsError/conpty v0.1.1-0.20230411202500-ce21da718973 h1:Lj4ynqny+8hzzI19/W5g/K9La7ib69TvTuuRbji9NFU=
+github.com/UserExistsError/conpty v0.1.1-0.20230411202500-ce21da718973/go.mod h1:qSwznBSBiRYbqlkGadeOQHOYxvTp1dR9qqineUaDoVM=
 github.com/akavel/rsrc v0.10.2 h1:Zxm8V5eI1hW4gGaYsJQUhxpjkENuG91ki8B4zCrvEsw=
 github.com/akavel/rsrc v0.10.2/go.mod h1:uLoCtb9J+EyAqh+26kdrTgmzRBFPGOolLWKpdxkKq+c=
 github.com/alexflint/go-arg v1.4.3 h1:9rwwEBpMXfKQKceuZfYcwuc/7YY7tWJbFsgG5cAU/uo=

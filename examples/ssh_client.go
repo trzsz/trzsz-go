@@ -150,10 +150,14 @@ func main() {
 		//
 		//   os.Stdin  ┌────────┐   os.Stdin   ┌─────────────┐   ServerIn   ┌────────┐
 		// ───────────►│        ├─────────────►│             ├─────────────►│        │
-		//             │ Client │              │ TrzszFilter │              │ Server │
-		// ◄───────────│        │◄─────────────┤             │◄─────────────┤        │
-		//   os.Stdout └────────┘   os.Stdout  └─────────────┘   ServerOut  └────────┘
-		trzszFilter = trzsz.NewTrzszFilter(os.Stdin, os.Stdout, serverIn, serverOut, trzsz.TrzszOptions{TerminalColumns: width})
+		//             │        │              │ TrzszFilter │              │        │
+		// ◄───────────│ Client │◄─────────────┤             │◄─────────────┤ Server │
+		//   os.Stdout │        │   os.Stdout  └─────────────┘   ServerOut  │        │
+		// ◄───────────│        │◄──────────────────────────────────────────┤        │
+		//   os.Stderr └────────┘                  stderr                   └────────┘
+		trzszFilter = trzsz.NewTrzszFilter(os.Stdin, os.Stdout, serverIn, serverOut,
+			trzsz.TrzszOptions{TerminalColumns: int32(width)})
+		session.Stderr = os.Stderr
 	} else {
 		// create a TrzszFilter to support trzsz, with stdin and stdout controllable.
 		//
@@ -162,16 +166,19 @@ func main() {
 		//             │                                          │
 		//   os.Stdin  │ ┌──────────┐  stdinPipe  ┌───────────┐   │ ClientIn   ┌─────────────┐   ServerIn   ┌────────┐
 		// ────────────┼►│          ├────────────►│           ├───┼───────────►│             ├─────────────►│        │
-		//             │ │  Custom  │             │  io.Pipe  │   │            │ TrzszFilter │              │ Server │
-		// ◄───────────┼─┤          │◄────────────┤           │◄──┼────────────┤             │◄─────────────┤        │
-		//   os.Stdout │ └──────────┘  stdoutPipe └───────────┘   │ ClientOut  └─────────────┘   ServerOut  └────────┘
-		//             └──────────────────────────────────────────┘
+		//             │ │  Custom  │             │  io.Pipe  │   │            │ TrzszFilter │              │        │
+		// ◄───────────┼─┤          │◄────────────┤           │◄──┼────────────┤             │◄─────────────┤ Server │
+		//   os.Stdout │ └──────────┘  stdoutPipe └───────────┘   │ ClientOut  └─────────────┘   ServerOut  │        │
+		// ◄───────────│                                          │◄────────────────────────────────────────┤        │
+		//   os.Stderr └──────────────────────────────────────────┘                stderr                   └────────┘
 		clientIn, stdinPipe := io.Pipe()   // You can treat stdinPipe as session.StdinPipe()
 		stdoutPipe, clientOut := io.Pipe() // You can treat stdoutPipe as session.StdoutPipe()
-		trzszFilter = trzsz.NewTrzszFilter(clientIn, clientOut, serverIn, serverOut, trzsz.TrzszOptions{TerminalColumns: width})
-		// TODO implement your function with stdin and stdout
+		trzszFilter = trzsz.NewTrzszFilter(clientIn, clientOut, serverIn, serverOut,
+			trzsz.TrzszOptions{TerminalColumns: int32(width)})
+		// TODO implement your function with stdin, stdout and stderr
 		go io.Copy(stdinPipe, os.Stdin)   // nolint:all
 		go io.Copy(os.Stdout, stdoutPipe) // nolint:all
+		session.Stderr = os.Stderr
 	}
 
 	// reset terminal columns on resize
@@ -184,7 +191,7 @@ func main() {
 				fmt.Printf("term get size failed: %s\n", err)
 				continue
 			}
-			trzszFilter.SetTerminalColumns(width)
+			trzszFilter.SetTerminalColumns(int32(width))
 		}
 	}()
 	defer func() { signal.Stop(ch); close(ch) }()
