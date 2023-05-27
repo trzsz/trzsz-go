@@ -178,12 +178,15 @@ func (filter *TrzszFilter) chooseDownloadPath() (string, error) {
 	if savePath != nil {
 		return *savePath, nil
 	}
-	path, err := zenity.SelectFile(
+	options := []zenity.Option{
 		zenity.Title("Choose a folder to save file(s)"),
 		zenity.Directory(),
 		zenity.ShowHidden(),
-		zenity.Attach(parentWindowID),
-	)
+	}
+	if !isRunningOnLinux() {
+		options = append(options, zenity.Attach(parentWindowID))
+	}
+	path, err := zenity.SelectFile(options...)
 	if err != nil {
 		return "", err
 	}
@@ -201,7 +204,6 @@ func (filter *TrzszFilter) chooseUploadPaths(directory bool) ([]string, error) {
 	options := []zenity.Option{
 		zenity.Title("Choose some files to send"),
 		zenity.ShowHidden(),
-		zenity.Attach(parentWindowID),
 	}
 	defaultPath := filter.getTrzszConfig("DefaultUploadPath")
 	if defaultPath != nil {
@@ -209,6 +211,9 @@ func (filter *TrzszFilter) chooseUploadPaths(directory bool) ([]string, error) {
 	}
 	if directory {
 		options = append(options, zenity.Directory())
+	}
+	if !isRunningOnLinux() {
+		options = append(options, zenity.Attach(parentWindowID))
 	}
 	files, err := zenity.SelectFileMultiple(options...)
 	if err != nil {
