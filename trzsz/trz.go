@@ -28,7 +28,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -119,13 +118,13 @@ func TrzMain() int {
 		args.Binary = false
 	}
 
-	uniqueID := strconv.FormatInt(time.Now().UnixMilli()%10e10, 10)
+	uniqueID := (time.Now().UnixMilli() % 10e10) * 100
 	if isRunningOnWindows() {
 		if inMode, outMode, err := enableVirtualTerminal(); err == nil {
 			defer resetVirtualTerminal(inMode, outMode) // nolint:all
 		}
 		setupConsoleOutput()
-		uniqueID += "10"
+		uniqueID += 10
 	} else if tmuxMode == tmuxNormalMode {
 		columns := getTerminalColumns()
 		if columns > 0 && columns < 40 {
@@ -133,16 +132,14 @@ func TrzMain() int {
 		} else {
 			os.Stdout.WriteString("\n\x1b[1A\x1b[0J")
 		}
-		uniqueID += "20"
-	} else {
-		uniqueID += "00"
+		uniqueID += 20
 	}
 
 	mode := "R"
 	if args.Directory {
 		mode = "D"
 	}
-	os.Stdout.WriteString(fmt.Sprintf("\x1b7\x07::TRZSZ:TRANSFER:%s:%s:%s\r\n", mode, kTrzszVersion, uniqueID))
+	os.Stdout.WriteString(fmt.Sprintf("\x1b7\x07::TRZSZ:TRANSFER:%s:%s:%013d\r\n", mode, kTrzszVersion, uniqueID))
 	os.Stdout.Sync()
 
 	state, err := term.MakeRaw(int(os.Stdin.Fd()))

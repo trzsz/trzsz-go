@@ -27,7 +27,6 @@ package trzsz
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/alexflint/go-arg"
@@ -118,13 +117,13 @@ func TszMain() int {
 		args.Binary = false
 	}
 
-	uniqueID := strconv.FormatInt(time.Now().UnixMilli()%10e10, 10)
+	uniqueID := (time.Now().UnixMilli() % 10e10) * 100
 	if isRunningOnWindows() {
 		if inMode, outMode, err := enableVirtualTerminal(); err == nil {
-			defer resetVirtualTerminal(inMode, outMode)
+			defer resetVirtualTerminal(inMode, outMode) // nolint:all
 		}
 		setupConsoleOutput()
-		uniqueID += "10"
+		uniqueID += 10
 	} else if tmuxMode == tmuxNormalMode {
 		columns := getTerminalColumns()
 		if columns > 0 && columns < 40 {
@@ -132,12 +131,10 @@ func TszMain() int {
 		} else {
 			os.Stdout.WriteString("\n\x1b[1A\x1b[0J")
 		}
-		uniqueID += "20"
-	} else {
-		uniqueID += "00"
+		uniqueID += 20
 	}
 
-	os.Stdout.WriteString(fmt.Sprintf("\x1b7\x07::TRZSZ:TRANSFER:S:%s:%s\r\n", kTrzszVersion, uniqueID))
+	os.Stdout.WriteString(fmt.Sprintf("\x1b7\x07::TRZSZ:TRANSFER:S:%s:%013d\r\n", kTrzszVersion, uniqueID))
 	os.Stdout.Sync()
 
 	state, err := term.MakeRaw(int(os.Stdin.Fd()))

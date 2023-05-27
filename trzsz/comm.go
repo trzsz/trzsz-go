@@ -458,6 +458,7 @@ func newTrzszDetector() *trzszDetector {
 }
 
 var trzszRegexp = regexp.MustCompile(`::TRZSZ:TRANSFER:([SRD]):(\d+\.\d+\.\d+)(:\d+)?`)
+var tmuxControlModeRegexp = regexp.MustCompile(`((%output %\d+)|(%extended-output %\d+ \d+ :)) .*::TRZSZ:TRANSFER:`)
 
 func (detector *trzszDetector) detectTrzsz(output []byte) (*byte, bool) {
 	if len(output) < 24 {
@@ -469,6 +470,9 @@ func (detector *trzszDetector) detectTrzsz(output []byte) (*byte, bool) {
 	}
 	match := trzszRegexp.FindSubmatch(output[idx:])
 	if len(match) < 2 {
+		return nil, false
+	}
+	if tmuxControlModeRegexp.Match(output) {
 		return nil, false
 	}
 	uniqueID := ""
