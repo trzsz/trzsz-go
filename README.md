@@ -194,7 +194,12 @@ Want to write your own ssh client that supports trzsz? Please check the [go ssh 
 
 Feel free to email the author <lonnywong@qq.com>. Welcome to join the QQ group: 318578930.
 
+
+## Sponsor
+
 Want to buy the author a drink🍺?
 
 ![sponsor wechat qrcode](https://trzsz.github.io/images/sponsor_wechat.jpg)
 ![sponsor alipay qrcode](https://trzsz.github.io/images/sponsor_alipay.jpg)
+
+Thanks [@BrightXiaoHan](https://github.com/BrightXiaoHan).
