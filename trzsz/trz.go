@@ -31,7 +31,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alexflint/go-arg"
+	"github.com/trzsz/go-arg"
 	"golang.org/x/term"
 )
 

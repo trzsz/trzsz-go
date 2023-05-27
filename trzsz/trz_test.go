@@ -28,8 +28,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alexflint/go-arg"
 	"github.com/stretchr/testify/assert"
+	"github.com/trzsz/go-arg"
 )
 
 func newTrzArgs(args baseArgs, path string) trzArgs {
