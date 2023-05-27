@@ -48,7 +48,7 @@ type trzszRelay struct {
 	bufferLock      sync.Mutex
 	stdinBuffer     *trzszBuffer
 	stdoutBuffer    *trzszBuffer
-	tmuxPaneWidth   int
+	tmuxPaneWidth   int32
 	clientIsWindows bool
 	serverIsWindows bool
 	relayStatus     atomic.Int32
@@ -363,7 +363,7 @@ func (r *trzszRelay) wrapOutput() {
 	}
 }
 
-func newTrzszRelay(pty *trzszPty, bypassTmuxOut *os.File, tmuxPaneWidth int, logger *traceLogger) *trzszRelay {
+func newTrzszRelay(pty *trzszPty, bypassTmuxOut *os.File, tmuxPaneWidth int32, logger *traceLogger) *trzszRelay {
 	osStdinChan := make(chan []byte, 10)
 	go func() {
 		for buffer := range osStdinChan {

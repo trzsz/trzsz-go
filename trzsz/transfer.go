@@ -64,14 +64,14 @@ type transferConfig struct {
 	Protocol        int         `json:"protocol"`
 	MaxBufSize      int64       `json:"bufsize"`
 	EscapeCodes     escapeArray `json:"escape_chars"`
-	TmuxPaneColumns int         `json:"tmux_pane_width"`
+	TmuxPaneColumns int32       `json:"tmux_pane_width"`
 	TmuxOutputJunk  bool        `json:"tmux_output_junk"`
 }
 
 type trzszTransfer struct {
 	buffer          *trzszBuffer
 	writer          io.Writer
-	stopped         bool
+	stopped         atomic.Bool
 	lastInputTime   atomic.Int64
 	cleanTimeout    time.Duration
 	maxChunkTime    time.Duration
@@ -119,20 +119,23 @@ func newTransfer(writer io.Writer, stdinState *term.State, flushInTime bool, log
 }
 
 func (t *trzszTransfer) addReceivedData(buf []byte) {
-	if !t.stopped {
+	if !t.stopped.Load() {
 		t.buffer.addBuffer(buf)
 	}
 	t.lastInputTime.Store(time.Now().UnixMilli())
 }
 
 func (t *trzszTransfer) stopTransferringFiles() {
+	if t.stopped.Load() {
+		return
+	}
 	t.cleanTimeout = maxDuration(t.maxChunkTime*2, 500*time.Millisecond)
-	t.stopped = true
+	t.stopped.Store(true)
 	t.buffer.stopBuffer()
 }
 
 func (t *trzszTransfer) cleanInput(timeoutDuration time.Duration) {
-	t.stopped = true
+	t.stopped.Store(true)
 	t.buffer.drainBuffer()
 	t.lastInputTime.Store(time.Now().UnixMilli())
 	for {
@@ -156,7 +159,7 @@ func (t *trzszTransfer) sendLine(typ string, buf string) error {
 }
 
 func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
-	if t.stopped {
+	if t.stopped.Load() {
 		return nil, newSimpleTrzszError("Stopped")
 	}
 
@@ -355,7 +358,7 @@ func (t *trzszTransfer) recvAction() (*transferAction, error) {
 	return action, nil
 }
 
-func (t *trzszTransfer) sendConfig(args *baseArgs, action *transferAction, escapeChars [][]unicode, tmuxMode tmuxModeType, tmuxPaneWidth int) error {
+func (t *trzszTransfer) sendConfig(args *baseArgs, action *transferAction, escapeChars [][]unicode, tmuxMode tmuxModeType, tmuxPaneWidth int32) error {
 	cfgMap := map[string]interface{}{
 		"lang": "go",
 	}

@@ -42,7 +42,7 @@ import (
 // TrzszOptions specify the options to create a TrzszFilter.
 type TrzszOptions struct {
 	// TerminalColumns is the columns of the terminal.
-	TerminalColumns int
+	TerminalColumns int32
 	// DetectDragFile is an optional feature.
 	// If DetectDragFile is true, will detect the user input to determine whether user is dragging to upload.
 	DetectDragFile bool
@@ -96,7 +96,7 @@ func NewTrzszFilter(clientIn io.Reader, clientOut io.WriteCloser, serverIn io.Wr
 }
 
 // SetTerminalColumns set the latest columns of the terminal.
-func (filter *TrzszFilter) SetTerminalColumns(columns int) {
+func (filter *TrzszFilter) SetTerminalColumns(columns int32) {
 	filter.options.TerminalColumns = columns
 	if progress := filter.progress.Load(); progress != nil {
 		progress.setTerminalColumns(columns)

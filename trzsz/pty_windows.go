@@ -30,6 +30,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -47,7 +48,7 @@ type trzszPty struct {
 	outMode   uint32
 	width     int
 	height    int
-	closed    bool
+	closed    atomic.Bool
 	exitCode  *uint32
 	startTime time.Time
 }
@@ -169,13 +170,27 @@ func spawn(name string, args ...string) (*trzszPty, error) {
 		return nil, err
 	}
 
-	return &trzszPty{cpty, cpty, cpty, inCP, outCP, inMode, outMode, width, height, false, nil, time.Now()}, nil
+	return &trzszPty{
+		Stdin:     cpty,
+		Stdout:    cpty,
+		cpty:      cpty,
+		inCP:      inCP,
+		outCP:     outCP,
+		inMode:    inMode,
+		outMode:   outMode,
+		width:     width,
+		height:    height,
+		startTime: time.Now(),
+	}, nil
 }
 
-func (t *trzszPty) OnResize(setTerminalColumns func(int)) {
+func (t *trzszPty) OnResize(setTerminalColumns func(int32)) {
 	go func() {
 		for {
 			time.Sleep(1 * time.Second)
+			if t.closed.Load() {
+				break
+			}
 			width, height, err := getConsoleSize()
 			if err != nil {
 				continue
@@ -184,21 +199,21 @@ func (t *trzszPty) OnResize(setTerminalColumns func(int)) {
 				t.width = width
 				t.height = height
 				t.cpty.Resize(width, height)
-				setTerminalColumns(width)
+				setTerminalColumns(int32(width))
 			}
 		}
 	}()
 }
 
-func (t *trzszPty) GetColumns() (int, error) {
-	return t.width, nil
+func (t *trzszPty) GetColumns() (int32, error) {
+	return int32(t.width), nil
 }
 
 func (t *trzszPty) Close() {
-	if t.closed {
+	if t.closed.Load() {
 		return
 	}
-	t.closed = true
+	t.closed.Store(true)
 	t.cpty.Close()
 	setConsoleCP(t.inCP)
 	setConsoleOutputCP(t.outCP)

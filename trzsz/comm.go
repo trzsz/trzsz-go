@@ -319,7 +319,7 @@ const (
 	tmuxControlMode
 )
 
-func checkTmux() (tmuxModeType, *os.File, int, error) {
+func checkTmux() (tmuxModeType, *os.File, int32, error) {
 	if _, tmux := os.LookupEnv("TMUX"); !tmux {
 		return noTmuxMode, os.Stdout, -1, nil
 	}
@@ -356,7 +356,7 @@ func checkTmux() (tmuxModeType, *os.File, int, error) {
 			return 0, nil, -1, err
 		}
 	}
-	return tmuxNormalMode, tmuxStdout, tmuxPaneWidth, nil
+	return tmuxNormalMode, tmuxStdout, int32(tmuxPaneWidth), nil
 }
 
 func getTerminalColumns() int {

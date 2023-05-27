@@ -48,7 +48,7 @@ func (trzArgs) Version() string {
 	return fmt.Sprintf("trz (trzsz) go %s", kTrzszVersion)
 }
 
-func recvFiles(transfer *trzszTransfer, args *trzArgs, tmuxMode tmuxModeType, tmuxPaneWidth int) error {
+func recvFiles(transfer *trzszTransfer, args *trzArgs, tmuxMode tmuxModeType, tmuxPaneWidth int32) error {
 	action, err := transfer.recvAction()
 	if err != nil {
 		return err

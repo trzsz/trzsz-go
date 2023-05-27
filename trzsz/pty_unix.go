@@ -31,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/creack/pty"
@@ -42,7 +43,8 @@ type trzszPty struct {
 	Stdout io.ReadWriteCloser
 	ptmx   *os.File
 	cmd    *exec.Cmd
-	closed bool
+	ch     chan os.Signal
+	closed atomic.Bool
 }
 
 func spawn(name string, arg ...string) (*trzszPty, error) {
@@ -55,34 +57,44 @@ func spawn(name string, arg ...string) (*trzszPty, error) {
 	return &trzszPty{Stdin: ptmx, Stdout: ptmx, ptmx: ptmx, cmd: cmd}, nil
 }
 
-func (t *trzszPty) OnResize(setTerminalColumns func(int)) {
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGWINCH)
+func (t *trzszPty) OnResize(setTerminalColumns func(int32)) {
+	if t.ch != nil {
+		return
+	}
+	t.ch = make(chan os.Signal, 1)
+	signal.Notify(t.ch, syscall.SIGWINCH)
 	go func() {
-		for range ch {
+		defer func() { signal.Stop(t.ch); close(t.ch) }()
+		for range t.ch {
+			if t.closed.Load() {
+				break
+			}
 			size, err := pty.GetsizeFull(os.Stdin)
 			if err != nil {
 				continue
 			}
 			_ = pty.Setsize(t.ptmx, size)
-			setTerminalColumns(int(size.Cols))
+			setTerminalColumns(int32(size.Cols))
 		}
 	}()
 }
 
-func (t *trzszPty) GetColumns() (int, error) {
+func (t *trzszPty) GetColumns() (int32, error) {
 	size, err := pty.GetsizeFull(os.Stdin)
 	if err != nil {
 		return 0, err
 	}
-	return int(size.Cols), nil
+	return int32(size.Cols), nil
 }
 
 func (t *trzszPty) Close() {
-	if t.closed {
+	if t.closed.Load() {
 		return
 	}
-	t.closed = true
+	t.closed.Store(true)
+	if t.ch != nil {
+		t.ch <- syscall.SIGWINCH
+	}
 	t.ptmx.Close()
 }
 

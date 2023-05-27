@@ -29,6 +29,7 @@ import (
 	"io"
 	"math"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -139,8 +140,8 @@ const kSpeedArraySize = 30
 
 type textProgressBar struct {
 	writer          io.Writer
-	columns         int
-	tmuxPaneColumns int
+	columns         atomic.Int32
+	tmuxPaneColumns atomic.Int32
 	fileCount       int
 	fileIdx         int
 	fileName        string
@@ -155,22 +156,21 @@ type textProgressBar struct {
 	stepArray       [kSpeedArraySize]int64
 }
 
-func newTextProgressBar(writer io.Writer, columns int, tmuxPaneColumns int) *textProgressBar {
+func newTextProgressBar(writer io.Writer, columns int32, tmuxPaneColumns int32) *textProgressBar {
 	if tmuxPaneColumns > 1 {
 		columns = tmuxPaneColumns - 1 //  -1 to avoid messing up the tmux pane
 	}
-	return &textProgressBar{
-		writer:          writer,
-		columns:         columns,
-		tmuxPaneColumns: tmuxPaneColumns,
-		firstWrite:      true}
+	progress := &textProgressBar{writer: writer, firstWrite: true}
+	progress.columns.Store(columns)
+	progress.tmuxPaneColumns.Store(tmuxPaneColumns)
+	return progress
 }
 
-func (p *textProgressBar) setTerminalColumns(columns int) {
-	p.columns = columns
+func (p *textProgressBar) setTerminalColumns(columns int32) {
+	p.columns.Store(columns)
 	// resizing tmux panes is not supported
-	if p.tmuxPaneColumns > 0 {
-		p.tmuxPaneColumns = 0
+	if p.tmuxPaneColumns.Load() > 0 {
+		p.tmuxPaneColumns.Store(0)
 	}
 }
 
@@ -204,8 +204,8 @@ func (p *textProgressBar) onStep(step int64) {
 
 func (p *textProgressBar) onDone() {
 	if !p.firstWrite {
-		if p.tmuxPaneColumns > 0 {
-			_ = writeAll(p.writer, []byte(fmt.Sprintf("\x1b[%dD", p.columns)))
+		if p.tmuxPaneColumns.Load() > 0 {
+			_ = writeAll(p.writer, []byte(fmt.Sprintf("\x1b[%dD", p.columns.Load())))
 		} else {
 			_ = writeAll(p.writer, []byte("\r"))
 		}
@@ -240,8 +240,8 @@ func (p *textProgressBar) showProgress() {
 		return
 	}
 
-	if p.tmuxPaneColumns > 0 {
-		_ = writeAll(p.writer, []byte(fmt.Sprintf("\x1b[%dD%s", p.columns, progressText)))
+	if p.tmuxPaneColumns.Load() > 0 {
+		_ = writeAll(p.writer, []byte(fmt.Sprintf("\x1b[%dD%s", p.columns.Load(), progressText)))
 	} else {
 		_ = writeAll(p.writer, []byte(fmt.Sprintf("\r%s", progressText)))
 	}
@@ -281,50 +281,50 @@ func (p *textProgressBar) getProgressText(percentage, total, speed, eta string) 
 	right := fmt.Sprintf(" %s | %s | %s | %s", percentage, total, speed, eta)
 
 	for {
-		if p.columns-leftLength-len(right) >= barMinLength {
+		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
 			break
 		}
 		if leftLength > 50 {
 			left, leftLength = getEllipsisString(left, 50)
 		}
 
-		if p.columns-leftLength-len(right) >= barMinLength {
+		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
 			break
 		}
 		if leftLength > 40 {
 			left, leftLength = getEllipsisString(left, 40)
 		}
 
-		if p.columns-leftLength-len(right) >= barMinLength {
+		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
 			break
 		}
 		right = fmt.Sprintf(" %s | %s | %s", percentage, speed, eta)
 
-		if p.columns-leftLength-len(right) >= barMinLength {
+		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
 			break
 		}
 		if leftLength > 30 {
 			left, leftLength = getEllipsisString(left, 30)
 		}
 
-		if p.columns-leftLength-len(right) >= barMinLength {
+		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
 			break
 		}
 		right = fmt.Sprintf(" %s | %s", percentage, eta)
 
-		if p.columns-leftLength-len(right) >= barMinLength {
+		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
 			break
 		}
 		right = fmt.Sprintf(" %s", percentage)
 
-		if p.columns-leftLength-len(right) >= barMinLength {
+		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
 			break
 		}
 		if leftLength > 20 {
 			left, leftLength = getEllipsisString(left, 20)
 		}
 
-		if p.columns-leftLength-len(right) >= barMinLength {
+		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
 			break
 		}
 		left = ""
@@ -332,7 +332,7 @@ func (p *textProgressBar) getProgressText(percentage, total, speed, eta string) 
 		break // nolint:all
 	}
 
-	barLength := p.columns - len(right)
+	barLength := int(p.columns.Load()) - len(right)
 	if leftLength > 0 {
 		barLength -= (leftLength + 1)
 		left += " "
