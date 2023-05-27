@@ -172,7 +172,22 @@ func spawn(name string, args ...string) (*trzszPty, error) {
 	return &trzszPty{cpty, cpty, cpty, inCP, outCP, inMode, outMode, width, height, false, nil, time.Now()}, nil
 }
 
-func (t *trzszPty) OnResize(cb func(int)) {
+func (t *trzszPty) OnResize(setTerminalColumns func(int)) {
+	go func() {
+		for {
+			time.Sleep(1 * time.Second)
+			width, height, err := getConsoleSize()
+			if err != nil {
+				continue
+			}
+			if t.width != width || t.height != height {
+				t.width = width
+				t.height = height
+				t.cpty.Resize(width, height)
+				setTerminalColumns(width)
+			}
+		}
+	}()
 }
 
 func (t *trzszPty) GetColumns() (int, error) {

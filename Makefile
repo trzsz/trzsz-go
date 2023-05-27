@@ -37,7 +37,7 @@ ${BIN_DIR}/${TRZSZ}: $(wildcard ./cmd/trzsz/*.go ./trzsz/*.go)
 	go build -o ${BIN_DIR}/ ./cmd/trzsz
 
 clean:
-	-rm -f ${BIN_DIR}/${TRZ} ${BIN_DIR}/${TSZ} ${BIN_DIR}/${TRZSZ}
+	-rm -f ${BIN_DIR}/trz{,.exe} ${BIN_DIR}/tsz{,.exe} ${BIN_DIR}/trzsz{,.exe}
 
 test:
 	${GO_TEST} -v -count=1 ./trzsz

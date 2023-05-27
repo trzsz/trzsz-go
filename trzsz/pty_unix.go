@@ -31,7 +31,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"sync"
 	"syscall"
 
 	"github.com/creack/pty"
@@ -43,9 +42,6 @@ type trzszPty struct {
 	Stdout io.ReadWriteCloser
 	ptmx   *os.File
 	cmd    *exec.Cmd
-	ch     chan os.Signal
-	resize func(int)
-	mutex  sync.Mutex
 	closed bool
 }
 
@@ -56,44 +52,22 @@ func spawn(name string, arg ...string) (*trzszPty, error) {
 	if err != nil {
 		return nil, err
 	}
+	return &trzszPty{Stdin: ptmx, Stdout: ptmx, ptmx: ptmx, cmd: cmd}, nil
+}
 
-	// handle pty size
+func (t *trzszPty) OnResize(setTerminalColumns func(int)) {
 	ch := make(chan os.Signal, 1)
-	tPty := &trzszPty{Stdin: ptmx, Stdout: ptmx, ptmx: ptmx, cmd: cmd, ch: ch}
 	signal.Notify(ch, syscall.SIGWINCH)
 	go func() {
 		for range ch {
-			_ = tPty.Resize()
+			size, err := pty.GetsizeFull(os.Stdin)
+			if err != nil {
+				continue
+			}
+			_ = pty.Setsize(t.ptmx, size)
+			setTerminalColumns(int(size.Cols))
 		}
 	}()
-	ch <- syscall.SIGWINCH
-
-	return tPty, nil
-}
-
-func (t *trzszPty) OnResize(cb func(int)) {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	t.resize = cb
-}
-
-func (t *trzszPty) Resize() error {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
-	if t.closed {
-		return nil
-	}
-	size, err := pty.GetsizeFull(os.Stdin)
-	if err != nil {
-		return err
-	}
-	if err := pty.Setsize(t.ptmx, size); err != nil {
-		return err
-	}
-	if t.resize != nil {
-		t.resize(int(size.Cols))
-	}
-	return nil
 }
 
 func (t *trzszPty) GetColumns() (int, error) {
@@ -105,14 +79,10 @@ func (t *trzszPty) GetColumns() (int, error) {
 }
 
 func (t *trzszPty) Close() {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
 	if t.closed {
 		return
 	}
 	t.closed = true
-	signal.Stop(t.ch)
-	close(t.ch)
 	t.ptmx.Close()
 }
 
