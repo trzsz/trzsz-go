@@ -68,6 +68,15 @@ yay -S trzsz
 ```
 
 
+### with Go install
+
+```
+go install github.com/trzsz/trzsz-go/cmd/trz@latest
+go install github.com/trzsz/trzsz-go/cmd/tsz@latest
+go install github.com/trzsz/trzsz-go/cmd/trzsz@latest
+```
+
+
 ### Others
 
 Download from the github [releases](https://github.com/trzsz/trzsz-go/releases), or install from the source code:
@@ -149,6 +158,7 @@ DefaultDownloadPath = /Users/username/Downloads/
 * The `/usr/bin/ssh` in [MSYS2](https://www.msys2.org/) and [Cygwin](https://www.cygwin.com/) is not supported yet, use the [OpenSSH](https://docs.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse) instead.
   * In `MSYS2`, e.g.: `winpty trzsz /c/Windows/System32/OpenSSH/ssh.exe x.x.x.x`.
   * In `Cygwin`, e.g.: `trzsz "C:\Windows\System32\OpenSSH\ssh.exe" x.x.x.x`.
+  * Or use [trzsz-ssh](https://github.com/trzsz/trzsz-ssh) instead, e.g.: `tssh alias` ( The `tssh` includes `trzsz ssh` ).
 
 * Dragging files doesn't upload?
   * Don't forget the `--dragfile` option. e.g.: `trzsz -d ssh x.x.x.x`.
@@ -182,4 +192,9 @@ Want to write your own ssh client that supports trzsz? Please check the [go ssh 
 
 ## Contact
 
-Feel free to email me <lonnywong@qq.com>. Welcome to join the QQ group: 318578930.
+Feel free to email the author <lonnywong@qq.com>. Welcome to join the QQ group: 318578930.
+
+Want to buy the author a drink🍺?
+
+![sponsor wechat qrcode](https://trzsz.github.io/images/sponsor_wechat.jpg)
+![sponsor alipay qrcode](https://trzsz.github.io/images/sponsor_alipay.jpg)
