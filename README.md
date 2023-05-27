@@ -136,7 +136,7 @@ For more information, check the website of trzsz: [https://trzsz.github.io](http
 
 ## Configuration
 
-`trzsz` looks for configuration at `~/.trzsz.conf`. e.g.:
+`trzsz` looks for configuration at `~/.trzsz.conf`. The path have to end with `/`, e.g.:
 
 ```
 DefaultUploadPath =
