@@ -65,6 +65,7 @@ func TestTransferAction(t *testing.T) {
 	err = clientTransfer.sendAction(true, false)
 	assert.Nil(err)
 	writer.assertBufferCount(1)
+	assert.False(clientTransfer.windowsProtocol)
 	assert.Equal("\n", clientTransfer.transferConfig.Newline)
 
 	isWindows = false
@@ -82,6 +83,7 @@ func TestTransferAction(t *testing.T) {
 	err = clientTransfer.sendAction(true, false)
 	assert.Nil(err)
 	writer.assertBufferCount(2)
+	assert.False(clientTransfer.windowsProtocol)
 	assert.Equal("\n", clientTransfer.transferConfig.Newline)
 
 	isWindows = false
@@ -99,6 +101,7 @@ func TestTransferAction(t *testing.T) {
 	err = clientTransfer.sendAction(true, true)
 	assert.Nil(err)
 	writer.assertBufferCount(3)
+	assert.True(clientTransfer.windowsProtocol)
 	assert.Equal("!\n", clientTransfer.transferConfig.Newline)
 
 	isWindows = true
@@ -116,6 +119,7 @@ func TestTransferAction(t *testing.T) {
 	err = clientTransfer.sendAction(true, true)
 	assert.Nil(err)
 	writer.assertBufferCount(4)
+	assert.True(clientTransfer.windowsProtocol)
 	assert.Equal("!\n", clientTransfer.transferConfig.Newline)
 
 	isWindows = true

@@ -104,14 +104,14 @@ func TestTszArgs(t *testing.T) {
 		assert.Contains(err.Error(), errMsg)
 	}
 
-	assertArgsError("-B 2gb", "greater than 1G")
-	assertArgsError("-B10", "less than 1K")
-	assertArgsError("-B10x", "invalid size 10x")
-	assertArgsError("-Bb", "invalid size b")
-	assertArgsError("-tiii", "iii")
-	assertArgsError("-t --directory", "missing value")
-	assertArgsError("-x", "unknown argument -x")
-	assertArgsError("--kkk", "unknown argument --kkk")
+	assertArgsError("-B 2gb a", "greater than 1G")
+	assertArgsError("-B10 a", "less than 1K")
+	assertArgsError("-B10x a", "invalid size 10x")
+	assertArgsError("-Bb a", "invalid size b")
+	assertArgsError("-tiii a", "iii")
+	assertArgsError("-t --directory a", "missing value")
+	assertArgsError("-x a", "unknown argument -x")
+	assertArgsError("--kkk a", "unknown argument --kkk")
 	assertArgsError("-y", "file is required")
 	assertArgsError("-q -B 2k -et3", "file is required")
 }
