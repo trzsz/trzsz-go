@@ -77,6 +77,7 @@ func (t *trzszPty) OnResize(setTerminalColumns func(int32)) {
 			setTerminalColumns(int32(size.Cols))
 		}
 	}()
+	t.ch <- syscall.SIGWINCH
 }
 
 func (t *trzszPty) GetColumns() (int32, error) {
