@@ -14,10 +14,14 @@
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
+# Go workspace file
+go.work
+
 bin/
 debian/files
 
 *.swp
+*.swo
 
 dist/
 vendor/

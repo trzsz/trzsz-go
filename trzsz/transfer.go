@@ -129,8 +129,8 @@ func (t *trzszTransfer) stopTransferringFiles() {
 	if t.stopped.Load() {
 		return
 	}
-	t.cleanTimeout = maxDuration(t.maxChunkTime*2, 500*time.Millisecond)
 	t.stopped.Store(true)
+	t.cleanTimeout = maxDuration(t.maxChunkTime*2, 500*time.Millisecond)
 	t.buffer.stopBuffer()
 }
 

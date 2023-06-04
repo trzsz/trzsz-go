@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sync"
 	"sync/atomic"
 )
@@ -316,6 +317,23 @@ func (r *trzszRelay) wrapInput() {
 	}
 }
 
+var uniqueIDRegexp = regexp.MustCompile(`::TRZSZ:TRANSFER:[SRD]:\d+\.\d+\.\d+:(\d{13}\d*)`)
+
+func (r *trzszRelay) rewriteTrzszTrigger(buf []byte) []byte {
+	for _, match := range uniqueIDRegexp.FindAllSubmatch(buf, -1) {
+		if len(match) == 2 {
+			uniqueID := match[1]
+			if len(uniqueID) >= 13 && bytes.HasSuffix(uniqueID, []byte("00")) {
+				newUniqueID := make([]byte, len(uniqueID))
+				copy(newUniqueID, uniqueID)
+				newUniqueID[len(uniqueID)-2] = '2'
+				buf = bytes.ReplaceAll(buf, uniqueID, newUniqueID)
+			}
+		}
+	}
+	return buf
+}
+
 func (r *trzszRelay) wrapOutput() {
 	defer close(r.osStdoutChan)
 	defer close(r.bypassTmuxChan)
@@ -350,6 +368,7 @@ func (r *trzszRelay) wrapOutput() {
 
 			mode, serverIsWindows := detector.detectTrzsz(buf)
 			if mode != nil {
+				buf = r.rewriteTrzszTrigger(buf)
 				r.relayStatus.Store(kRelayHandshaking) // store status before send to client
 				r.serverIsWindows = serverIsWindows
 				go r.handshake()

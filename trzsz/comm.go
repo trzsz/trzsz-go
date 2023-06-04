@@ -469,7 +469,7 @@ func (detector *trzszDetector) detectTrzsz(output []byte) (*byte, bool) {
 		return nil, false
 	}
 	match := trzszRegexp.FindSubmatch(output[idx:])
-	if len(match) < 2 {
+	if len(match) < 3 {
 		return nil, false
 	}
 	if tmuxControlModeRegexp.Match(output) {

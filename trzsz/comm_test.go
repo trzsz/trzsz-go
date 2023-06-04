@@ -72,6 +72,7 @@ func TestTrzszDetector(t *testing.T) {
 	assertDetectTrzsz("", nil, false)
 	assertDetectTrzsz("ABC", nil, false)
 	assertDetectTrzsz(strings.Repeat("A::", 10), nil, false)
+	assertDetectTrzsz("::TRZSZ:TRANSFER:R:", nil, false)
 
 	// normal trzsz trigger
 	R := byte('R')
