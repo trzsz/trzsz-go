@@ -256,7 +256,7 @@ func (filter *TrzszFilter) downloadFiles(transfer *trzszTransfer) error {
 		return err
 	}
 
-	return transfer.clientExit(fmt.Sprintf("Saved %s to %s", strings.Join(localNames, ", "), path))
+	return transfer.clientExit(formatPrintFilesMsg("save", localNames, path))
 }
 
 func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) error {
@@ -296,8 +296,7 @@ func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) 
 	if err != nil {
 		return err
 	}
-
-	return transfer.clientExit(fmt.Sprintf("Received %s", strings.Join(remoteNames, ", ")))
+	return transfer.clientExit(formatPrintFilesMsg("receive", remoteNames, ""))
 }
 
 func (filter *TrzszFilter) handleTrzsz(mode byte) {

@@ -562,3 +562,28 @@ func (logger *traceLogger) writeTraceLog(buf []byte, typ string) []byte {
 	}
 	return buf
 }
+
+func formatPrintFilesMsg(op string, files []string, dstPath string) string {
+	msg := ""
+	switch op {
+	case "save":
+		msg += "Saved "
+	case "receive":
+		msg += "Received "
+	default:
+		return ""
+	}
+
+	msg += fmt.Sprintf("%d file", len(files))
+	if len(files) > 1 {
+		msg += "s"
+	}
+	if len(dstPath) != 0 {
+		msg += fmt.Sprintf(" to %s", dstPath)
+	}
+	msg += ":\n"
+	for i, val := range files {
+		msg += fmt.Sprintf("- %d. %s \n", i+1, val)
+	}
+	return msg
+}

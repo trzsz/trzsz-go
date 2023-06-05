@@ -120,3 +120,70 @@ func TestTrzszDetector(t *testing.T) {
 	assertDetectTrzsz("%extended-output % 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, false)
 	assertDetectTrzsz("%extended-output %0 0 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, false)
 }
+
+func Test_formatPrintFilesMsg(t *testing.T) {
+	type args struct {
+		op      string
+		files   []string
+		dstPath string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "nodstPath",
+			args: args{
+				op:      "receive",
+				dstPath: "",
+				files:   []string{"a.jpg", "b.jpg", "c.jpg"},
+			},
+			want: "Received 3 files:\n" +
+				"- 1. a.jpg \n" +
+				"- 2. b.jpg \n" +
+				"- 3. c.jpg \n",
+		},
+		{
+			name: "dstPath",
+			args: args{
+				op:      "receive",
+				dstPath: "/root",
+				files:   []string{"a.jpg", "b.jpg", "c.jpg"},
+			},
+			want: "Received 3 files to /root:\n" +
+				"- 1. a.jpg \n" +
+				"- 2. b.jpg \n" +
+				"- 3. c.jpg \n",
+		},
+		{
+			name: "dstPath",
+			args: args{
+				op:      "save",
+				dstPath: "/root",
+				files:   []string{"a.jpg", "b.jpg", "c.jpg"},
+			},
+			want: "Saved 3 files to /root:\n" +
+				"- 1. a.jpg \n" +
+				"- 2. b.jpg \n" +
+				"- 3. c.jpg \n",
+		},
+		{
+			name: "dstPath",
+			args: args{
+				op:      "receive",
+				dstPath: "/root",
+				files:   []string{"a.jpg"},
+			},
+			want: "Received 1 file to /root:\n" +
+				"- 1. a.jpg \n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatPrintFilesMsg(tt.args.op, tt.args.files, tt.args.dstPath); got != tt.want {
+				t.Errorf("formatPrintFilesMsg() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
