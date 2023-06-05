@@ -28,7 +28,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/trzsz/go-arg"
@@ -83,7 +82,7 @@ func recvFiles(transfer *trzszTransfer, args *trzArgs, tmuxMode tmuxModeType, tm
 		return err
 	}
 
-	transfer.serverExit(fmt.Sprintf("Received %s to %s", strings.Join(localNames, ", "), args.Path))
+	transfer.serverExit(formatPrintFilesMsg("receive", localNames, args.Path))
 	return nil
 }
 
