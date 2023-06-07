@@ -82,7 +82,7 @@ func recvFiles(transfer *trzszTransfer, args *trzArgs, tmuxMode tmuxModeType, tm
 		return err
 	}
 
-	transfer.serverExit(formatPrintFilesMsg("receive", localNames, args.Path))
+	transfer.serverExit(formatSavedFileNames(localNames, args.Path))
 	return nil
 }
 
