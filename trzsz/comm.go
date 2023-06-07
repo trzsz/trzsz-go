@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2023 Lonny Wong <lonnywong@qq.com>
+Copyright (c) 2023 [Trzsz](https://github.com/trzsz)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -563,11 +563,11 @@ func (logger *traceLogger) writeTraceLog(buf []byte, typ string) []byte {
 	return buf
 }
 
-func formatSavedFileNames(files []string, dstPath string) string {
+func formatSavedFileNames(fileNames []string, dstPath string) string {
 	var msg strings.Builder
 	msg.WriteString("Saved ")
-	msg.WriteString(strconv.Itoa(len(files)))
-	if len(files) > 1 {
+	msg.WriteString(strconv.Itoa(len(fileNames)))
+	if len(fileNames) > 1 {
 		msg.WriteString(" files/directories")
 	} else {
 		msg.WriteString(" file/directory")
@@ -577,10 +577,12 @@ func formatSavedFileNames(files []string, dstPath string) string {
 		msg.WriteString(dstPath)
 	}
 	msg.WriteString("\r\n")
-	for _, val := range files {
+	for i, name := range fileNames {
+		if i > 0 {
+			msg.WriteString("\r\n")
+		}
 		msg.WriteString("- ")
-		msg.WriteString(val)
-		msg.WriteString("\r\n")
+		msg.WriteString(name)
 	}
 	return msg.String()
 }
