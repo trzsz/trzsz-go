@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2023 Lonny Wong <lonnywong@qq.com>
+Copyright (c) 2023 [Trzsz](https://github.com/trzsz)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -141,7 +141,7 @@ func TestFormatSavedFileNames(t *testing.T) {
 			want: "Saved 3 files/directories\r\n" +
 				"- a.jpg\r\n" +
 				"- b.jpg\r\n" +
-				"- c.jpg\r\n",
+				"- c.jpg",
 		},
 		{
 			name: "dstPath",
@@ -152,7 +152,7 @@ func TestFormatSavedFileNames(t *testing.T) {
 			want: "Saved 3 files/directories to /root\r\n" +
 				"- a.jpg\r\n" +
 				"- b.jpg\r\n" +
-				"- c.jpg\r\n",
+				"- c.jpg",
 		},
 		{
 			name: "dstPath",
@@ -163,7 +163,7 @@ func TestFormatSavedFileNames(t *testing.T) {
 			want: "Saved 3 files/directories to /root\r\n" +
 				"- a.jpg\r\n" +
 				"- b.jpg\r\n" +
-				"- c.jpg\r\n",
+				"- c.jpg",
 		},
 		{
 			name: "dstPath",
@@ -172,7 +172,7 @@ func TestFormatSavedFileNames(t *testing.T) {
 				files:   []string{"a.jpg"},
 			},
 			want: "Saved 1 file/directory to /root\r\n" +
-				"- a.jpg\r\n",
+				"- a.jpg",
 		},
 	}
 	for _, tt := range tests {
