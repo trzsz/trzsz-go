@@ -271,19 +271,14 @@ func TestPipelineReadData(t *testing.T) {
 	assertClosed(t, fileDataChan)
 	assertClosed(t, md5SourceChan)
 
-	// size incorrect
+	// growing size
 	ctx = newPipelineContext()
 	f2, err := os.Open(file.Name())
 	assert.Nil(err)
 	defer f2.Close()
-	transfer.pipelineReadData(ctx, f2, 4096*2+300)
-	select {
-	case <-ctx.Done():
-		assert.ErrorIs(ctx.Err(), context.Canceled)
-		assert.EqualError(context.Cause(ctx), "File size 8492 but read 8292")
-	case <-time.After(time.Second):
-		assert.Fail("Context timeout")
-	}
+	fileDataChan, md5SourceChan = transfer.pipelineReadData(ctx, f2, 200)
+	assertChannel(t, bytes.Repeat([]byte{'A'}, 200), fileDataChan)
+	assertChannel(t, bytes.Repeat([]byte{'A'}, 200), md5SourceChan)
 
 	// cancel read
 	f3, err := os.Open(file.Name())
