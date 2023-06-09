@@ -539,6 +539,10 @@ func (t *trzszTransfer) sendFileData(file *os.File, size int64, progress progres
 	hasher := md5.New()
 	for step < size {
 		beginTime := time.Now()
+		m := size - step
+		if m < bufSize {
+			buffer = buffer[:m]
+		}
 		n, err := file.Read(buffer)
 		if err != nil {
 			return nil, err

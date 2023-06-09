@@ -196,9 +196,14 @@ func (t *trzszTransfer) pipelineReadData(ctx *pipelineContext, file *os.File, si
 	go func() {
 		defer close(fileDataChan)
 		defer close(md5SourceChan)
-		length := int64(0)
-		for ctx.Err() == nil {
-			buffer := make([]byte, 4096)
+		step := int64(0)
+		bufSize := int64(4096)
+		for step < size && ctx.Err() == nil {
+			m := size - step
+			if m > bufSize {
+				m = bufSize
+			}
+			buffer := make([]byte, m)
 			n, err := file.Read(buffer)
 			if n > 0 {
 				select {
@@ -211,14 +216,7 @@ func (t *trzszTransfer) pipelineReadData(ctx *pipelineContext, file *os.File, si
 				case <-ctx.Done():
 					return
 				}
-				length += int64(n)
-			}
-			if err == io.EOF {
-				if length == size {
-					return
-				}
-				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("File size %d but read %d", size, length)))
-				return
+				step += int64(n)
 			}
 			if err != nil {
 				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("Read file error: %v", err)))
