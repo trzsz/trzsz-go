@@ -197,9 +197,9 @@ Feel free to email the author <lonnywong@qq.com>. Welcome to join the QQ group: 
 
 ## Sponsor
 
-Want to buy the author a drink🍺?
+Want to buy the author a drink 🍺 ?
 
 ![sponsor wechat qrcode](https://trzsz.github.io/images/sponsor_wechat.jpg)
 ![sponsor alipay qrcode](https://trzsz.github.io/images/sponsor_alipay.jpg)
 
-Thanks [@BrightXiaoHan](https://github.com/BrightXiaoHan).
+Thanks [@BrightXiaoHan](https://github.com/BrightXiaoHan) [@pmzgit](https://github.com/pmzgit).
