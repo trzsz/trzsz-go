@@ -26,7 +26,6 @@ package trzsz
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -45,7 +44,7 @@ func detectDragFiles(buf []byte) ([]string, bool, bool) {
 
 func detectFilePath(path string, dragFiles *[]string, hasDir *bool) bool {
 	fileInfo, err := os.Stat(path)
-	if errors.Is(err, os.ErrNotExist) {
+	if os.IsNotExist(err) {
 		return false
 	}
 	if fileInfo.IsDir() {

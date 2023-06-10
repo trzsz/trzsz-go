@@ -28,7 +28,6 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -197,7 +196,7 @@ func (e *trzszError) isRemoteFail() bool {
 
 func checkPathWritable(path string) error {
 	info, err := os.Stat(path)
-	if errors.Is(err, os.ErrNotExist) {
+	if os.IsNotExist(err) {
 		return newSimpleTrzszError(fmt.Sprintf("No such directory: %s", path))
 	} else if err != nil {
 		return err
@@ -270,7 +269,7 @@ func checkPathsReadable(paths []string, directory bool) ([]*trzszFile, error) {
 			return nil, err
 		}
 		info, err := os.Stat(path)
-		if errors.Is(err, os.ErrNotExist) {
+		if os.IsNotExist(err) {
 			return nil, newSimpleTrzszError(fmt.Sprintf("No such file: %s", path))
 		} else if err != nil {
 			return nil, err
@@ -299,12 +298,12 @@ func checkDuplicateNames(list []*trzszFile) error {
 }
 
 func getNewName(path, name string) (string, error) {
-	if _, err := os.Stat(filepath.Join(path, name)); errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(path, name)); os.IsNotExist(err) {
 		return name, nil
 	}
 	for i := 0; i < 1000; i++ {
 		newName := fmt.Sprintf("%s.%d", name, i)
-		if _, err := os.Stat(filepath.Join(path, newName)); errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Stat(filepath.Join(path, newName)); os.IsNotExist(err) {
 			return newName, nil
 		}
 	}
@@ -341,7 +340,7 @@ func checkTmux() (tmuxModeType, *os.File, int32, error) {
 	if controlMode == "1" || tmuxTty[0] != '/' {
 		return tmuxControlMode, os.Stdout, -1, nil
 	}
-	if _, err := os.Stat(tmuxTty); errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(tmuxTty); os.IsNotExist(err) {
 		return tmuxControlMode, os.Stdout, -1, nil
 	}
 
@@ -450,38 +449,81 @@ func writeAll(dst io.Writer, data []byte) error {
 }
 
 type trzszDetector struct {
+	relay       bool
+	tmux        bool
 	uniqueIDMap map[string]int
 }
 
-func newTrzszDetector() *trzszDetector {
-	return &trzszDetector{make(map[string]int)}
+func newTrzszDetector(relay, tmux bool) *trzszDetector {
+	return &trzszDetector{relay, tmux, make(map[string]int)}
 }
 
 var trzszRegexp = regexp.MustCompile(`::TRZSZ:TRANSFER:([SRD]):(\d+\.\d+\.\d+)(:\d+)?`)
+var uniqueIDRegexp = regexp.MustCompile(`::TRZSZ:TRANSFER:[SRD]:\d+\.\d+\.\d+:(\d{13}\d*)`)
 var tmuxControlModeRegexp = regexp.MustCompile(`((%output %\d+)|(%extended-output %\d+ \d+ :)) .*::TRZSZ:TRANSFER:`)
 
-func (detector *trzszDetector) detectTrzsz(output []byte) (*byte, bool) {
+func (detector *trzszDetector) rewriteTrzszTrigger(buf []byte) []byte {
+	for _, match := range uniqueIDRegexp.FindAllSubmatch(buf, -1) {
+		if len(match) == 2 {
+			uniqueID := match[1]
+			if len(uniqueID) >= 13 && bytes.HasSuffix(uniqueID, []byte("00")) {
+				newUniqueID := make([]byte, len(uniqueID))
+				copy(newUniqueID, uniqueID)
+				newUniqueID[len(uniqueID)-2] = '2'
+				buf = bytes.ReplaceAll(buf, uniqueID, newUniqueID)
+			}
+		}
+	}
+	return buf
+}
+
+func (detector *trzszDetector) addRelaySuffix(output []byte, idx int) []byte {
+	idx += 20
+	if idx >= len(output) {
+		return output
+	}
+	for ; idx < len(output); idx++ {
+		c := output[idx]
+		if c != ':' && c != '.' && !(c >= '0' && c <= '9') {
+			break
+		}
+	}
+	buf := bytes.NewBuffer(make([]byte, 0, len(output)+2))
+	buf.Write(output[:idx])
+	buf.Write([]byte("#R"))
+	buf.Write(output[idx:])
+	return buf.Bytes()
+}
+
+func (detector *trzszDetector) detectTrzsz(output []byte) ([]byte, *byte, bool) {
 	if len(output) < 24 {
-		return nil, false
+		return output, nil, false
 	}
 	idx := bytes.LastIndex(output, []byte("::TRZSZ:TRANSFER:"))
 	if idx < 0 {
-		return nil, false
+		return output, nil, false
 	}
+
+	if detector.relay && detector.tmux {
+		output = detector.rewriteTrzszTrigger(output)
+		idx = bytes.LastIndex(output, []byte("::TRZSZ:TRANSFER:"))
+	}
+
 	match := trzszRegexp.FindSubmatch(output[idx:])
 	if len(match) < 3 {
-		return nil, false
+		return output, nil, false
 	}
 	if tmuxControlModeRegexp.Match(output) {
-		return nil, false
+		return output, nil, false
 	}
+
 	uniqueID := ""
 	if len(match) > 3 {
 		uniqueID = string(match[3])
 	}
 	if len(uniqueID) >= 8 && (isRunningOnWindows() || !(len(uniqueID) == 14 && strings.HasSuffix(uniqueID, "00"))) {
 		if _, ok := detector.uniqueIDMap[uniqueID]; ok {
-			return nil, false
+			return output, nil, false
 		}
 		if len(detector.uniqueIDMap) > 100 {
 			m := make(map[string]int)
@@ -494,11 +536,19 @@ func (detector *trzszDetector) detectTrzsz(output []byte) (*byte, bool) {
 		}
 		detector.uniqueIDMap[uniqueID] = len(detector.uniqueIDMap)
 	}
+
 	remoteIsWindows := false
 	if uniqueID == ":1" || (len(uniqueID) == 14 && strings.HasSuffix(uniqueID, "10")) {
 		remoteIsWindows = true
 	}
-	return &match[1][0], remoteIsWindows
+
+	if detector.relay {
+		output = detector.addRelaySuffix(output, idx)
+	} else {
+		output = bytes.ReplaceAll(output, []byte("TRZSZ"), []byte("TRZSZGO"))
+	}
+
+	return output, &match[1][0], remoteIsWindows
 }
 
 type traceLogger struct {

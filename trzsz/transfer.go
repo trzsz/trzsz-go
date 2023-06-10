@@ -28,7 +28,6 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -668,7 +667,7 @@ func (t *trzszTransfer) doCreateFile(path string) (*os.File, error) {
 
 func (t *trzszTransfer) doCreateDirectory(path string) error {
 	stat, err := os.Stat(path)
-	if errors.Is(err, os.ErrNotExist) {
+	if os.IsNotExist(err) {
 		return os.MkdirAll(path, 0755)
 	} else if err != nil {
 		return err

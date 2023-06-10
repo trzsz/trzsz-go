@@ -33,7 +33,7 @@ import (
 
 func getParentWindowID() any {
 	pid := os.Getppid()
-	for {
+	for i := 0; i < 1000; i++ {
 		kinfo, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
 		if err != nil {
 			return 0
@@ -43,7 +43,9 @@ func getParentWindowID() any {
 		case 0:
 			return 0
 		case 1:
-			if bytes.HasPrefix(kinfo.Proc.P_comm[:], []byte("iTermServer")) {
+			name := kinfo.Proc.P_comm[:]
+			idx := bytes.IndexByte(name, '\x00')
+			if idx > 0 && bytes.HasPrefix(name[:idx], []byte("iTerm")) {
 				return "iTerm2"
 			}
 			return pid
@@ -51,4 +53,5 @@ func getParentWindowID() any {
 			pid = int(ppid)
 		}
 	}
+	return 0
 }

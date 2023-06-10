@@ -25,7 +25,6 @@ SOFTWARE.
 package main
 
 import (
-	"errors"
 	"fmt"
 	"github.com/kevinburke/ssh_config"
 	"github.com/trzsz/trzsz-go/trzsz"
@@ -62,7 +61,7 @@ func main() {
 	var auth []ssh.AuthMethod
 	addAuthMethod := func(name string) error {
 		path := filepath.Join(home, ".ssh", name)
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
 			return nil
 		}
 		privateKey, err := os.ReadFile(path)

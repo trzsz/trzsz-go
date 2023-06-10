@@ -29,8 +29,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"regexp"
 	"sync"
 	"sync/atomic"
 )
@@ -42,7 +40,10 @@ const (
 )
 
 type trzszRelay struct {
-	pty             *trzszPty
+	clientIn        io.Reader
+	clientOut       io.WriteCloser
+	serverIn        io.WriteCloser
+	serverOut       io.Reader
 	osStdinChan     chan []byte
 	osStdoutChan    chan []byte
 	bypassTmuxChan  chan []byte
@@ -284,7 +285,7 @@ func (r *trzszRelay) wrapInput() {
 	defer close(r.osStdinChan)
 	for {
 		buffer := make([]byte, 32*1024)
-		n, err := os.Stdin.Read(buffer)
+		n, err := r.clientIn.Read(buffer)
 		if n > 0 {
 			buf := buffer[:n]
 			if r.logger != nil {
@@ -317,30 +318,13 @@ func (r *trzszRelay) wrapInput() {
 	}
 }
 
-var uniqueIDRegexp = regexp.MustCompile(`::TRZSZ:TRANSFER:[SRD]:\d+\.\d+\.\d+:(\d{13}\d*)`)
-
-func (r *trzszRelay) rewriteTrzszTrigger(buf []byte) []byte {
-	for _, match := range uniqueIDRegexp.FindAllSubmatch(buf, -1) {
-		if len(match) == 2 {
-			uniqueID := match[1]
-			if len(uniqueID) >= 13 && bytes.HasSuffix(uniqueID, []byte("00")) {
-				newUniqueID := make([]byte, len(uniqueID))
-				copy(newUniqueID, uniqueID)
-				newUniqueID[len(uniqueID)-2] = '2'
-				buf = bytes.ReplaceAll(buf, uniqueID, newUniqueID)
-			}
-		}
-	}
-	return buf
-}
-
 func (r *trzszRelay) wrapOutput() {
 	defer close(r.osStdoutChan)
 	defer close(r.bypassTmuxChan)
-	detector := newTrzszDetector()
+	detector := newTrzszDetector(true, true)
 	for {
 		buffer := make([]byte, 32*1024)
-		n, err := r.pty.Stdout.Read(buffer)
+		n, err := r.serverOut.Read(buffer)
 		if n > 0 {
 			buf := buffer[:n]
 			if r.logger != nil {
@@ -366,9 +350,10 @@ func (r *trzszRelay) wrapOutput() {
 				continue
 			}
 
-			mode, serverIsWindows := detector.detectTrzsz(buf)
+			var mode *byte
+			var serverIsWindows bool
+			buf, mode, serverIsWindows = detector.detectTrzsz(buf)
 			if mode != nil {
-				buf = r.rewriteTrzszTrigger(buf)
 				r.relayStatus.Store(kRelayHandshaking) // store status before send to client
 				r.serverIsWindows = serverIsWindows
 				go r.handshake()
@@ -379,49 +364,6 @@ func (r *trzszRelay) wrapOutput() {
 		if err == io.EOF {
 			break
 		}
-	}
-}
-
-func newTrzszRelay(pty *trzszPty, bypassTmuxOut *os.File, tmuxPaneWidth int32, logger *traceLogger) *trzszRelay {
-	osStdinChan := make(chan []byte, 10)
-	go func() {
-		for buffer := range osStdinChan {
-			if logger != nil {
-				logger.writeTraceLog(buffer, "tosvr")
-			}
-			_ = writeAll(pty.Stdin, buffer)
-		}
-	}()
-
-	osStdoutChan := make(chan []byte, 10)
-	go func() {
-		for buffer := range osStdoutChan {
-			if logger != nil {
-				logger.writeTraceLog(buffer, "stdout")
-			}
-			_ = writeAll(os.Stdout, buffer)
-		}
-	}()
-
-	bypassTmuxChan := make(chan []byte, 10)
-	go func() {
-		for buffer := range bypassTmuxChan {
-			if logger != nil {
-				logger.writeTraceLog(buffer, "tocli")
-			}
-			_ = writeAll(bypassTmuxOut, buffer)
-		}
-	}()
-
-	return &trzszRelay{
-		pty:            pty,
-		osStdinChan:    osStdinChan,
-		osStdoutChan:   osStdoutChan,
-		bypassTmuxChan: bypassTmuxChan,
-		stdinBuffer:    newTrzszBuffer(),
-		stdoutBuffer:   newTrzszBuffer(),
-		tmuxPaneWidth:  tmuxPaneWidth,
-		logger:         logger,
 	}
 }
 
@@ -447,15 +389,70 @@ func asyncCopy(src io.Reader, dst io.Writer) {
 	}()
 }
 
-func runAsRelay(pty *trzszPty, logger *traceLogger) {
+// NewTrzszRelay create a TrzszRelay to support trzsz through a jump server.
+//
+// ┌────────┐   ClientIn   ┌────────────┐   ServerIn   ┌────────┐
+// │        ├─────────────►│            ├─────────────►│        │
+// │ Client │              │ TrzszRelay │              │ Server │
+// │        │◄─────────────┤            │◄─────────────┤        │
+// └────────┘   ClientOut  └────────────┘   ServerOut  └────────┘
+func NewTrzszRelay(clientIn io.Reader, clientOut io.WriteCloser,
+	serverIn io.WriteCloser, serverOut io.Reader, options TrzszOptions) {
 	tmuxMode, bypassTmuxOut, tmuxPaneWidth, _ := checkTmux()
 	if tmuxMode != tmuxNormalMode {
-		asyncCopy(os.Stdin, pty.Stdin)
-		asyncCopy(pty.Stdout, os.Stdout)
+		asyncCopy(clientIn, serverIn)
+		asyncCopy(serverOut, clientOut)
 		return
 	}
 
-	relay := newTrzszRelay(pty, bypassTmuxOut, tmuxPaneWidth, logger)
+	var logger *traceLogger
+	if options.DetectTraceLog {
+		logger = newTraceLogger()
+	}
+
+	osStdinChan := make(chan []byte, 10)
+	go func() {
+		for buffer := range osStdinChan {
+			if logger != nil {
+				logger.writeTraceLog(buffer, "tosvr")
+			}
+			_ = writeAll(serverIn, buffer)
+		}
+	}()
+
+	osStdoutChan := make(chan []byte, 10)
+	go func() {
+		for buffer := range osStdoutChan {
+			if logger != nil {
+				logger.writeTraceLog(buffer, "stdout")
+			}
+			_ = writeAll(clientOut, buffer)
+		}
+	}()
+
+	bypassTmuxChan := make(chan []byte, 10)
+	go func() {
+		for buffer := range bypassTmuxChan {
+			if logger != nil {
+				logger.writeTraceLog(buffer, "tocli")
+			}
+			_ = writeAll(bypassTmuxOut, buffer)
+		}
+	}()
+
+	relay := &trzszRelay{
+		clientIn:       clientIn,
+		clientOut:      clientOut,
+		serverIn:       serverIn,
+		serverOut:      serverOut,
+		osStdinChan:    osStdinChan,
+		osStdoutChan:   osStdoutChan,
+		bypassTmuxChan: bypassTmuxChan,
+		stdinBuffer:    newTrzszBuffer(),
+		stdoutBuffer:   newTrzszBuffer(),
+		tmuxPaneWidth:  tmuxPaneWidth,
+		logger:         logger,
+	}
 	go relay.wrapInput()
 	go relay.wrapOutput()
 }

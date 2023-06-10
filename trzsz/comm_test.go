@@ -25,6 +25,7 @@ SOFTWARE.
 package trzsz
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
@@ -61,10 +62,15 @@ func newTestWriter(t *testing.T) *testWriter {
 
 func TestTrzszDetector(t *testing.T) {
 	assert := assert.New(t)
-	detector := newTrzszDetector()
+	detector := newTrzszDetector(false, false)
 	assertDetectTrzsz := func(output string, mode *byte, win bool) {
 		t.Helper()
-		m, w := detector.detectTrzsz([]byte(output))
+		buf, m, w := detector.detectTrzsz([]byte(output))
+		if mode == nil {
+			assert.Equal([]byte(output), buf)
+		} else {
+			assert.Equal(bytes.ReplaceAll([]byte(output), []byte("TRZSZ"), []byte("TRZSZGO")), buf)
+		}
 		assert.Equal(mode, m)
 		assert.Equal(win, w)
 	}
@@ -81,8 +87,10 @@ func TestTrzszDetector(t *testing.T) {
 	assertDetectTrzsz("::TRZSZ:TRANSFER:"+"R:1.0.0:0", &R, false)
 	assertDetectTrzsz("ABC::TRZSZ:TRANSFER:"+"D:1.0.0:123", &D, false)
 	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1", &S, true)
-	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1ABC", &S, true)
-	assertDetectTrzsz("XYX\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1ABC", &S, true)
+	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:1234", &S, true)
+	assertDetectTrzsz("XYX\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:7890", &S, true)
+	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:1234ABC\n", &S, true)
+	assertDetectTrzsz("XYX\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:7890EFG\r\n", &S, true)
 
 	// repeated trigger
 	uniqueID := time.Now().UnixMilli() % 10e10
@@ -119,6 +127,51 @@ func TestTrzszDetector(t *testing.T) {
 	assertDetectTrzsz("%extended-output 0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, false)
 	assertDetectTrzsz("%extended-output % 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, false)
 	assertDetectTrzsz("%extended-output %0 0 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, false)
+}
+
+func TestRelayDetector(t *testing.T) {
+	assert := assert.New(t)
+	detector := newTrzszDetector(true, true)
+	R := byte('R')
+	prefix := "\x1b7\x07::TRZSZ:TRANSFER:R:1.0.0"
+	assertRewriteEqual := func(output, expected string, mode *byte, win bool) {
+		t.Helper()
+		detector.uniqueIDMap = make(map[string]int) // ignore unique check
+		buf, m, w := detector.detectTrzsz([]byte(prefix + output))
+		assert.Equal([]byte(prefix+expected), buf)
+		assert.Equal(mode, m)
+		assert.Equal(win, w)
+	}
+
+	assertRewriteEqual(":0", ":0#R", &R, false)
+	assertRewriteEqual(":1", ":1#R", &R, true)
+	assertRewriteEqual(":0\n", ":0#R\n", &R, false)
+	assertRewriteEqual(":1\r\n", ":1#R\r\n", &R, true)
+
+	assertRewriteEqual(":1234567890110", ":1234567890110#R", &R, true)
+	assertRewriteEqual(":9876543210210", ":9876543210210#R", &R, true)
+	assertRewriteEqual(":1234567890110\n", ":1234567890110#R\n", &R, true)
+	assertRewriteEqual(":9876543210210\r\n", ":9876543210210#R\r\n", &R, true)
+	assertRewriteEqual(":1234567890110#R\n", ":1234567890110#R#R\n", &R, true)
+	assertRewriteEqual(":9876543210210#R\r\n", ":9876543210210#R#R\r\n", &R, true)
+
+	assertRewriteEqual(":123456789\n0100", ":123456789#R\n0100", &R, false)
+	assertRewriteEqual(":123456789\r\n0200", ":123456789#R\r\n0200", &R, false)
+	assertRewriteEqual(":123456789\n0100\n", ":123456789#R\n0100\n", &R, false)
+	assertRewriteEqual(":123456789\r\n0200\r\n", ":123456789#R\r\n0200\r\n", &R, false)
+
+	assertRewriteEqual(":1234567890100", ":1234567890120#R", &R, false)
+	assertRewriteEqual(":9876543210200", ":9876543210220#R", &R, false)
+	assertRewriteEqual(":1234567890100\n", ":1234567890120#R\n", &R, false)
+	assertRewriteEqual(":9876543210200\r\n", ":9876543210220#R\r\n", &R, false)
+	assertRewriteEqual(":1234567890100#R\n", ":1234567890120#R#R\n", &R, false)
+	assertRewriteEqual(":9876543210200#R\r\n", ":9876543210220#R#R\r\n", &R, false)
+
+	assertRewriteEqual(":1234567890100\n"+prefix+":9876543210200\r\n",
+		":1234567890120\n"+prefix+":9876543210220#R\r\n", &R, false)
+
+	assertRewriteEqual(":1234567890100\n"+prefix+":9876543210200\r\n::TRZSZ:TRANSFER:R:",
+		":1234567890120\n"+prefix+":9876543210220\r\n::TRZSZ:TRANSFER:R:", nil, false)
 }
 
 func TestFormatSavedFileNames(t *testing.T) {

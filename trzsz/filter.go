@@ -26,7 +26,6 @@ package trzsz
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -79,7 +78,8 @@ type TrzszFilter struct {
 // └────────┘   ClientOut  └─────────────┘   ServerOut  └────────┘
 //
 // Specify the columns of the terminal in options.TerminalColumns.
-func NewTrzszFilter(clientIn io.Reader, clientOut io.WriteCloser, serverIn io.WriteCloser, serverOut io.Reader, options TrzszOptions) *TrzszFilter {
+func NewTrzszFilter(clientIn io.Reader, clientOut io.WriteCloser,
+	serverIn io.WriteCloser, serverOut io.Reader, options TrzszOptions) *TrzszFilter {
 	filter := &TrzszFilter{
 		clientIn:  clientIn,
 		clientOut: clientOut,
@@ -421,7 +421,7 @@ func (filter *TrzszFilter) wrapInput() {
 func (filter *TrzszFilter) wrapOutput() {
 	const bufSize = 32 * 1024
 	buffer := make([]byte, bufSize)
-	detector := newTrzszDetector()
+	detector := newTrzszDetector(false, false)
 	for {
 		n, err := filter.serverOut.Read(buffer)
 		if n > 0 {
@@ -434,9 +434,11 @@ func (filter *TrzszFilter) wrapOutput() {
 				buffer = make([]byte, bufSize)
 				continue
 			}
-			mode, remoteIsWindows := detector.detectTrzsz(buf)
+			var mode *byte
+			var remoteIsWindows bool
+			buf, mode, remoteIsWindows = detector.detectTrzsz(buf)
 			if mode != nil {
-				_ = writeAll(filter.clientOut, bytes.Replace(buf, []byte("TRZSZ"), []byte("TRZSZGO"), 1))
+				_ = writeAll(filter.clientOut, buf)
 				filter.remoteIsWindows = remoteIsWindows
 				go filter.handleTrzsz(*mode)
 				continue

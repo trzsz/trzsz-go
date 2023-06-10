@@ -135,11 +135,9 @@ func TrzszMain() int {
 
 	if args.Relay {
 		// run as relay
-		var logger *traceLogger
-		if args.TraceLog {
-			logger = newTraceLogger()
-		}
-		go runAsRelay(pty, logger)
+		NewTrzszRelay(os.Stdin, os.Stdout, pty.Stdin, pty.Stdout, TrzszOptions{
+			DetectTraceLog: args.TraceLog,
+		})
 	} else {
 		// new trzsz filter
 		columns, err := pty.GetColumns()
