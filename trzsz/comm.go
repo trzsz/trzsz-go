@@ -46,20 +46,32 @@ import (
 
 var timeNowFunc = time.Now
 
-var isLinux bool = (runtime.GOOS == "linux")
-var isMacOS bool = (runtime.GOOS == "darwin")
-var isWindows bool = (runtime.GOOS == "windows")
+var linuxRuntime bool = (runtime.GOOS == "linux")
+var macosRuntime bool = (runtime.GOOS == "darwin")
+var windowsRuntime bool = (runtime.GOOS == "windows")
+var windowsEnvironment bool = (runtime.GOOS == "windows")
 
 func isRunningOnLinux() bool {
-	return isLinux
+	return linuxRuntime
 }
 
 func isRunningOnMacOS() bool {
-	return isMacOS
+	return macosRuntime
 }
 
+// isRunningOnWindows returns whether the runtime platform is Windows.
 func isRunningOnWindows() bool {
-	return isWindows
+	return windowsRuntime
+}
+
+// isWindowsEnvironment returns false if trzsz is not affected by Windows.
+func isWindowsEnvironment() bool {
+	return windowsEnvironment
+}
+
+// SetAffectedByWindows set whether trzsz is affected by Windows.
+func SetAffectedByWindows(affected bool) {
+	windowsEnvironment = affected
 }
 
 type progressCallback interface {
@@ -523,7 +535,7 @@ func (detector *trzszDetector) detectTrzsz(output []byte) ([]byte, *byte, bool) 
 	if len(match) > 3 {
 		uniqueID = string(match[3])
 	}
-	if len(uniqueID) >= 8 && (isRunningOnWindows() || !(len(uniqueID) == 14 && strings.HasSuffix(uniqueID, "00"))) {
+	if len(uniqueID) >= 8 && (isWindowsEnvironment() || !(len(uniqueID) == 14 && strings.HasSuffix(uniqueID, "00"))) {
 		if _, ok := detector.uniqueIDMap[uniqueID]; ok {
 			return output, nil, false
 		}

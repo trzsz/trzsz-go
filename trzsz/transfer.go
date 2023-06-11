@@ -162,7 +162,7 @@ func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 		return nil, newSimpleTrzszError("Stopped")
 	}
 
-	if isRunningOnWindows() || t.windowsProtocol {
+	if isWindowsEnvironment() || t.windowsProtocol {
 		line, err := t.buffer.readLineOnWindows(timeout)
 		if err != nil {
 			return nil, err
@@ -326,7 +326,7 @@ func (t *trzszTransfer) sendAction(confirm, remoteIsWindows bool) error {
 		SupportBinary:    true,
 		SupportDirectory: true,
 	}
-	if isRunningOnWindows() || remoteIsWindows {
+	if isWindowsEnvironment() || remoteIsWindows {
 		action.Newline = "!\n"
 		action.SupportBinary = false
 	}

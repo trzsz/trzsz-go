@@ -25,7 +25,6 @@ SOFTWARE.
 package trzsz
 
 import (
-	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,9 +32,9 @@ import (
 )
 
 func TestTransferAction(t *testing.T) {
-	isWindows = false // test as on Linux
+	SetAffectedByWindows(false) // test as on Linux
 	defer func() {
-		isWindows = (runtime.GOOS == "windows")
+		SetAffectedByWindows(isRunningOnWindows())
 	}()
 
 	assert := assert.New(t)
@@ -61,14 +60,14 @@ func TestTransferAction(t *testing.T) {
 	assert.Equal("\n", serverTransfer.transferConfig.Newline)
 
 	// client and server are Linux
-	isWindows = false
+	SetAffectedByWindows(false)
 	err = clientTransfer.sendAction(true, false)
 	assert.Nil(err)
 	writer.assertBufferCount(1)
 	assert.False(clientTransfer.windowsProtocol)
 	assert.Equal("\n", clientTransfer.transferConfig.Newline)
 
-	isWindows = false
+	SetAffectedByWindows(false)
 	serverTransfer.addReceivedData([]byte(writer.buffer[0]))
 	action, err = serverTransfer.recvAction()
 	assert.Nil(err)
@@ -79,14 +78,14 @@ func TestTransferAction(t *testing.T) {
 	assert.Equal(2, action.Protocol)
 
 	// client is Windows, server is Linux
-	isWindows = true
+	SetAffectedByWindows(true)
 	err = clientTransfer.sendAction(true, false)
 	assert.Nil(err)
 	writer.assertBufferCount(2)
 	assert.False(clientTransfer.windowsProtocol)
 	assert.Equal("\n", clientTransfer.transferConfig.Newline)
 
-	isWindows = false
+	SetAffectedByWindows(false)
 	serverTransfer.addReceivedData([]byte(writer.buffer[1]))
 	action, err = serverTransfer.recvAction()
 	assert.Nil(err)
@@ -97,46 +96,46 @@ func TestTransferAction(t *testing.T) {
 	assert.Equal(2, action.Protocol)
 
 	// client is Linux, server is Windows
-	isWindows = false
+	SetAffectedByWindows(false)
 	err = clientTransfer.sendAction(true, true)
 	assert.Nil(err)
 	writer.assertBufferCount(3)
 	assert.True(clientTransfer.windowsProtocol)
 	assert.Equal("!\n", clientTransfer.transferConfig.Newline)
 
-	isWindows = true
+	SetAffectedByWindows(true)
 	serverTransfer.addReceivedData([]byte(writer.buffer[2]))
 	action, err = serverTransfer.recvAction()
 	assert.Nil(err)
 	assert.Equal("!\n", action.Newline)
 	assert.False(action.SupportBinary)
-	assert.True(isWindows || serverTransfer.windowsProtocol)
+	assert.True(isWindowsEnvironment() || serverTransfer.windowsProtocol)
 	assert.Equal("!\n", serverTransfer.transferConfig.Newline)
 	assert.Equal(2, action.Protocol)
 
 	// client and server are Windows
-	isWindows = true
+	SetAffectedByWindows(true)
 	err = clientTransfer.sendAction(true, true)
 	assert.Nil(err)
 	writer.assertBufferCount(4)
 	assert.True(clientTransfer.windowsProtocol)
 	assert.Equal("!\n", clientTransfer.transferConfig.Newline)
 
-	isWindows = true
+	SetAffectedByWindows(true)
 	serverTransfer.addReceivedData([]byte(writer.buffer[3]))
 	action, err = serverTransfer.recvAction()
 	assert.Nil(err)
 	assert.Equal("!\n", action.Newline)
 	assert.False(action.SupportBinary)
-	assert.True(isWindows || serverTransfer.windowsProtocol)
+	assert.True(isWindowsEnvironment() || serverTransfer.windowsProtocol)
 	assert.Equal("!\n", serverTransfer.transferConfig.Newline)
 	assert.Equal(2, action.Protocol)
 }
 
 func TestTransferConfig(t *testing.T) {
-	isWindows = false // test as on Linux
+	SetAffectedByWindows(false) // test as on Linux
 	defer func() {
-		isWindows = (runtime.GOOS == "windows")
+		SetAffectedByWindows(isRunningOnWindows())
 	}()
 
 	assert := assert.New(t)

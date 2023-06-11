@@ -300,7 +300,7 @@ func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) 
 }
 
 func (filter *TrzszFilter) handleTrzsz(mode byte) {
-	transfer := newTransfer(filter.serverIn, nil, isRunningOnWindows() || filter.remoteIsWindows, filter.logger)
+	transfer := newTransfer(filter.serverIn, nil, isWindowsEnvironment() || filter.remoteIsWindows, filter.logger)
 
 	filter.transfer.Store(transfer)
 	defer func() {
