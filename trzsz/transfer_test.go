@@ -190,3 +190,19 @@ func TestTransferConfig(t *testing.T) {
 	assertConfigEqual(cfgStr)
 	assertConfigEqual(writer.buffer[0])
 }
+
+func TestStripTmuxStatusLine(t *testing.T) {
+	assert := assert.New(t)
+	writer := newTestWriter(t)
+	transfer := newTransfer(writer, nil, false, nil)
+
+	P := "\x1bP=1s\x1b\\\x1b[?25l\x1b[?12l\x1b[?25h\x1b[5 q\x1bP=2s\x1b\\"
+	assert.Equal([]byte("ABC123"), transfer.stripTmuxStatusLine([]byte("ABC"+"123")))
+	assert.Equal([]byte("ABC123"), transfer.stripTmuxStatusLine([]byte("ABC"+P+"123")))
+	assert.Equal([]byte("ABC123XYZ"), transfer.stripTmuxStatusLine([]byte("ABC"+P+"123"+P+"XYZ")))
+	assert.Equal([]byte("ABC123XYZ"), transfer.stripTmuxStatusLine([]byte("ABC"+P+"123"+P+P+P+"XYZ")))
+
+	for i := 0; i < len(P)-2; i++ {
+		assert.Equal([]byte("ABC123"), transfer.stripTmuxStatusLine([]byte("ABC"+P+"123"+P[:len(P)-i])))
+	}
+}

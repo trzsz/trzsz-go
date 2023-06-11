@@ -157,6 +157,30 @@ func (t *trzszTransfer) sendLine(typ string, buf string) error {
 	return t.writeAll([]byte(fmt.Sprintf("#%s:%s%s", typ, buf, t.transferConfig.Newline)))
 }
 
+func (t *trzszTransfer) stripTmuxStatusLine(buf []byte) []byte {
+	for {
+		beginIdx := bytes.Index(buf, []byte("\x1bP="))
+		if beginIdx < 0 {
+			return buf
+		}
+		bufIdx := beginIdx + 3
+		midIdx := bytes.Index(buf[bufIdx:], []byte("\x1bP="))
+		if midIdx < 0 {
+			return buf[:beginIdx]
+		}
+		bufIdx += midIdx + 3
+		endIdx := bytes.Index(buf[bufIdx:], []byte("\x1b\\"))
+		if endIdx < 0 {
+			return buf[:beginIdx]
+		}
+		bufIdx += endIdx + 2
+		b := bytes.NewBuffer(make([]byte, 0, len(buf)-(bufIdx-beginIdx)))
+		b.Write(buf[:beginIdx])
+		b.Write(buf[bufIdx:])
+		buf = b.Bytes()
+	}
+}
+
 func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
 	if t.stopped.Load() {
 		return nil, newSimpleTrzszError("Stopped")
@@ -184,6 +208,7 @@ func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 		if idx >= 0 {
 			line = line[idx:]
 		}
+		line = t.stripTmuxStatusLine(line)
 	}
 
 	return line, nil
