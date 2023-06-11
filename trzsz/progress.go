@@ -34,8 +34,6 @@ import (
 	"unicode/utf8"
 )
 
-var timeNowFunc = time.Now
-
 func getDisplayLength(str string) int {
 	length := 0
 	for _, r := range []rune(str) { // nolint:all

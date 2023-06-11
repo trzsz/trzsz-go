@@ -46,8 +46,14 @@ type pipelineContext struct {
 }
 
 type trzszData struct {
-	length int
+	data   []byte
 	buffer []byte
+	index  int
+}
+
+type trzszAck struct {
+	begin  time.Time
+	length int64
 }
 
 type base64Reader struct {
@@ -91,12 +97,9 @@ type base64Writer struct {
 }
 
 func (b *base64Writer) deliver(data []byte) bool {
-	buffer := bytes.NewBuffer(make([]byte, 0, len(data)+0x10))
-	buffer.Write([]byte("#DATA:"))
-	buffer.Write(data)
-	buffer.Write([]byte(b.transfer.transferConfig.Newline))
+	buffer := b.transfer.formatSendData(data)
 	select {
-	case b.sendDataChan <- trzszData{len(data), buffer.Bytes()}:
+	case b.sendDataChan <- trzszData{data, buffer, 0}:
 		return true
 	case <-b.ctx.Done():
 		return false
@@ -228,7 +231,7 @@ func (t *trzszTransfer) pipelineReadData(ctx *pipelineContext, file *os.File, si
 }
 
 func (t *trzszTransfer) pipelineEncodeData(ctx *pipelineContext, fileDataChan <-chan []byte) <-chan trzszData {
-	sendDataChan := make(chan trzszData, 1)
+	sendDataChan := make(chan trzszData, 100)
 	go func() {
 		defer close(sendDataChan)
 
@@ -271,14 +274,28 @@ func (t *trzszTransfer) pipelineEncodeData(ctx *pipelineContext, fileDataChan <-
 	return sendDataChan
 }
 
-func (t *trzszTransfer) pipelineEscapeData(ctx *pipelineContext, fileDataChan <-chan []byte) <-chan trzszData {
-	sendDataChan := make(chan trzszData, 1)
-	deliver := func(data []byte) bool {
+func (t *trzszTransfer) formatSendData(data []byte) []byte {
+	if t.transferConfig.Binary {
 		buffer := bytes.NewBuffer(make([]byte, 0, len(data)+0x20))
-		buffer.Write([]byte(fmt.Sprintf("#DATA:%d\n", len(data))))
+		buffer.Write([]byte(fmt.Sprintf("#DATA:%d", len(data))))
+		buffer.Write([]byte(t.transferConfig.Newline))
 		buffer.Write(data)
+		return buffer.Bytes()
+	} else {
+		buffer := bytes.NewBuffer(make([]byte, 0, len(data)+0x10))
+		buffer.Write([]byte("#DATA:"))
+		buffer.Write(data)
+		buffer.Write([]byte(t.transferConfig.Newline))
+		return buffer.Bytes()
+	}
+}
+
+func (t *trzszTransfer) pipelineEscapeData(ctx *pipelineContext, fileDataChan <-chan []byte) <-chan trzszData {
+	sendDataChan := make(chan trzszData, 100)
+	deliver := func(data []byte) bool {
+		buffer := t.formatSendData(data)
 		select {
-		case sendDataChan <- trzszData{len(data), buffer.Bytes()}:
+		case sendDataChan <- trzszData{data, buffer, 0}:
 			return true
 		case <-ctx.Done():
 			return false
@@ -377,7 +394,57 @@ func (t *trzszTransfer) pipelineRecvFinalAck(ctx *pipelineContext, size int64, p
 	}
 }
 
-func (t *trzszTransfer) pipelineSendData(ctx *pipelineContext, size int64, sendDataChan <-chan trzszData, showProgress bool) <-chan int64 {
+func (t *trzszTransfer) pipelineSendData(ctx *pipelineContext, sendDataChan <-chan trzszData) <-chan trzszAck {
+	ackChan := make(chan trzszAck, 100)
+	deliver := func(buffer []byte, length int) error {
+		beginTime := timeNowFunc()
+		if err := t.writeAll(buffer); err != nil {
+			return err
+		}
+		select {
+		case ackChan <- trzszAck{beginTime, int64(length)}:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	go func() {
+		defer close(ackChan)
+		for data := range sendDataChan {
+			if ctx.Err() != nil {
+				return
+			}
+			bufSize := int(t.bufferSize.Load())
+			if len(data.data) <= bufSize { // send all at once
+				if err := deliver(data.buffer, len(data.data)); err != nil {
+					ctx.cancel(err)
+					return
+				}
+				continue
+			}
+			// split and send
+			for data.index < len(data.data) {
+				left := len(data.data) - data.index
+				bufSize := int(t.bufferSize.Load())
+				if bufSize > left {
+					bufSize = left
+				}
+				nextIdx := data.index + bufSize
+				if err := deliver(t.formatSendData(data.data[data.index:nextIdx]), bufSize); err != nil {
+					ctx.cancel(err)
+					return
+				}
+				data.index = nextIdx
+				if ctx.Err() != nil {
+					return
+				}
+			}
+		}
+	}()
+	return ackChan
+}
+
+func (t *trzszTransfer) pipelineRecvAck(ctx *pipelineContext, size int64, ackChan <-chan trzszAck, showProgress bool) <-chan int64 {
 	var progressChan chan int64
 	if showProgress {
 		progressChan = make(chan int64, 100)
@@ -386,20 +453,14 @@ func (t *trzszTransfer) pipelineSendData(ctx *pipelineContext, size int64, sendD
 		if showProgress {
 			defer close(progressChan)
 		}
-		for data := range sendDataChan {
-			beginTime := time.Now()
-			if err := t.writeAll(data.buffer); err != nil {
-				ctx.cancel(err)
-				return
-			}
-
+		for ack := range ackChan {
 			length, step, err := t.pipelineRecvCurrentAck()
 			if err != nil {
 				ctx.cancel(err)
 				return
 			}
-			if length != int64(data.length) {
-				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("SendData length check [%d] <> [%d]", length, data.length)))
+			if length != ack.length {
+				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("SendData length check [%d] <> [%d]", length, ack.length)))
 				return
 			}
 
@@ -411,7 +472,7 @@ func (t *trzszTransfer) pipelineSendData(ctx *pipelineContext, size int64, sendD
 				}
 			}
 
-			chunkTime := time.Since(beginTime)
+			chunkTime := time.Since(ack.begin)
 			bufSize := t.bufferSize.Load()
 			if length == bufSize && chunkTime < 500*time.Millisecond && bufSize < t.transferConfig.MaxBufSize {
 				t.bufferSize.Store(minInt64(bufSize*2, t.transferConfig.MaxBufSize))
@@ -461,8 +522,10 @@ func (t *trzszTransfer) sendFileDataV2(file *os.File, size int64, progress progr
 		sendDataChan = t.pipelineEncodeData(ctx, fileDataChan)
 	}
 
+	ackChan := t.pipelineSendData(ctx, sendDataChan)
+
 	showProgress := progress != nil && !reflect.ValueOf(progress).IsNil()
-	progressChan := t.pipelineSendData(ctx, size, sendDataChan, showProgress)
+	progressChan := t.pipelineRecvAck(ctx, size, ackChan, showProgress)
 
 	if showProgress {
 		t.pipelineShowProgress(ctx, progress, progressChan)
@@ -511,13 +574,23 @@ func (t *trzszTransfer) pipelineRecvBinaryData() ([]byte, error) {
 	return t.buffer.readBinary(int(size), timeout)
 }
 
-func (t *trzszTransfer) pipelineSendCurrentAck(length int) error {
-	step := t.savedSteps.Load()
-	return t.writeAll([]byte(fmt.Sprintf("#SUCC:%d/%d%s", length, step, t.transferConfig.Newline)))
-}
-
-func (t *trzszTransfer) pipelineSendFinalAck(ctx *pipelineContext, size int64, ackStepChan <-chan struct{}) {
+func (t *trzszTransfer) pipelineSendAck(ctx *pipelineContext, size int64, ackChan <-chan int) chan<- struct{} {
+	ackImmediatelyChan := make(chan struct{}, 1)
 	go func() {
+		// send an ack for each step
+		for length := range ackChan {
+			step := t.savedSteps.Load()
+			err := t.writeAll([]byte(fmt.Sprintf("#SUCC:%d/%d%s", length, step, t.transferConfig.Newline)))
+			if err != nil {
+				ctx.cancel(err)
+				return
+			}
+			if ctx.Err() != nil {
+				return
+			}
+		}
+
+		// send ack until all data is saved to disk
 		for ctx.Err() == nil {
 			step := t.savedSteps.Load()
 			if err := t.sendInteger("SUCC", step); err != nil {
@@ -538,16 +611,19 @@ func (t *trzszTransfer) pipelineSendFinalAck(ctx *pipelineContext, size int64, a
 			}
 
 			select {
-			case <-ackStepChan:
+			case <-ackImmediatelyChan:
 			case <-time.After(200 * time.Millisecond):
 			}
 		}
 	}()
+	return ackImmediatelyChan
 }
 
-func (t *trzszTransfer) pipelineRecvData(ctx *pipelineContext, size int64, ackStepChan <-chan struct{}) <-chan []byte {
+func (t *trzszTransfer) pipelineRecvData(ctx *pipelineContext) (<-chan int, <-chan []byte) {
+	ackChan := make(chan int, 100)
 	recvDataChan := make(chan []byte, 100)
 	go func() {
+		defer close(ackChan)
 		defer close(recvDataChan)
 		t.savedSteps.Store(0)
 		for ctx.Err() == nil {
@@ -564,8 +640,9 @@ func (t *trzszTransfer) pipelineRecvData(ctx *pipelineContext, size int64, ackSt
 				return
 			}
 
-			if err := t.pipelineSendCurrentAck(len(data)); err != nil {
-				ctx.cancel(err)
+			select {
+			case ackChan <- len(data):
+			case <-ctx.Done():
 				return
 			}
 
@@ -586,9 +663,8 @@ func (t *trzszTransfer) pipelineRecvData(ctx *pipelineContext, size int64, ackSt
 				return
 			}
 		}
-		t.pipelineSendFinalAck(ctx, size, ackStepChan)
 	}()
-	return recvDataChan
+	return ackChan, recvDataChan
 }
 
 func (t *trzszTransfer) pipelineDecodeData(ctx *pipelineContext, recvDataChan <-chan []byte) (<-chan []byte, <-chan []byte) {
@@ -694,13 +770,14 @@ func (t *trzszTransfer) pipelineUnescapeData(ctx *pipelineContext, recvDataChan 
 	return fileDataChan, md5SourceChan
 }
 
-func (t *trzszTransfer) pipelineSaveData(ctx *pipelineContext, file *os.File, size int64, fileDataChan <-chan []byte, ackStepChan chan<- struct{}, showProgress bool) <-chan int64 {
+func (t *trzszTransfer) pipelineSaveData(ctx *pipelineContext, file *os.File, size int64,
+	fileDataChan <-chan []byte, ackImmediatelyChan chan<- struct{}, showProgress bool) <-chan int64 {
 	var progressChan chan int64
 	if showProgress {
 		progressChan = make(chan int64, 100)
 	}
 	go func() {
-		defer close(ackStepChan)
+		defer close(ackImmediatelyChan)
 		if showProgress {
 			defer close(progressChan)
 		}
@@ -730,7 +807,7 @@ func (t *trzszTransfer) pipelineSaveData(ctx *pipelineContext, file *os.File, si
 			ctx.cancel(newSimpleTrzszError(fmt.Sprintf("SaveFile expected step %d but was %d", size, step)))
 			return
 		}
-		ackStepChan <- struct{}{}
+		ackImmediatelyChan <- struct{}{}
 	}()
 	return progressChan
 }
@@ -742,8 +819,9 @@ func (t *trzszTransfer) recvFileDataV2(file *os.File, size int64, progress progr
 	defer ctx.cancel(nil)
 	defer close(ctx.succ)
 
-	ackStepChan := make(chan struct{}, 1)
-	recvDataChan := t.pipelineRecvData(ctx, size, ackStepChan)
+	ackChan, recvDataChan := t.pipelineRecvData(ctx)
+
+	ackImmediatelyChan := t.pipelineSendAck(ctx, size, ackChan)
 
 	var fileDataChan <-chan []byte
 	var md5SourceChan <-chan []byte
@@ -756,7 +834,7 @@ func (t *trzszTransfer) recvFileDataV2(file *os.File, size int64, progress progr
 	md5DigestChan := t.pipelineCalculateMD5(ctx, md5SourceChan)
 
 	showProgress := progress != nil && !reflect.ValueOf(progress).IsNil()
-	progressChan := t.pipelineSaveData(ctx, file, size, fileDataChan, ackStepChan, showProgress)
+	progressChan := t.pipelineSaveData(ctx, file, size, fileDataChan, ackImmediatelyChan, showProgress)
 
 	if showProgress {
 		t.pipelineShowProgress(ctx, progress, progressChan)

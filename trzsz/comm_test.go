@@ -35,6 +35,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func mockTimeNow(times []int64, defaultTime int64) *int {
+	idx := 0
+	timeNowFunc = func() time.Time {
+		if idx >= len(times) {
+			return time.UnixMilli(defaultTime)
+		}
+		t := time.UnixMilli(times[idx])
+		idx++
+		return t
+	}
+	return &idx
+}
+
 type testWriter struct {
 	t      *testing.T
 	buffer []string
@@ -50,10 +63,16 @@ func (w *testWriter) assertBufferCount(count int) {
 	require.Equal(w.t, count, len(w.buffer))
 }
 
-func (w *testWriter) assertBufferEqual(idx int, expected string) { // nolint:all
+func (w *testWriter) assertBufferEqual(idx int, expected string) {
 	w.t.Helper()
 	require.Less(w.t, idx, len(w.buffer))
 	assert.Equal(w.t, expected, w.buffer[idx])
+}
+
+func (w *testWriter) assertLastBufferEqual(expected string) {
+	w.t.Helper()
+	require.Less(w.t, 0, len(w.buffer))
+	w.assertBufferEqual(len(w.buffer)-1, expected)
 }
 
 func newTestWriter(t *testing.T) *testWriter {

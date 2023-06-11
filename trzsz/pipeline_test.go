@@ -29,6 +29,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -54,6 +55,7 @@ func assertClosed(t *testing.T, ch any) {
 				}
 			case <-time.After(time.Second):
 				assert.Fail(t, "Channel not closed")
+				return
 			}
 		}
 	}
@@ -66,6 +68,20 @@ func assertClosed(t *testing.T, ch any) {
 				}
 			case <-time.After(time.Second):
 				assert.Fail(t, "Channel not closed")
+				return
+			}
+		}
+	}
+	if c, ok := ch.(<-chan trzszAck); ok {
+		for {
+			select {
+			case _, ok := <-c:
+				if !ok {
+					return
+				}
+			case <-time.After(time.Second):
+				assert.Fail(t, "Channel not closed")
+				return
 			}
 		}
 	}
@@ -95,6 +111,16 @@ func assertChannel(t *testing.T, expected any, ch any) {
 		return
 	}
 	if c, ok := ch.(chan trzszData); ok {
+		select {
+		case actual, ok := <-c:
+			assert.True(t, ok)
+			assert.Equal(t, expected, actual)
+		case <-time.After(time.Second):
+			assert.Fail(t, "Channel timeout")
+		}
+		return
+	}
+	if c, ok := ch.(<-chan trzszAck); ok {
 		select {
 		case actual, ok := <-c:
 			assert.True(t, ok)
@@ -182,6 +208,12 @@ func TestBase64Writer(t *testing.T) {
 		assert.Equal(len(data), n)
 		assert.Nil(err)
 	}
+	newTrzszData := func(data string) trzszData {
+		return trzszData{
+			data:   []byte(data),
+			buffer: []byte(fmt.Sprintf("#DATA:%s\n", data)),
+		}
+	}
 
 	// buffering
 	assertWriteSucc([]byte{})
@@ -192,7 +224,7 @@ func TestBase64Writer(t *testing.T) {
 
 	// buffer just complete
 	assertWriteSucc([]byte("D"))
-	assertChannel(t, trzszData{4, []byte("#DATA:ABCD\n")}, dataChan)
+	assertChannel(t, newTrzszData("ABCD"), dataChan)
 
 	// buffer complete and more data, and cancel
 	assertWriteSucc([]byte("ABCD1234abcdZZ"))
@@ -202,9 +234,9 @@ func TestBase64Writer(t *testing.T) {
 	assert.ErrorIs(err, context.Canceled)
 	base64Writer.ctx = newPipelineContext()                                            // reset context
 	base64Writer.buffer = bytes.NewBuffer(make([]byte, 0, transfer.bufferSize.Load())) // reset buffer
-	assertChannel(t, trzszData{4, []byte("#DATA:ABCD\n")}, dataChan)
-	assertChannel(t, trzszData{4, []byte("#DATA:1234\n")}, dataChan)
-	assertChannel(t, trzszData{4, []byte("#DATA:abcd\n")}, dataChan)
+	assertChannel(t, newTrzszData("ABCD"), dataChan)
+	assertChannel(t, newTrzszData("1234"), dataChan)
+	assertChannel(t, newTrzszData("abcd"), dataChan)
 	assert.Empty(dataChan)
 
 	// change buffer size
@@ -212,16 +244,16 @@ func TestBase64Writer(t *testing.T) {
 	assertWriteSucc([]byte("XY"))
 	assert.Empty(dataChan)
 	assertWriteSucc([]byte("MN"))
-	assertChannel(t, trzszData{4, []byte("#DATA:XYMN\n")}, dataChan)
+	assertChannel(t, newTrzszData("XYMN"), dataChan)
 	assertWriteSucc([]byte("ABCDEF"))
-	assertChannel(t, trzszData{5, []byte("#DATA:ABCDE\n")}, dataChan)
+	assertChannel(t, newTrzszData("ABCDE"), dataChan)
 
 	// close writer
 	assertWriteSucc([]byte("GH"))
 	assert.Empty(dataChan)
 	base64Writer.Close()
-	assertChannel(t, trzszData{3, []byte("#DATA:FGH\n")}, dataChan)
-	assertChannel(t, trzszData{0, []byte("#DATA:\n")}, dataChan)
+	assertChannel(t, newTrzszData("FGH"), dataChan)
+	assertChannel(t, newTrzszData(""), dataChan)
 }
 
 func TestPipelineCalculateMD5(t *testing.T) {
@@ -302,7 +334,7 @@ func TestPipelineEncodeAndDecode(t *testing.T) {
 
 	go func() {
 		for data := range sendDataChan {
-			recvDataChan <- data.buffer[6 : 6+data.length]
+			recvDataChan <- data.buffer[6 : 6+len(data.data)]
 		}
 		close(recvDataChan)
 	}()
@@ -325,7 +357,14 @@ func TestPipelineEscapeData(t *testing.T) {
 	fileDataChan := make(chan []byte, 100)
 	transfer := newTransfer(nil, nil, false, nil)
 	transfer.bufferSize.Store(4)
+	transfer.transferConfig.Binary = true
 	sendDataChan := transfer.pipelineEscapeData(newPipelineContext(), fileDataChan)
+	newTrzszData := func(data string) trzszData {
+		return trzszData{
+			data:   []byte(data),
+			buffer: []byte(fmt.Sprintf("#DATA:%d\n%s", len(data), data)),
+		}
+	}
 
 	// buffering
 	fileDataChan <- []byte{}
@@ -336,25 +375,25 @@ func TestPipelineEscapeData(t *testing.T) {
 
 	// buffer just complete
 	fileDataChan <- []byte("D")
-	assertChannel(t, trzszData{4, []byte("#DATA:4\nABCD")}, sendDataChan)
+	assertChannel(t, newTrzszData("ABCD"), sendDataChan)
 
 	// buffer complete and more data
 	fileDataChan <- []byte("ABCD1234abcdZZ")
-	assertChannel(t, trzszData{4, []byte("#DATA:4\nABCD")}, sendDataChan)
-	assertChannel(t, trzszData{4, []byte("#DATA:4\n1234")}, sendDataChan)
-	assertChannel(t, trzszData{4, []byte("#DATA:4\nabcd")}, sendDataChan)
+	assertChannel(t, newTrzszData("ABCD"), sendDataChan)
+	assertChannel(t, newTrzszData("1234"), sendDataChan)
+	assertChannel(t, newTrzszData("abcd"), sendDataChan)
 
 	// change buffer size
 	time.Sleep(100 * time.Millisecond)
 	transfer.bufferSize.Store(5)
 	fileDataChan <- []byte("ABCDEFGHI")
-	assertChannel(t, trzszData{4, []byte("#DATA:4\nZZAB")}, sendDataChan)
-	assertChannel(t, trzszData{5, []byte("#DATA:5\nCDEFG")}, sendDataChan)
+	assertChannel(t, newTrzszData("ZZAB"), sendDataChan)
+	assertChannel(t, newTrzszData("CDEFG"), sendDataChan)
 
 	// last buffer
 	close(fileDataChan)
-	assertChannel(t, trzszData{2, []byte("#DATA:2\nHI")}, sendDataChan)
-	assertChannel(t, trzszData{0, []byte("#DATA:0\n")}, sendDataChan)
+	assertChannel(t, newTrzszData("HI"), sendDataChan)
+	assertChannel(t, newTrzszData(""), sendDataChan)
 	assertClosed(t, sendDataChan)
 
 	// escape data
@@ -369,9 +408,9 @@ func TestPipelineEscapeData(t *testing.T) {
 	fileDataChan = make(chan []byte, 100)
 	sendDataChan = transfer.pipelineEscapeData(ctx, fileDataChan)
 	fileDataChan <- []byte{0xee, 0xee, 0xee}
-	assertChannel(t, trzszData{5, []byte("#DATA:5\n\xee\xee\xee\xee\xee")}, sendDataChan)
+	assertChannel(t, newTrzszData("\xee\xee\xee\xee\xee"), sendDataChan)
 	fileDataChan <- []byte{0x7e, 0x7e}
-	assertChannel(t, trzszData{5, []byte("#DATA:5\n\xee\xee\x31\xee\x31")}, sendDataChan)
+	assertChannel(t, newTrzszData("\xee\xee\x31\xee\x31"), sendDataChan)
 
 	// cancel
 	fileDataChan <- bytes.Repeat([]byte{0xee}, 4096)
@@ -451,4 +490,63 @@ func TestPipelineUnescapeData(t *testing.T) {
 	assertChannel(t, []byte("\xee\xee\x7e"), md5SourceChan)
 	assertChannel(t, []byte("\xee\xee"), fileDataChan)
 	assertChannel(t, []byte("\xee\xee"), md5SourceChan)
+
+	// cancel
+	recvDataChan = make(chan []byte, 100)
+	ctx := newPipelineContext()
+	fileDataChan, md5SourceChan = transfer.pipelineUnescapeData(ctx, recvDataChan)
+	ctx.cancel(nil)
+	recvDataChan <- []byte("123")
+	assertClosed(t, fileDataChan)
+	assertClosed(t, md5SourceChan)
+}
+
+func TestPipelineSendData(t *testing.T) {
+	writer := newTestWriter(t)
+	sendDataChan := make(chan trzszData, 100)
+	transfer := newTransfer(writer, nil, false, nil)
+	transfer.bufferSize.Store(3)
+	ctx := newPipelineContext()
+	ackChan := transfer.pipelineSendData(ctx, sendDataChan)
+	mockTimeNow([]int64{}, 2096)
+	newTrzszAck := func(length int64) trzszAck {
+		return trzszAck{begin: time.UnixMilli(2096), length: length}
+	}
+
+	// send all base64 at once
+	sendDataChan <- trzszData{data: []byte("ABC"), buffer: []byte("xyz123")}
+	assertChannel(t, newTrzszAck(3), ackChan)
+	writer.assertLastBufferEqual("xyz123")
+
+	// split base64 and send
+	sendDataChan <- trzszData{data: []byte("abcdefg"), buffer: []byte("331")}
+	assertChannel(t, newTrzszAck(3), ackChan)
+	assertChannel(t, newTrzszAck(3), ackChan)
+	assertChannel(t, newTrzszAck(1), ackChan)
+	writer.assertBufferCount(4)
+	writer.assertBufferEqual(1, "#DATA:abc\n")
+	writer.assertBufferEqual(2, "#DATA:def\n")
+	writer.assertBufferEqual(3, "#DATA:g\n")
+
+	// send all binary at once
+	transfer.transferConfig.Binary = true
+	transfer.bufferSize.Store(3)
+	sendDataChan <- trzszData{data: []byte("123"), buffer: []byte("ABCDEF")}
+	assertChannel(t, newTrzszAck(3), ackChan)
+	writer.assertLastBufferEqual("ABCDEF")
+
+	// split binary and send
+	sendDataChan <- trzszData{data: []byte("12345678"), buffer: []byte("332")}
+	assertChannel(t, newTrzszAck(3), ackChan)
+	assertChannel(t, newTrzszAck(3), ackChan)
+	assertChannel(t, newTrzszAck(2), ackChan)
+	writer.assertBufferCount(8)
+	writer.assertBufferEqual(5, "#DATA:3\n123")
+	writer.assertBufferEqual(6, "#DATA:3\n456")
+	writer.assertBufferEqual(7, "#DATA:2\n78")
+
+	// cancel
+	ctx.cancel(nil)
+	sendDataChan <- trzszData{data: []byte("111222333"), buffer: []byte("333")}
+	assertClosed(t, ackChan)
 }

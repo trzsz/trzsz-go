@@ -44,6 +44,8 @@ import (
 	"time"
 )
 
+var timeNowFunc = time.Now
+
 var isLinux bool = (runtime.GOOS == "linux")
 var isMacOS bool = (runtime.GOOS == "darwin")
 var isWindows bool = (runtime.GOOS == "windows")

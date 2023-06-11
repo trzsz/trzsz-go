@@ -30,24 +30,10 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func mockTimeNow(times []int64) *int {
-	idx := 0
-	timeNowFunc = func() time.Time {
-		if idx > len(times) {
-			return time.UnixMilli(0)
-		}
-		t := time.UnixMilli(times[idx])
-		idx++
-		return t
-	}
-	return &idx
-}
 
 var colorRegexp = regexp.MustCompile(`\x1b\[\d+[mD]`)
 
@@ -71,7 +57,7 @@ func (w *testWriter) assertProgressText(idx int, size int, expected []string) {
 func TestProgressWithEmptyFile(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135000})
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135000}, 0)
 
 	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
@@ -87,7 +73,7 @@ func TestProgressWithEmptyFile(t *testing.T) {
 func TestProgressZeroStep(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135100})
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135100}, 0)
 
 	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
@@ -103,7 +89,7 @@ func TestProgressZeroStep(t *testing.T) {
 func TestProgressLastStep(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135200})
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135200}, 0)
 
 	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
@@ -119,7 +105,7 @@ func TestProgressLastStep(t *testing.T) {
 func TestProgressWithSpeedAndEta(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135100})
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135100}, 0)
 
 	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
@@ -140,7 +126,7 @@ func TestProgressNewestSpeed(t *testing.T) {
 	for i := 0; i < 101; i++ {
 		mockTimes = append(mockTimes, now+int64(i*1000))
 	}
-	callTimeNowCount := mockTimeNow(mockTimes)
+	callTimeNowCount := mockTimeNow(mockTimes, 0)
 
 	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
@@ -199,7 +185,7 @@ func TestProgressNewestSpeed(t *testing.T) {
 func TestProgressReduceOutput(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135001, 1646564135099})
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135001, 1646564135099}, 0)
 
 	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
@@ -216,7 +202,7 @@ func TestProgressReduceOutput(t *testing.T) {
 func TestProgressFastSpeed(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000})
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000}, 0)
 
 	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
@@ -232,7 +218,7 @@ func TestProgressFastSpeed(t *testing.T) {
 func TestProgressSlowSpeed(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000})
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000}, 0)
 
 	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(1)
@@ -248,7 +234,7 @@ func TestProgressSlowSpeed(t *testing.T) {
 func TestProgressLongFileName(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000})
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000}, 0)
 
 	progress := newTextProgressBar(writer, 110, 0)
 	progress.onNum(1)
@@ -269,7 +255,7 @@ func TestProgressLongFileName(t *testing.T) {
 func TestProgressWithoutTotalSize(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000})
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000}, 0)
 
 	progress := newTextProgressBar(writer, 95, 0)
 	progress.onNum(1)
@@ -288,7 +274,7 @@ func TestProgressWithoutTotalSize(t *testing.T) {
 func TestProgressWithoutSpeedOrEta(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000})
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000}, 0)
 
 	progress := newTextProgressBar(writer, 70, 0)
 	progress.onNum(1)
@@ -307,7 +293,7 @@ func TestProgressWithoutSpeedOrEta(t *testing.T) {
 func TestProgressWithoutFileName(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000})
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000}, 0)
 
 	progress := newTextProgressBar(writer, 48, 0)
 	progress.onNum(1)
@@ -327,7 +313,7 @@ func TestProgressWithoutFileName(t *testing.T) {
 func TestProgressWithoutBar(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000})
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000}, 0)
 
 	progress := newTextProgressBar(writer, 10, 0)
 	progress.onNum(1)
@@ -343,7 +329,7 @@ func TestProgressWithoutBar(t *testing.T) {
 func TestProgressWithMultiFiles(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564137000, 1646564139000})
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564137000, 1646564139000}, 0)
 
 	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(2)
@@ -368,7 +354,7 @@ func TestProgressWithMultiFiles(t *testing.T) {
 func TestProgressInTmuxPane(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564137000, 1646564138000, 1646564139000})
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564137000, 1646564138000, 1646564139000}, 0)
 
 	progress := newTextProgressBar(writer, 100, 80)
 	progress.onNum(2)
