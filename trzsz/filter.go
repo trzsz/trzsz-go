@@ -384,9 +384,13 @@ func (filter *TrzszFilter) sendInput(buf []byte) {
 	}
 	if transfer := filter.transfer.Load(); transfer != nil {
 		if buf[0] == '\x03' { // `ctrl + c` to stop transferring files
-			transfer.stopTransferringFiles()
+			cancel,del := filter.ctrlCResult()
+			if !cancel{
+				transfer.delFiles.Store(del)
+				transfer.stopTransferringFiles()
+				return 
+			}
 		}
-		return
 	}
 	if filter.options.DetectDragFile {
 		dragFiles, hasDir, ignore := detectDragFiles(buf)
@@ -461,4 +465,29 @@ func (filter *TrzszFilter) wrapOutput() {
 			break
 		}
 	}
+}
+
+func (filter *TrzszFilter) ctrlCResult() (del bool,cancle bool){
+	deleteOption := "终止并删除已经上传的文件"
+	saveOption := "终止并保留已经上传的文件"
+	cancleOption := "取消操作"
+
+	res,err:=zenity.List(
+		"你的ctrl+c操作将：",
+		[]string{deleteOption,saveOption,cancleOption},
+		zenity.Title("是否保留文件"),
+		zenity.DisallowEmpty(),
+	)
+	if err!=nil{
+		return false,true
+	}
+	switch res{
+	case cancleOption:
+		return false,true
+	case saveOption:
+		return false,false
+	case deleteOption:
+		return true,false
+	}
+	return false,true
 }

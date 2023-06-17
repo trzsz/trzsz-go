@@ -82,6 +82,8 @@ type trzszTransfer struct {
 	savedSteps      atomic.Int64
 	transferConfig  transferConfig
 	logger          *traceLogger
+	savedFiles []string
+	delFiles atomic.Bool
 }
 
 func maxDuration(a, b time.Duration) time.Duration {
@@ -111,6 +113,7 @@ func newTransfer(writer io.Writer, stdinState *term.State, flushInTime bool, log
 			Newline:    "\n",
 			MaxBufSize: 10 * 1024 * 1024,
 		},
+		savedFiles: make([]string, 0),
 		logger: logger,
 	}
 	t.bufferSize.Store(1024)
@@ -183,7 +186,10 @@ func (t *trzszTransfer) stripTmuxStatusLine(buf []byte) []byte {
 
 func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
 	if t.stopped.Load() {
-		return nil, newSimpleTrzszError("Stopped")
+		if t.delFiles.Load(){
+			return nil,newSimpleTrzszError("Stopped and delete files.")
+		}
+		return nil, newSimpleTrzszError("Stopped and delete files")
 	}
 
 	if isWindowsEnvironment() || t.windowsProtocol {
@@ -430,6 +436,9 @@ func (t *trzszTransfer) recvConfig() (*transferConfig, error) {
 }
 
 func (t *trzszTransfer) clientExit(msg string) error {
+	if t.delFiles.Load(){
+		t.delSavedFiles()
+	}
 	return t.sendString("EXIT", msg)
 }
 
@@ -687,6 +696,7 @@ func (t *trzszTransfer) doCreateFile(path string) (*os.File, error) {
 		}
 		return nil, newSimpleTrzszError(fmt.Sprintf("%v", err))
 	}
+	t.savedFiles = append(t.savedFiles,path)
 	return file, nil
 }
 
@@ -700,6 +710,7 @@ func (t *trzszTransfer) doCreateDirectory(path string) error {
 	if !stat.IsDir() {
 		return newSimpleTrzszError(fmt.Sprintf("Not a directory: %s", path))
 	}
+	t.savedFiles = append(t.savedFiles,path)
 	return nil
 }
 
@@ -910,4 +921,10 @@ func (t *trzszTransfer) recvFiles(path string, progress progressCallback) ([]str
 	}
 
 	return localNames, nil
+}
+
+func (t *trzszTransfer) delSavedFiles(){
+	for i:=len(t.savedFiles)-1;i>=0;i--{
+		os.Remove(t.savedFiles[i])
+	}
 }
