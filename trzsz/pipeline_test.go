@@ -199,6 +199,7 @@ func TestBase64Reader(t *testing.T) {
 func TestBase64Writer(t *testing.T) {
 	assert := assert.New(t)
 	transfer := newTransfer(nil, nil, false, nil)
+	transfer.bufInitPhase.Store(false)
 	transfer.bufferSize.Store(4)
 	dataChan := make(chan trzszData, 3)
 	base64Writer := newBase64Writer(transfer, newPipelineContext(), dataChan)
@@ -275,11 +276,12 @@ func TestPipelineCalculateMD5(t *testing.T) {
 func TestPipelineReadData(t *testing.T) {
 	assert := assert.New(t)
 
+	N := 32 * 1024
 	file, err := os.CreateTemp("", "TestPipelineReadData")
 	assert.Nil(err)
 	defer os.Remove(file.Name())
-	_, _ = file.Write(bytes.Repeat([]byte{'A'}, 4096))
-	_, _ = file.Write(bytes.Repeat([]byte{'B'}, 4096))
+	_, _ = file.Write(bytes.Repeat([]byte{'A'}, N))
+	_, _ = file.Write(bytes.Repeat([]byte{'B'}, N))
 	_, _ = file.Write(bytes.Repeat([]byte{'C'}, 100))
 	file.Close()
 	f1, err := os.Open(file.Name())
@@ -289,14 +291,14 @@ func TestPipelineReadData(t *testing.T) {
 	// read success
 	ctx := newPipelineContext()
 	transfer := newTransfer(nil, nil, false, nil)
-	fileDataChan, md5SourceChan := transfer.pipelineReadData(ctx, f1, 4096*2+100)
+	fileDataChan, md5SourceChan := transfer.pipelineReadData(ctx, f1, int64(N*2+100))
 
-	assertChannel(t, bytes.Repeat([]byte{'A'}, 4096), fileDataChan)
-	assertChannel(t, bytes.Repeat([]byte{'B'}, 4096), fileDataChan)
+	assertChannel(t, bytes.Repeat([]byte{'A'}, N), fileDataChan)
+	assertChannel(t, bytes.Repeat([]byte{'B'}, N), fileDataChan)
 	assertChannel(t, bytes.Repeat([]byte{'C'}, 100), fileDataChan)
 
-	assertChannel(t, bytes.Repeat([]byte{'A'}, 4096), md5SourceChan)
-	assertChannel(t, bytes.Repeat([]byte{'B'}, 4096), md5SourceChan)
+	assertChannel(t, bytes.Repeat([]byte{'A'}, N), md5SourceChan)
+	assertChannel(t, bytes.Repeat([]byte{'B'}, N), md5SourceChan)
 	assertChannel(t, bytes.Repeat([]byte{'C'}, 100), md5SourceChan)
 
 	assert.Nil(ctx.Err())
@@ -316,7 +318,7 @@ func TestPipelineReadData(t *testing.T) {
 	f3, err := os.Open(file.Name())
 	assert.Nil(err)
 	defer f3.Close()
-	fileDataChan, md5SourceChan = transfer.pipelineReadData(ctx, f2, 4096*2+100)
+	fileDataChan, md5SourceChan = transfer.pipelineReadData(ctx, f2, int64(N*2+100))
 	assertClosed(t, fileDataChan)
 	assertClosed(t, md5SourceChan)
 }
@@ -325,6 +327,7 @@ func TestPipelineEncodeAndDecode(t *testing.T) {
 	assert := assert.New(t)
 
 	transfer := newTransfer(nil, nil, false, nil)
+	transfer.bufInitPhase.Store(false)
 	transfer.bufferSize.Store(4)
 	ctx := newPipelineContext()
 	srcDataChan := make(chan []byte, 100)
@@ -356,6 +359,7 @@ func TestPipelineEscapeData(t *testing.T) {
 
 	fileDataChan := make(chan []byte, 100)
 	transfer := newTransfer(nil, nil, false, nil)
+	transfer.bufInitPhase.Store(false)
 	transfer.bufferSize.Store(4)
 	transfer.transferConfig.Binary = true
 	sendDataChan := transfer.pipelineEscapeData(newPipelineContext(), fileDataChan)
@@ -413,7 +417,7 @@ func TestPipelineEscapeData(t *testing.T) {
 	assertChannel(t, newTrzszData("\xee\xee\x31\xee\x31"), sendDataChan)
 
 	// cancel
-	fileDataChan <- bytes.Repeat([]byte{0xee}, 4096)
+	fileDataChan <- bytes.Repeat([]byte{0xee}, 32*1024)
 	ctx.cancel(nil)
 	assertClosed(t, sendDataChan)
 }
@@ -523,10 +527,7 @@ func TestPipelineSendData(t *testing.T) {
 	assertChannel(t, newTrzszAck(3), ackChan)
 	assertChannel(t, newTrzszAck(3), ackChan)
 	assertChannel(t, newTrzszAck(1), ackChan)
-	writer.assertBufferCount(4)
-	writer.assertBufferEqual(1, "#DATA:abc\n")
-	writer.assertBufferEqual(2, "#DATA:def\n")
-	writer.assertBufferEqual(3, "#DATA:g\n")
+	writer.assertBase64DataEqual([]string{"abc", "def", "g"})
 
 	// send all binary at once
 	transfer.transferConfig.Binary = true
@@ -540,10 +541,7 @@ func TestPipelineSendData(t *testing.T) {
 	assertChannel(t, newTrzszAck(3), ackChan)
 	assertChannel(t, newTrzszAck(3), ackChan)
 	assertChannel(t, newTrzszAck(2), ackChan)
-	writer.assertBufferCount(8)
-	writer.assertBufferEqual(5, "#DATA:3\n123")
-	writer.assertBufferEqual(6, "#DATA:3\n456")
-	writer.assertBufferEqual(7, "#DATA:2\n78")
+	writer.assertBinaryDataEqual([]string{"123", "456", "78"})
 
 	// cancel
 	ctx.cancel(nil)

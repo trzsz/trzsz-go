@@ -36,6 +36,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -78,6 +79,8 @@ type trzszTransfer struct {
 	fileNameMap     map[int]string
 	windowsProtocol bool
 	flushInTime     bool
+	bufInitWG       sync.WaitGroup
+	bufInitPhase    atomic.Bool
 	bufferSize      atomic.Int64
 	savedSteps      atomic.Int64
 	transferConfig  transferConfig
@@ -113,7 +116,8 @@ func newTransfer(writer io.Writer, stdinState *term.State, flushInTime bool, log
 		},
 		logger: logger,
 	}
-	t.bufferSize.Store(1024)
+	t.bufInitPhase.Store(true)
+	t.bufferSize.Store(10240)
 	return t
 }
 
@@ -131,6 +135,13 @@ func (t *trzszTransfer) stopTransferringFiles() {
 	t.stopped.Store(true)
 	t.cleanTimeout = maxDuration(t.maxChunkTime*2, 500*time.Millisecond)
 	t.buffer.stopBuffer()
+}
+
+func (t *trzszTransfer) checkStop() error {
+	if t.stopped.Load() {
+		return newSimpleTrzszError("Stopped")
+	}
+	return nil
 }
 
 func (t *trzszTransfer) cleanInput(timeoutDuration time.Duration) {
@@ -182,13 +193,16 @@ func (t *trzszTransfer) stripTmuxStatusLine(buf []byte) []byte {
 }
 
 func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
-	if t.stopped.Load() {
-		return nil, newSimpleTrzszError("Stopped")
+	if err := t.checkStop(); err != nil {
+		return nil, err
 	}
 
 	if isWindowsEnvironment() || t.windowsProtocol {
 		line, err := t.buffer.readLineOnWindows(timeout)
 		if err != nil {
+			if e := t.checkStop(); e != nil {
+				return nil, e
+			}
 			return nil, err
 		}
 		idx := bytes.LastIndex(line, []byte("#"+expectType+":"))
@@ -200,6 +214,9 @@ func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 
 	line, err := t.buffer.readLine(t.transferConfig.TmuxOutputJunk || mayHasJunk, timeout)
 	if err != nil {
+		if e := t.checkStop(); e != nil {
+			return nil, e
+		}
 		return nil, err
 	}
 
@@ -308,6 +325,9 @@ func (t *trzszTransfer) checkBinary(expect []byte) error {
 }
 
 func (t *trzszTransfer) sendData(data []byte) error {
+	if err := t.checkStop(); err != nil {
+		return err
+	}
 	if !t.transferConfig.Binary {
 		return t.sendBinary("DATA", data)
 	}
@@ -336,6 +356,9 @@ func (t *trzszTransfer) recvData() ([]byte, error) {
 	}
 	data, err := t.buffer.readBinary(int(size), timeout)
 	if err != nil {
+		if e := t.checkStop(); e != nil {
+			return nil, e
+		}
 		return nil, err
 	}
 	return unescapeData(data, t.transferConfig.EscapeCodes), nil

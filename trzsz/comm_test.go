@@ -75,6 +75,27 @@ func (w *testWriter) assertLastBufferEqual(expected string) {
 	w.assertBufferEqual(len(w.buffer)-1, expected)
 }
 
+func (w *testWriter) assertBase64DataEqual(expected []string) {
+	w.t.Helper()
+	require.Less(w.t, 0, len(expected)*3)
+	for i := 0; i < len(expected); i++ {
+		j := len(w.buffer) - (len(expected)-i)*3
+		w.assertBufferEqual(j, "#DATA:")
+		w.assertBufferEqual(j+1, expected[i])
+		w.assertBufferEqual(j+2, "\n")
+	}
+}
+
+func (w *testWriter) assertBinaryDataEqual(expected []string) {
+	w.t.Helper()
+	require.Less(w.t, 0, len(expected)*2)
+	for i := 0; i < len(expected); i++ {
+		j := len(w.buffer) - (len(expected)-i)*2
+		w.assertBufferEqual(j, fmt.Sprintf("#DATA:%d\n", len(expected[i])))
+		w.assertBufferEqual(j+1, expected[i])
+	}
+}
+
 func newTestWriter(t *testing.T) *testWriter {
 	return &testWriter{t, nil}
 }
