@@ -36,6 +36,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -78,6 +79,8 @@ type trzszTransfer struct {
 	fileNameMap     map[int]string
 	windowsProtocol bool
 	flushInTime     bool
+	bufInitWG       sync.WaitGroup
+	bufInitPhase    atomic.Bool
 	bufferSize      atomic.Int64
 	savedSteps      atomic.Int64
 	transferConfig  transferConfig
@@ -116,7 +119,8 @@ func newTransfer(writer io.Writer, stdinState *term.State, flushInTime bool, log
 		savedFiles: make([]string, 0),
 		logger: logger,
 	}
-	t.bufferSize.Store(1024)
+	t.bufInitPhase.Store(true)
+	t.bufferSize.Store(10240)
 	return t
 }
 
@@ -134,6 +138,19 @@ func (t *trzszTransfer) stopTransferringFiles() {
 	t.stopped.Store(true)
 	t.cleanTimeout = maxDuration(t.maxChunkTime*2, 500*time.Millisecond)
 	t.buffer.stopBuffer()
+}
+
+func (t *trzszTransfer) checkStop() error {
+	if t.stopped.Load() {
+		if t.delFiles.Load(){
+			if len(t.savedFiles)>1{
+				return newSimpleTrzszError("Stopped and delete files/directories")
+			}
+			return newSimpleTrzszError("Stopped and delete file/directory")
+		}
+		return newSimpleTrzszError("Stopped and keep files/directories")
+	}
+	return nil
 }
 
 func (t *trzszTransfer) cleanInput(timeoutDuration time.Duration) {
@@ -185,16 +202,16 @@ func (t *trzszTransfer) stripTmuxStatusLine(buf []byte) []byte {
 }
 
 func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
-	if t.stopped.Load() {
-		if t.delFiles.Load(){
-			return nil,newSimpleTrzszError("Stopped and delete files.")
-		}
-		return nil, newSimpleTrzszError("Stopped and delete files")
+	if err := t.checkStop(); err != nil {
+		return nil, err
 	}
 
 	if isWindowsEnvironment() || t.windowsProtocol {
 		line, err := t.buffer.readLineOnWindows(timeout)
 		if err != nil {
+			if e := t.checkStop(); e != nil {
+				return nil, e
+			}
 			return nil, err
 		}
 		idx := bytes.LastIndex(line, []byte("#"+expectType+":"))
@@ -206,6 +223,9 @@ func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 
 	line, err := t.buffer.readLine(t.transferConfig.TmuxOutputJunk || mayHasJunk, timeout)
 	if err != nil {
+		if e := t.checkStop(); e != nil {
+			return nil, e
+		}
 		return nil, err
 	}
 
@@ -314,6 +334,9 @@ func (t *trzszTransfer) checkBinary(expect []byte) error {
 }
 
 func (t *trzszTransfer) sendData(data []byte) error {
+	if err := t.checkStop(); err != nil {
+		return err
+	}
 	if !t.transferConfig.Binary {
 		return t.sendBinary("DATA", data)
 	}
@@ -342,6 +365,9 @@ func (t *trzszTransfer) recvData() ([]byte, error) {
 	}
 	data, err := t.buffer.readBinary(int(size), timeout)
 	if err != nil {
+		if e := t.checkStop(); e != nil {
+			return nil, e
+		}
 		return nil, err
 	}
 	return unescapeData(data, t.transferConfig.EscapeCodes), nil
@@ -459,6 +485,11 @@ func (t *trzszTransfer) serverExit(msg string) {
 	}
 	os.Stdout.WriteString(msg)
 	os.Stdout.WriteString("\r\n")
+	if strings.Contains(msg,"Stopped and delete"){
+		deletedFiles:=t.delSavedFiles()
+		os.Stdout.WriteString(formatFileList(deletedFiles))
+		os.Stdout.WriteString("\r\n")
+	}
 }
 
 func (t *trzszTransfer) clientError(err error) {
@@ -923,8 +954,14 @@ func (t *trzszTransfer) recvFiles(path string, progress progressCallback) ([]str
 	return localNames, nil
 }
 
-func (t *trzszTransfer) delSavedFiles(){
+func (t *trzszTransfer) delSavedFiles() []string{
+	deletedFiles := make([]string,len(t.savedFiles))
+	delInd := len(t.savedFiles)
 	for i:=len(t.savedFiles)-1;i>=0;i--{
-		os.Remove(t.savedFiles[i])
+		if err:=os.Remove(t.savedFiles[i]);err==nil{
+			delInd--
+			deletedFiles[delInd]=t.savedFiles[i]
+		}
 	}
+	return deletedFiles[delInd:]
 }

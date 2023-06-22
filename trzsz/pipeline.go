@@ -97,9 +97,12 @@ type base64Writer struct {
 }
 
 func (b *base64Writer) deliver(data []byte) bool {
-	buffer := b.transfer.formatSendData(data)
+	buffer := bytes.NewBuffer(make([]byte, 0, len(data)+0x10))
+	buffer.Write([]byte("#DATA:"))
+	buffer.Write(data)
+	buffer.Write([]byte(b.transfer.transferConfig.Newline))
 	select {
-	case b.sendDataChan <- trzszData{data, buffer, 0}:
+	case b.sendDataChan <- trzszData{data, buffer.Bytes(), 0}:
 		return true
 	case <-b.ctx.Done():
 		return false
@@ -124,10 +127,17 @@ func (b *base64Writer) Write(p []byte) (int, error) {
 		if err != nil {
 			return 0, err
 		}
+
+		if b.transfer.bufInitPhase.Load() {
+			b.transfer.bufInitWG.Add(1)
+		}
 		if !b.deliver(b.buffer.Bytes()) {
 			return 0, b.ctx.Err()
 		}
 
+		if b.transfer.bufInitPhase.Load() {
+			b.transfer.bufInitWG.Wait()
+		}
 		b.bufSize = b.transfer.bufferSize.Load()
 		b.buffer = bytes.NewBuffer(make([]byte, 0, b.bufSize))
 		p = p[n:]
@@ -136,6 +146,7 @@ func (b *base64Writer) Write(p []byte) (int, error) {
 }
 
 func (b *base64Writer) Close() error {
+	b.transfer.bufInitPhase.Store(false)
 	if b.buffer.Len() > 0 {
 		if !b.deliver(b.buffer.Bytes()) {
 			return b.ctx.Err()
@@ -200,7 +211,7 @@ func (t *trzszTransfer) pipelineReadData(ctx *pipelineContext, file *os.File, si
 		defer close(fileDataChan)
 		defer close(md5SourceChan)
 		step := int64(0)
-		bufSize := int64(4096)
+		bufSize := int64(32 * 1024)
 		for step < size && ctx.Err() == nil {
 			m := size - step
 			if m > bufSize {
@@ -231,7 +242,7 @@ func (t *trzszTransfer) pipelineReadData(ctx *pipelineContext, file *os.File, si
 }
 
 func (t *trzszTransfer) pipelineEncodeData(ctx *pipelineContext, fileDataChan <-chan []byte) <-chan trzszData {
-	sendDataChan := make(chan trzszData, 100)
+	sendDataChan := make(chan trzszData, 5)
 	go func() {
 		defer close(sendDataChan)
 
@@ -274,28 +285,39 @@ func (t *trzszTransfer) pipelineEncodeData(ctx *pipelineContext, fileDataChan <-
 	return sendDataChan
 }
 
-func (t *trzszTransfer) formatSendData(data []byte) []byte {
+func (t *trzszTransfer) sendDataV2(buffer []byte, length int, encoded bool) error {
+	if err := t.checkStop(); err != nil {
+		return err
+	}
+	if encoded {
+		return t.writeAll(buffer)
+	}
 	if t.transferConfig.Binary {
-		buffer := bytes.NewBuffer(make([]byte, 0, len(data)+0x20))
-		buffer.Write([]byte(fmt.Sprintf("#DATA:%d", len(data))))
-		buffer.Write([]byte(t.transferConfig.Newline))
-		buffer.Write(data)
-		return buffer.Bytes()
+		if err := t.writeAll([]byte(fmt.Sprintf("#DATA:%d%s", length, t.transferConfig.Newline))); err != nil {
+			return err
+		}
+		return t.writeAll(buffer)
 	} else {
-		buffer := bytes.NewBuffer(make([]byte, 0, len(data)+0x10))
-		buffer.Write([]byte("#DATA:"))
-		buffer.Write(data)
-		buffer.Write([]byte(t.transferConfig.Newline))
-		return buffer.Bytes()
+		if err := t.writeAll([]byte("#DATA:")); err != nil {
+			return err
+		}
+		if err := t.writeAll(buffer); err != nil {
+			return err
+		}
+		return t.writeAll([]byte(t.transferConfig.Newline))
 	}
 }
 
 func (t *trzszTransfer) pipelineEscapeData(ctx *pipelineContext, fileDataChan <-chan []byte) <-chan trzszData {
-	sendDataChan := make(chan trzszData, 100)
+	sendDataChan := make(chan trzszData, 5)
 	deliver := func(data []byte) bool {
-		buffer := t.formatSendData(data)
+		buffer := bytes.NewBuffer(make([]byte, 0, len(data)+0x20))
+		buffer.Write([]byte(("#DATA:")))
+		buffer.Write([]byte(strconv.Itoa(len(data))))
+		buffer.Write([]byte(t.transferConfig.Newline))
+		buffer.Write(data)
 		select {
-		case sendDataChan <- trzszData{data, buffer, 0}:
+		case sendDataChan <- trzszData{data, buffer.Bytes(), 0}:
 			return true
 		case <-ctx.Done():
 			return false
@@ -314,11 +336,19 @@ func (t *trzszTransfer) pipelineEscapeData(ctx *pipelineContext, fileDataChan <-
 				buffer.Write(buf)
 			}
 			for buffer.Len() >= bufSize {
+				if t.bufInitPhase.Load() {
+					t.bufInitWG.Add(1)
+				}
+
 				b := buffer.Bytes()
 				if !deliver(b[:bufSize]) {
 					return
 				}
 				buffer = bytes.NewBuffer(b[bufSize:])
+
+				if t.bufInitPhase.Load() {
+					t.bufInitWG.Wait()
+				}
 				bufSize = int(t.bufferSize.Load())
 			}
 			if ctx.Err() != nil {
@@ -328,6 +358,7 @@ func (t *trzszTransfer) pipelineEscapeData(ctx *pipelineContext, fileDataChan <-
 		if ctx.Err() != nil {
 			return
 		}
+		t.bufInitPhase.Store(false)
 		if buffer.Len() > 0 {
 			if !deliver(buffer.Bytes()) {
 				return
@@ -395,10 +426,10 @@ func (t *trzszTransfer) pipelineRecvFinalAck(ctx *pipelineContext, size int64, p
 }
 
 func (t *trzszTransfer) pipelineSendData(ctx *pipelineContext, sendDataChan <-chan trzszData) <-chan trzszAck {
-	ackChan := make(chan trzszAck, 100)
-	deliver := func(buffer []byte, length int) error {
+	ackChan := make(chan trzszAck, 5)
+	deliver := func(buffer []byte, length int, encoded bool) error {
 		beginTime := timeNowFunc()
-		if err := t.writeAll(buffer); err != nil {
+		if err := t.sendDataV2(buffer, length, encoded); err != nil {
 			return err
 		}
 		select {
@@ -416,7 +447,7 @@ func (t *trzszTransfer) pipelineSendData(ctx *pipelineContext, sendDataChan <-ch
 			}
 			bufSize := int(t.bufferSize.Load())
 			if len(data.data) <= bufSize { // send all at once
-				if err := deliver(data.buffer, len(data.data)); err != nil {
+				if err := deliver(data.buffer, len(data.data), true); err != nil {
 					ctx.cancel(err)
 					return
 				}
@@ -430,7 +461,7 @@ func (t *trzszTransfer) pipelineSendData(ctx *pipelineContext, sendDataChan <-ch
 					bufSize = left
 				}
 				nextIdx := data.index + bufSize
-				if err := deliver(t.formatSendData(data.data[data.index:nextIdx]), bufSize); err != nil {
+				if err := deliver(data.data[data.index:nextIdx], bufSize, false); err != nil {
 					ctx.cancel(err)
 					return
 				}
@@ -474,11 +505,26 @@ func (t *trzszTransfer) pipelineRecvAck(ctx *pipelineContext, size int64, ackCha
 
 			chunkTime := time.Since(ack.begin)
 			bufSize := t.bufferSize.Load()
+
 			if length == bufSize && chunkTime < 500*time.Millisecond && bufSize < t.transferConfig.MaxBufSize {
 				t.bufferSize.Store(minInt64(bufSize*2, t.transferConfig.MaxBufSize))
-			} else if chunkTime >= 2*time.Second && bufSize > 1024 {
-				t.bufferSize.Store(1024)
+				if t.bufInitPhase.Load() {
+					t.bufInitWG.Done()
+				}
+			} else {
+				if t.bufInitPhase.Load() {
+					t.bufInitPhase.Store(false)
+					t.bufInitWG.Done()
+				}
+				if chunkTime >= 2*time.Second && length <= bufSize {
+					bufSize = bufSize / int64(chunkTime/time.Second)
+					if bufSize < 1024 {
+						bufSize = 1024
+					}
+					t.bufferSize.Store(bufSize)
+				}
 			}
+
 			if chunkTime > t.maxChunkTime {
 				t.maxChunkTime = chunkTime
 			}
@@ -571,7 +617,14 @@ func (t *trzszTransfer) pipelineRecvBinaryData() ([]byte, error) {
 		return []byte{}, nil
 	}
 
-	return t.buffer.readBinary(int(size), timeout)
+	data, err := t.buffer.readBinary(int(size), timeout)
+	if err != nil {
+		if e := t.checkStop(); e != nil {
+			return nil, e
+		}
+		return nil, err
+	}
+	return data, nil
 }
 
 func (t *trzszTransfer) pipelineSendAck(ctx *pipelineContext, size int64, ackChan <-chan int) chan<- struct{} {
@@ -680,7 +733,7 @@ func (t *trzszTransfer) pipelineDecodeData(ctx *pipelineContext, recvDataChan <-
 		}
 		defer z.Close()
 		for ctx.Err() == nil {
-			buffer := make([]byte, 4096)
+			buffer := make([]byte, 32*1024)
 			n, err := z.Read(buffer)
 			if n > 0 {
 				select {

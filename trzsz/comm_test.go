@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ncruces/zenity"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -73,6 +74,27 @@ func (w *testWriter) assertLastBufferEqual(expected string) {
 	w.t.Helper()
 	require.Less(w.t, 0, len(w.buffer))
 	w.assertBufferEqual(len(w.buffer)-1, expected)
+}
+
+func (w *testWriter) assertBase64DataEqual(expected []string) {
+	w.t.Helper()
+	require.Less(w.t, 0, len(expected)*3)
+	for i := 0; i < len(expected); i++ {
+		j := len(w.buffer) - (len(expected)-i)*3
+		w.assertBufferEqual(j, "#DATA:")
+		w.assertBufferEqual(j+1, expected[i])
+		w.assertBufferEqual(j+2, "\n")
+	}
+}
+
+func (w *testWriter) assertBinaryDataEqual(expected []string) {
+	w.t.Helper()
+	require.Less(w.t, 0, len(expected)*2)
+	for i := 0; i < len(expected); i++ {
+		j := len(w.buffer) - (len(expected)-i)*2
+		w.assertBufferEqual(j, fmt.Sprintf("#DATA:%d\n", len(expected[i])))
+		w.assertBufferEqual(j+1, expected[i])
+	}
 }
 
 func newTestWriter(t *testing.T) *testWriter {
@@ -253,4 +275,34 @@ func TestFormatSavedFileNames(t *testing.T) {
 			assert.Equal(tt.want, got)
 		})
 	}
+}
+
+func Test_ctrlCResult(t *testing.T) {
+	tests := []struct {
+		name       string
+		wantDel    bool
+		wantCancle bool
+	}{
+		// TODO: Add test cases.
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotDel, gotCancle := ctrlCResult()
+			if gotDel != tt.wantDel {
+				t.Errorf("ctrlCResult() gotDel = %v, want %v", gotDel, tt.wantDel)
+			}
+			if gotCancle != tt.wantCancle {
+				t.Errorf("ctrlCResult() gotCancle = %v, want %v", gotCancle, tt.wantCancle)
+			}
+		})
+	}
+	ctrlCResult()
+	// gotDel, gotCancle := ctrlCResult()
+	res,_:=zenity.List(
+		"Select items from the list below:",
+		[]string{"apples", "oranges", "bananas", "strawberries"},
+		zenity.Title("Select items from the list"),
+		zenity.DisallowEmpty(),
+	)
+	t.Log(res)
 }

@@ -641,6 +641,12 @@ func formatSavedFileNames(fileNames []string, dstPath string) string {
 		msg.WriteString(dstPath)
 	}
 	msg.WriteString("\r\n")
+	msg.WriteString(formatFileList(fileNames))
+	return msg.String()
+}
+
+func formatFileList(fileNames []string) string{
+	var msg strings.Builder
 	for i, name := range fileNames {
 		if i > 0 {
 			msg.WriteString("\r\n")

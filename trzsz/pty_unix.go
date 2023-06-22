@@ -36,6 +36,7 @@ import (
 
 	"github.com/creack/pty"
 	"golang.org/x/sys/unix"
+	"golang.org/x/term"
 )
 
 type trzszPty struct {
@@ -81,6 +82,9 @@ func (t *trzszPty) OnResize(setTerminalColumns func(int32)) {
 }
 
 func (t *trzszPty) GetColumns() (int32, error) {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return 0, nil
+	}
 	size, err := pty.GetsizeFull(os.Stdin)
 	if err != nil {
 		return 0, err
