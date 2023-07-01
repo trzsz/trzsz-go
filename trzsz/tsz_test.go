@@ -32,29 +32,26 @@ import (
 	"github.com/trzsz/go-arg"
 )
 
-func newTszArgs(args baseArgs, files []string) tszArgs {
+func newTszArgs(args baseArgs, files []string) *tszArgs {
 	if args.Bufsize.Size == 0 {
 		args.Bufsize.Size = 10 * 1024 * 1024
 	}
 	if args.Timeout == 0 {
 		args.Timeout = 20
 	}
-	return tszArgs{args, files}
+	return &tszArgs{args, files}
 }
 
 func TestTszArgs(t *testing.T) {
 	assert := assert.New(t)
-	assertArgsEqual := func(cmdline string, expectedArg tszArgs) {
+	assertArgsEqual := func(cmdline string, expectedArg *tszArgs) {
 		t.Helper()
-		var args tszArgs
-		p, err := arg.NewParser(arg.Config{}, &args)
-		assert.Nil(err)
+		var args *tszArgs
 		if cmdline == "" {
-			err = p.Parse(nil)
+			args = parseTszArgs([]string{})
 		} else {
-			err = p.Parse(strings.Split(cmdline, " "))
+			args = parseTszArgs(strings.Split("tsz "+cmdline, " "))
 		}
-		assert.Nil(err)
 		assert.Equal(expectedArg, args)
 	}
 
@@ -64,6 +61,7 @@ func TestTszArgs(t *testing.T) {
 	assertArgsEqual("-b a", newTszArgs(baseArgs{Binary: true}, []string{"a"}))
 	assertArgsEqual("-e a", newTszArgs(baseArgs{Escape: true}, []string{"a"}))
 	assertArgsEqual("-d a", newTszArgs(baseArgs{Directory: true}, []string{"a"}))
+	assertArgsEqual("-r a", newTszArgs(baseArgs{Directory: true, Recursive: true}, []string{"a"}))
 	assertArgsEqual("-B 2k a", newTszArgs(baseArgs{Bufsize: bufferSize{2 * 1024}}, []string{"a"}))
 	assertArgsEqual("-t 3 a", newTszArgs(baseArgs{Timeout: 3}, []string{"a"}))
 
@@ -72,6 +70,7 @@ func TestTszArgs(t *testing.T) {
 	assertArgsEqual("--binary a", newTszArgs(baseArgs{Binary: true}, []string{"a"}))
 	assertArgsEqual("--escape a", newTszArgs(baseArgs{Escape: true}, []string{"a"}))
 	assertArgsEqual("--directory a", newTszArgs(baseArgs{Directory: true}, []string{"a"}))
+	assertArgsEqual("--recursive a", newTszArgs(baseArgs{Directory: true, Recursive: true}, []string{"a"}))
 	assertArgsEqual("--bufsize 2M a", newTszArgs(baseArgs{Bufsize: bufferSize{2 * 1024 * 1024}}, []string{"a"}))
 	assertArgsEqual("--timeout 55 a", newTszArgs(baseArgs{Timeout: 55}, []string{"a"}))
 
@@ -85,7 +84,8 @@ func TestTszArgs(t *testing.T) {
 
 	assertArgsEqual("-yq a", newTszArgs(baseArgs{Quiet: true, Overwrite: true}, []string{"a"}))
 	assertArgsEqual("-bed a", newTszArgs(baseArgs{Binary: true, Escape: true, Directory: true}, []string{"a"}))
-	assertArgsEqual("-yB 2096 a", newTszArgs(baseArgs{Overwrite: true, Bufsize: bufferSize{2096}}, []string{"a"}))
+	assertArgsEqual("-yrB 2096 a", newTszArgs(baseArgs{Overwrite: true, Directory: true, Recursive: true,
+		Bufsize: bufferSize{2096}}, []string{"a"}))
 	assertArgsEqual("-ebt300 a", newTszArgs(baseArgs{Binary: true, Escape: true, Timeout: 300}, []string{"a"}))
 	assertArgsEqual("-yqB3K -eb -t 9 -d a", newTszArgs(baseArgs{Quiet: true, Overwrite: true,
 		Bufsize: bufferSize{3 * 1024}, Escape: true, Binary: true, Timeout: 9, Directory: true}, []string{"a"}))
@@ -99,11 +99,16 @@ func TestTszArgs(t *testing.T) {
 		var args tszArgs
 		p, err := arg.NewParser(arg.Config{}, &args)
 		assert.Nil(err)
-		err = p.Parse(strings.Split(cmdline, " "))
+		if cmdline == "" {
+			err = p.Parse(nil)
+		} else {
+			err = p.Parse(strings.Split(cmdline, " "))
+		}
 		assert.NotNil(err)
 		assert.Contains(err.Error(), errMsg)
 	}
 
+	assertArgsError("", "file is required")
 	assertArgsError("-B 2gb a", "greater than 1G")
 	assertArgsError("-B10 a", "less than 1K")
 	assertArgsError("-B10x a", "invalid size 10x")

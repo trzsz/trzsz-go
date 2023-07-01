@@ -32,29 +32,26 @@ import (
 	"github.com/trzsz/go-arg"
 )
 
-func newTrzArgs(args baseArgs, path string) trzArgs {
+func newTrzArgs(args baseArgs, path string) *trzArgs {
 	if args.Bufsize.Size == 0 {
 		args.Bufsize.Size = 10 * 1024 * 1024
 	}
 	if args.Timeout == 0 {
 		args.Timeout = 20
 	}
-	return trzArgs{args, path}
+	return &trzArgs{args, path}
 }
 
 func TestTrzArgs(t *testing.T) {
 	assert := assert.New(t)
-	assertArgsEqual := func(cmdline string, expectedArg trzArgs) {
+	assertArgsEqual := func(cmdline string, expectedArg *trzArgs) {
 		t.Helper()
-		var args trzArgs
-		p, err := arg.NewParser(arg.Config{}, &args)
-		assert.Nil(err)
+		var args *trzArgs
 		if cmdline == "" {
-			err = p.Parse(nil)
+			args = parseTrzArgs([]string{})
 		} else {
-			err = p.Parse(strings.Split(cmdline, " "))
+			args = parseTrzArgs(strings.Split("trz "+cmdline, " "))
 		}
-		assert.Nil(err)
 		assert.Equal(expectedArg, args)
 	}
 
@@ -64,6 +61,7 @@ func TestTrzArgs(t *testing.T) {
 	assertArgsEqual("-b", newTrzArgs(baseArgs{Binary: true}, "."))
 	assertArgsEqual("-e", newTrzArgs(baseArgs{Escape: true}, "."))
 	assertArgsEqual("-d", newTrzArgs(baseArgs{Directory: true}, "."))
+	assertArgsEqual("-r", newTrzArgs(baseArgs{Directory: true, Recursive: true}, "."))
 	assertArgsEqual("-B 2k", newTrzArgs(baseArgs{Bufsize: bufferSize{2 * 1024}}, "."))
 	assertArgsEqual("-t 3", newTrzArgs(baseArgs{Timeout: 3}, "."))
 
@@ -72,6 +70,7 @@ func TestTrzArgs(t *testing.T) {
 	assertArgsEqual("--binary", newTrzArgs(baseArgs{Binary: true}, "."))
 	assertArgsEqual("--escape", newTrzArgs(baseArgs{Escape: true}, "."))
 	assertArgsEqual("--directory", newTrzArgs(baseArgs{Directory: true}, "."))
+	assertArgsEqual("--recursive", newTrzArgs(baseArgs{Directory: true, Recursive: true}, "."))
 	assertArgsEqual("--bufsize 2M", newTrzArgs(baseArgs{Bufsize: bufferSize{2 * 1024 * 1024}}, "."))
 	assertArgsEqual("--timeout 55", newTrzArgs(baseArgs{Timeout: 55}, "."))
 
@@ -85,7 +84,8 @@ func TestTrzArgs(t *testing.T) {
 
 	assertArgsEqual("-yq", newTrzArgs(baseArgs{Quiet: true, Overwrite: true}, "."))
 	assertArgsEqual("-bed", newTrzArgs(baseArgs{Binary: true, Escape: true, Directory: true}, "."))
-	assertArgsEqual("-yB 2096", newTrzArgs(baseArgs{Overwrite: true, Bufsize: bufferSize{2096}}, "."))
+	assertArgsEqual("-yrB 2096", newTrzArgs(baseArgs{Overwrite: true, Directory: true, Recursive: true,
+		Bufsize: bufferSize{2096}}, "."))
 	assertArgsEqual("-ebt300", newTrzArgs(baseArgs{Binary: true, Escape: true, Timeout: 300}, "."))
 	assertArgsEqual("-yqB3K -eb -t 9 -d", newTrzArgs(baseArgs{Quiet: true, Overwrite: true,
 		Bufsize: bufferSize{3 * 1024}, Escape: true, Binary: true, Timeout: 9, Directory: true}, "."))
@@ -99,7 +99,11 @@ func TestTrzArgs(t *testing.T) {
 		var args trzArgs
 		p, err := arg.NewParser(arg.Config{}, &args)
 		assert.Nil(err)
-		err = p.Parse(strings.Split(cmdline, " "))
+		if cmdline == "" {
+			err = p.Parse(nil)
+		} else {
+			err = p.Parse(strings.Split(cmdline, " "))
+		}
 		assert.NotNil(err)
 		assert.Contains(err.Error(), errMsg)
 	}

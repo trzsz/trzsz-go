@@ -46,6 +46,25 @@ func (tszArgs) Version() string {
 	return fmt.Sprintf("tsz (trzsz) go %s", kTrzszVersion)
 }
 
+func parseTszArgs(osArgs []string) *tszArgs {
+	var args tszArgs
+	parser, err := arg.NewParser(arg.Config{Out: os.Stderr, Exit: os.Exit}, &args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(-1)
+		return nil
+	}
+	var flags []string
+	if len(osArgs) > 0 {
+		flags = osArgs[1:]
+	}
+	parser.MustParse(flags)
+	if args.Recursive {
+		args.Directory = true
+	}
+	return &args
+}
+
 func sendFiles(transfer *trzszTransfer, files []*trzszFile, args *tszArgs, tmuxMode tmuxModeType, tmuxPaneWidth int32) error {
 	action, err := transfer.recvAction()
 	if err != nil {
@@ -87,8 +106,7 @@ func sendFiles(transfer *trzszTransfer, files []*trzszFile, args *tszArgs, tmuxM
 
 // TszMain is the main function of `tsz` binary.
 func TszMain() int {
-	var args tszArgs
-	arg.MustParse(&args)
+	args := parseTszArgs(os.Args)
 
 	files, err := checkPathsReadable(args.File, args.Directory)
 	if err != nil {
@@ -154,7 +172,7 @@ func TszMain() int {
 	go wrapStdinInput(transfer)
 	handleServerSignal(transfer)
 
-	if err := sendFiles(transfer, files, &args, tmuxMode, tmuxPaneWidth); err != nil {
+	if err := sendFiles(transfer, files, args, tmuxMode, tmuxPaneWidth); err != nil {
 		transfer.serverError(err)
 	}
 

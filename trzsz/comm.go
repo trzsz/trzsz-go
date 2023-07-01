@@ -92,6 +92,7 @@ type baseArgs struct {
 	Binary    bool       `arg:"-b" help:"binary transfer mode, faster for binary files"`
 	Escape    bool       `arg:"-e" help:"escape all known control characters"`
 	Directory bool       `arg:"-d" help:"transfer directories and files"`
+	Recursive bool       `arg:"-r" help:"transfer directories and files, same as -d"`
 	Bufsize   bufferSize `arg:"-B" placeholder:"N" default:"10M" help:"max buffer chunk size (1K<=N<=1G). (default: 10M)"`
 	Timeout   int        `arg:"-t" placeholder:"N" default:"20" help:"timeout ( N seconds ) for each buffer chunk.\nN <= 0 means never timeout. (default: 20)"`
 }

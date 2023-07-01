@@ -47,6 +47,25 @@ func (trzArgs) Version() string {
 	return fmt.Sprintf("trz (trzsz) go %s", kTrzszVersion)
 }
 
+func parseTrzArgs(osArgs []string) *trzArgs {
+	var args trzArgs
+	parser, err := arg.NewParser(arg.Config{Out: os.Stderr, Exit: os.Exit}, &args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(-1)
+		return nil
+	}
+	var flags []string
+	if len(osArgs) > 0 {
+		flags = osArgs[1:]
+	}
+	parser.MustParse(flags)
+	if args.Recursive {
+		args.Directory = true
+	}
+	return &args
+}
+
 func recvFiles(transfer *trzszTransfer, args *trzArgs, tmuxMode tmuxModeType, tmuxPaneWidth int32) error {
 	action, err := transfer.recvAction()
 	if err != nil {
@@ -88,8 +107,7 @@ func recvFiles(transfer *trzszTransfer, args *trzArgs, tmuxMode tmuxModeType, tm
 
 // TrzMain is the main function of `trz` binary.
 func TrzMain() int {
-	var args trzArgs
-	arg.MustParse(&args)
+	args := parseTrzArgs(os.Args)
 
 	var err error
 	args.Path, err = filepath.Abs(args.Path)
@@ -158,7 +176,7 @@ func TrzMain() int {
 	go wrapStdinInput(transfer)
 	handleServerSignal(transfer)
 
-	if err := recvFiles(transfer, &args, tmuxMode, tmuxPaneWidth); err != nil {
+	if err := recvFiles(transfer, args, tmuxMode, tmuxPaneWidth); err != nil {
 		transfer.serverError(err)
 	}
 
