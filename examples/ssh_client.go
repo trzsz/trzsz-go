@@ -26,15 +26,18 @@ package main
 
 import (
 	"fmt"
-	"github.com/kevinburke/ssh_config"
-	"github.com/trzsz/trzsz-go/trzsz"
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/term"
 	"io"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"time"
+
+	"github.com/kevinburke/ssh_config"
+	"github.com/trzsz/trzsz-go/trzsz"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -58,52 +61,44 @@ func main() {
 		fmt.Printf("user home dir failed: %s\n", err)
 		return
 	}
-	var auth []ssh.AuthMethod
-	addAuthMethod := func(name string) error {
+	var signers []ssh.Signer
+	for _, name := range []string{"id_rsa", "id_ecdsa", "id_ecdsa_sk", "id_ed25519", "id_ed25519_sk", "id_dsa"} {
 		path := filepath.Join(home, ".ssh", name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return nil
+			continue
 		}
 		privateKey, err := os.ReadFile(path)
 		if err != nil {
-			return fmt.Errorf("read private key failed: %s\n", err)
+			fmt.Printf("read private key [%s] failed: %s\n", path, err)
+			return
 		}
 		signer, err := ssh.ParsePrivateKey(privateKey)
 		if err != nil {
-			return fmt.Errorf("parse private key failed: %s\n", err)
+			fmt.Printf("parse private key [%s] failed: %s\n", path, err)
+			return
 		}
-		auth = append(auth, ssh.PublicKeys(signer))
-		return nil
-	}
-	if err := addAuthMethod("id_rsa"); err != nil {
-		fmt.Print(err.Error())
-		return
-	}
-	if err := addAuthMethod("id_ed25519"); err != nil {
-		fmt.Print(err.Error())
-		return
-	}
-	if len(auth) == 0 {
-		fmt.Printf("No private key in %s/.ssh\n", home)
-		return
+		signers = append(signers, signer)
 	}
 
 	// ssh login
 	config := &ssh.ClientConfig{
 		User:            user,
-		Auth:            auth,
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signers...)},
+		Timeout:         3 * time.Second,
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO should not be used for production code
 	}
-	conn, err := ssh.Dial("tcp", host+":"+port, config)
+	client, err := ssh.Dial("tcp", net.JoinHostPort(host, port), config)
 	if err != nil {
 		fmt.Printf("ssh dial tcp [%s:%s] failed: %s\n", host, port, err)
 		return
 	}
-	session, err := conn.NewSession()
+	defer client.Close()
+	session, err := client.NewSession()
 	if err != nil {
 		fmt.Printf("ssh new session failed: %s\n", err)
 		return
 	}
+	defer session.Close()
 
 	// make stdin to raw
 	fd := int(os.Stdin.Fd())
@@ -180,16 +175,20 @@ func main() {
 		session.Stderr = os.Stderr
 	}
 
+	// connect to linux directly is not affected by Windows
+	trzsz.SetAffectedByWindows(false)
+
 	// reset terminal columns on resize
 	ch := make(chan os.Signal, 1)
 	// signal.Notify(ch, syscall.SIGWINCH) // TODO find another way to do this on Windows
 	go func() {
 		for range ch {
-			width, _, err := term.GetSize(fd)
+			width, height, err := term.GetSize(fd)
 			if err != nil {
 				fmt.Printf("term get size failed: %s\n", err)
 				continue
 			}
+			_ = session.WindowChange(height, width)
 			trzszFilter.SetTerminalColumns(int32(width))
 		}
 	}()
