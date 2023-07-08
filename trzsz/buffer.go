@@ -30,11 +30,13 @@ import (
 )
 
 type trzszBuffer struct {
-	bufCh   chan []byte
-	stopCh  chan bool
-	nextBuf []byte
-	nextIdx int
-	readBuf bytes.Buffer
+	bufCh      chan []byte
+	stopCh     chan bool
+	nextBuf    []byte
+	nextIdx    int
+	readBuf    bytes.Buffer
+	timeout    <-chan time.Time
+	newTimeout <-chan time.Time
 }
 
 func newTrzszBuffer() *trzszBuffer {
@@ -79,25 +81,38 @@ func (b *trzszBuffer) popBuffer() []byte {
 	}
 }
 
-func (b *trzszBuffer) nextBuffer(timeout <-chan time.Time) ([]byte, error) {
+func (b *trzszBuffer) setNewTimeout(timeout <-chan time.Time) {
+	b.newTimeout = timeout
+}
+
+func (b *trzszBuffer) nextBuffer() ([]byte, error) {
 	if b.nextBuf != nil && b.nextIdx < len(b.nextBuf) {
 		return b.nextBuf[b.nextIdx:], nil
 	}
-	select {
-	case b.nextBuf = <-b.bufCh:
-		b.nextIdx = 0
-		return b.nextBuf, nil
-	case <-b.stopCh:
-		return nil, newSimpleTrzszError("Stopped")
-	case <-timeout:
-		return nil, newSimpleTrzszError("Receive data timeout")
+	for {
+		select {
+		case b.nextBuf = <-b.bufCh:
+			b.nextIdx = 0
+			return b.nextBuf, nil
+		case <-b.stopCh:
+			return nil, errStopped
+		case <-b.timeout:
+			if b.newTimeout != nil {
+				b.timeout = b.newTimeout
+				b.newTimeout = nil
+				continue
+			}
+			return nil, errReceiveDataTimeout
+		}
 	}
 }
 
 func (b *trzszBuffer) readLine(mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
 	b.readBuf.Reset()
+	b.timeout = timeout
+	b.newTimeout = nil
 	for {
-		buf, err := b.nextBuffer(timeout)
+		buf, err := b.nextBuffer()
 		if err != nil {
 			return nil, err
 		}
@@ -127,8 +142,10 @@ func (b *trzszBuffer) readBinary(size int, timeout <-chan time.Time) ([]byte, er
 	if b.readBuf.Cap() < size {
 		b.readBuf.Grow(size)
 	}
+	b.timeout = timeout
+	b.newTimeout = nil
 	for b.readBuf.Len() < size {
-		buf, err := b.nextBuffer(timeout)
+		buf, err := b.nextBuffer()
 		if err != nil {
 			return nil, err
 		}
@@ -162,6 +179,8 @@ func isTrzszLetter(b byte) bool {
 
 func (b *trzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error) {
 	b.readBuf.Reset()
+	b.timeout = timeout
+	b.newTimeout = nil
 	lastByte := byte('\x1b')
 	skipVT100 := false
 	hasNewline := false
@@ -169,7 +188,7 @@ func (b *trzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error
 	hasCursorHome := false
 	preHasCursorHome := false
 	for {
-		buf, err := b.nextBuffer(timeout)
+		buf, err := b.nextBuffer()
 		if err != nil {
 			return nil, err
 		}

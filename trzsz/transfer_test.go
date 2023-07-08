@@ -61,7 +61,7 @@ func TestTransferAction(t *testing.T) {
 
 	// client and server are Linux
 	SetAffectedByWindows(false)
-	err = clientTransfer.sendAction(true, false)
+	err = clientTransfer.sendAction(true, "1.0.0", false)
 	assert.Nil(err)
 	writer.assertBufferCount(1)
 	assert.False(clientTransfer.windowsProtocol)
@@ -75,11 +75,11 @@ func TestTransferAction(t *testing.T) {
 	assert.True(action.SupportBinary)
 	assert.False(serverTransfer.windowsProtocol)
 	assert.Equal("\n", serverTransfer.transferConfig.Newline)
-	assert.Equal(2, action.Protocol)
+	assert.Equal(kProtocolVersion, action.Protocol)
 
 	// client is Windows, server is Linux
 	SetAffectedByWindows(true)
-	err = clientTransfer.sendAction(true, false)
+	err = clientTransfer.sendAction(true, "1.0.0", false)
 	assert.Nil(err)
 	writer.assertBufferCount(2)
 	assert.False(clientTransfer.windowsProtocol)
@@ -93,11 +93,11 @@ func TestTransferAction(t *testing.T) {
 	assert.False(action.SupportBinary)
 	assert.False(serverTransfer.windowsProtocol)
 	assert.Equal("!\n", serverTransfer.transferConfig.Newline)
-	assert.Equal(2, action.Protocol)
+	assert.Equal(kProtocolVersion, action.Protocol)
 
 	// client is Linux, server is Windows
 	SetAffectedByWindows(false)
-	err = clientTransfer.sendAction(true, true)
+	err = clientTransfer.sendAction(true, "1.0.0", true)
 	assert.Nil(err)
 	writer.assertBufferCount(3)
 	assert.True(clientTransfer.windowsProtocol)
@@ -111,11 +111,11 @@ func TestTransferAction(t *testing.T) {
 	assert.False(action.SupportBinary)
 	assert.True(isWindowsEnvironment() || serverTransfer.windowsProtocol)
 	assert.Equal("!\n", serverTransfer.transferConfig.Newline)
-	assert.Equal(2, action.Protocol)
+	assert.Equal(kProtocolVersion, action.Protocol)
 
 	// client and server are Windows
 	SetAffectedByWindows(true)
-	err = clientTransfer.sendAction(true, true)
+	err = clientTransfer.sendAction(true, "1.0.0", true)
 	assert.Nil(err)
 	writer.assertBufferCount(4)
 	assert.True(clientTransfer.windowsProtocol)
@@ -129,7 +129,7 @@ func TestTransferAction(t *testing.T) {
 	assert.False(action.SupportBinary)
 	assert.True(isWindowsEnvironment() || serverTransfer.windowsProtocol)
 	assert.Equal("!\n", serverTransfer.transferConfig.Newline)
-	assert.Equal(2, action.Protocol)
+	assert.Equal(kProtocolVersion, action.Protocol)
 }
 
 func TestTransferConfig(t *testing.T) {

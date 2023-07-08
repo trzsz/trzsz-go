@@ -59,6 +59,7 @@ type TrzszFilter struct {
 	options         TrzszOptions
 	transfer        atomic.Pointer[trzszTransfer]
 	progress        atomic.Pointer[textProgressBar]
+	serverVersion   string
 	remoteIsWindows bool
 	dragging        atomic.Bool
 	dragHasDir      atomic.Bool
@@ -228,7 +229,7 @@ func (filter *TrzszFilter) chooseUploadPaths(directory bool) ([]string, error) {
 func (filter *TrzszFilter) downloadFiles(transfer *trzszTransfer) error {
 	path, err := filter.chooseDownloadPath()
 	if err == zenity.ErrCanceled {
-		return transfer.sendAction(false, filter.remoteIsWindows)
+		return transfer.sendAction(false, filter.serverVersion, filter.remoteIsWindows)
 	}
 	if err != nil {
 		return err
@@ -237,7 +238,7 @@ func (filter *TrzszFilter) downloadFiles(transfer *trzszTransfer) error {
 		return err
 	}
 
-	if err := transfer.sendAction(true, filter.remoteIsWindows); err != nil {
+	if err := transfer.sendAction(true, filter.serverVersion, filter.remoteIsWindows); err != nil {
 		return err
 	}
 	config, err := transfer.recvConfig()
@@ -262,7 +263,7 @@ func (filter *TrzszFilter) downloadFiles(transfer *trzszTransfer) error {
 func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) error {
 	paths, err := filter.chooseUploadPaths(directory)
 	if err == zenity.ErrCanceled {
-		return transfer.sendAction(false, filter.remoteIsWindows)
+		return transfer.sendAction(false, filter.serverVersion, filter.remoteIsWindows)
 	}
 	if err != nil {
 		return err
@@ -272,7 +273,7 @@ func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) 
 		return err
 	}
 
-	if err := transfer.sendAction(true, filter.remoteIsWindows); err != nil {
+	if err := transfer.sendAction(true, filter.serverVersion, filter.remoteIsWindows); err != nil {
 		return err
 	}
 	config, err := transfer.recvConfig()
@@ -435,10 +436,12 @@ func (filter *TrzszFilter) wrapOutput() {
 				continue
 			}
 			var mode *byte
+			var serverVersion string
 			var remoteIsWindows bool
-			buf, mode, remoteIsWindows = detector.detectTrzsz(buf)
+			buf, mode, serverVersion, remoteIsWindows = detector.detectTrzsz(buf)
 			if mode != nil {
 				_ = writeAll(filter.clientOut, buf)
+				filter.serverVersion = serverVersion
 				filter.remoteIsWindows = remoteIsWindows
 				go filter.handleTrzsz(*mode)
 				continue

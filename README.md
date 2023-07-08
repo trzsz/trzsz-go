@@ -87,7 +87,7 @@
   go install github.com/trzsz/trzsz-go/cmd/trzsz@latest
   ```
 
-  After installation, the binaries are usually located in `~/go/bin/` ( `C:\Users\your_name\go\bin\` on Windows ).
+  The binaries are usually located in `~/go/bin/` ( `C:\Users\your_name\go\bin\` on Windows ).
 
   </details>
 

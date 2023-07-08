@@ -198,6 +198,10 @@ func TestBufferReadOnWin(t *testing.T) {
 	tb.addBuffer([]byte("BFjn6\x1b[30;1H\x1b[?25l\n\x1b[29;120H6jEF8aG!"))
 	assertReadSucc([]byte("BFjn6jEF8aG"))
 
+	tb.addBuffer([]byte("test1!\ntest2!\n"))
+	assertReadSucc([]byte("test1"))
+	assertReadSucc([]byte("test2"))
+
 	tb.addBuffer([]byte("test\x03message"))
 	_, err := tb.readLineOnWindows(nil)
 	assert.EqualError(err, "Interrupted")
@@ -228,6 +232,16 @@ func TestBufferOthers(t *testing.T) {
 	_, err := tb.readLine(false, timeout)
 	assert.EqualError(err, "Receive data timeout")
 	assert.GreaterOrEqual(time.Since(beginTime), 100*time.Millisecond)
+
+	// new timeout
+	go func() {
+		tb.setNewTimeout(time.NewTimer(200 * time.Millisecond).C)
+		time.Sleep(100 * time.Millisecond)
+		tb.addBuffer([]byte("test message\n"))
+	}()
+	line, err := tb.readLine(false, time.NewTimer(50*time.Millisecond).C)
+	assert.Nil(err)
+	assert.Equal([]byte("test message"), line)
 
 	// read line interrupted
 	tb.addBuffer([]byte("test\x03message\n"))

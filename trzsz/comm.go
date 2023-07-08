@@ -168,6 +168,11 @@ type trzszError struct {
 	trace   bool
 }
 
+var (
+	errStopped            = newSimpleTrzszError("Stopped")
+	errReceiveDataTimeout = newSimpleTrzszError("Receive data timeout")
+)
+
 func newTrzszError(message string, errType string, trace bool) *trzszError {
 	if errType == "fail" || errType == "FAIL" || errType == "EXIT" {
 		msg, err := decodeString(message)
@@ -463,6 +468,36 @@ func writeAll(dst io.Writer, data []byte) error {
 	return nil
 }
 
+type trzszVersion [3]uint32
+
+func parseTrzszVersion(ver string) (*trzszVersion, error) {
+	tokens := strings.Split(ver, ".")
+	if len(tokens) != 3 {
+		return nil, newSimpleTrzszError(fmt.Sprintf("version [%s] invalid", ver))
+	}
+	var version trzszVersion
+	for i := 0; i < 3; i++ {
+		v, err := strconv.ParseUint(tokens[i], 10, 32)
+		if err != nil {
+			return nil, newSimpleTrzszError(fmt.Sprintf("version [%s] invalid", ver))
+		}
+		version[i] = uint32(v)
+	}
+	return &version, nil
+}
+
+func (v *trzszVersion) compare(ver *trzszVersion) int {
+	for i := 0; i < 3; i++ {
+		if v[i] < ver[i] {
+			return -1
+		}
+		if v[i] > ver[i] {
+			return 1
+		}
+	}
+	return 0
+}
+
 type trzszDetector struct {
 	relay       bool
 	tmux        bool
@@ -510,13 +545,13 @@ func (detector *trzszDetector) addRelaySuffix(output []byte, idx int) []byte {
 	return buf.Bytes()
 }
 
-func (detector *trzszDetector) detectTrzsz(output []byte) ([]byte, *byte, bool) {
+func (detector *trzszDetector) detectTrzsz(output []byte) ([]byte, *byte, string, bool) {
 	if len(output) < 24 {
-		return output, nil, false
+		return output, nil, "", false
 	}
 	idx := bytes.LastIndex(output, []byte("::TRZSZ:TRANSFER:"))
 	if idx < 0 {
-		return output, nil, false
+		return output, nil, "", false
 	}
 
 	if detector.relay && detector.tmux {
@@ -526,10 +561,10 @@ func (detector *trzszDetector) detectTrzsz(output []byte) ([]byte, *byte, bool) 
 
 	match := trzszRegexp.FindSubmatch(output[idx:])
 	if len(match) < 3 {
-		return output, nil, false
+		return output, nil, "", false
 	}
 	if tmuxControlModeRegexp.Match(output) {
-		return output, nil, false
+		return output, nil, "", false
 	}
 
 	uniqueID := ""
@@ -538,7 +573,7 @@ func (detector *trzszDetector) detectTrzsz(output []byte) ([]byte, *byte, bool) 
 	}
 	if len(uniqueID) >= 8 && (isWindowsEnvironment() || !(len(uniqueID) == 14 && strings.HasSuffix(uniqueID, "00"))) {
 		if _, ok := detector.uniqueIDMap[uniqueID]; ok {
-			return output, nil, false
+			return output, nil, "", false
 		}
 		if len(detector.uniqueIDMap) > 100 {
 			m := make(map[string]int)
@@ -563,7 +598,7 @@ func (detector *trzszDetector) detectTrzsz(output []byte) ([]byte, *byte, bool) 
 		output = bytes.ReplaceAll(output, []byte("TRZSZ"), []byte("TRZSZGO"))
 	}
 
-	return output, &match[1][0], remoteIsWindows
+	return output, &match[1][0], string(match[2]), remoteIsWindows
 }
 
 type traceLogger struct {

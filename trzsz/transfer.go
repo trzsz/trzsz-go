@@ -44,6 +44,9 @@ import (
 	"golang.org/x/term"
 )
 
+const kProtocolVersion = 3
+const kLastChunkTimeCount = 10
+
 type transferAction struct {
 	Lang             string `json:"lang"`
 	Version          string `json:"version"`
@@ -69,22 +72,27 @@ type transferConfig struct {
 }
 
 type trzszTransfer struct {
-	buffer          *trzszBuffer
-	writer          io.Writer
-	stopped         atomic.Bool
-	lastInputTime   atomic.Int64
-	cleanTimeout    time.Duration
-	maxChunkTime    time.Duration
-	stdinState      *term.State
-	fileNameMap     map[int]string
-	windowsProtocol bool
-	flushInTime     bool
-	bufInitWG       sync.WaitGroup
-	bufInitPhase    atomic.Bool
-	bufferSize      atomic.Int64
-	savedSteps      atomic.Int64
-	transferConfig  transferConfig
-	logger          *traceLogger
+	buffer           *trzszBuffer
+	writer           io.Writer
+	stopped          atomic.Bool
+	pausing          atomic.Bool
+	pauseIdx         atomic.Uint32
+	pauseBeginTime   atomic.Int64
+	resumeBeginTime  atomic.Pointer[time.Time]
+	lastInputTime    atomic.Int64
+	cleanTimeout     time.Duration
+	lastChunkTimeArr [kLastChunkTimeCount]time.Duration
+	lastChunkTimeIdx int
+	stdinState       *term.State
+	fileNameMap      map[int]string
+	windowsProtocol  bool
+	flushInTime      bool
+	bufInitWG        sync.WaitGroup
+	bufInitPhase     atomic.Bool
+	bufferSize       atomic.Int64
+	savedSteps       atomic.Int64
+	transferConfig   transferConfig
+	logger           *traceLogger
 }
 
 func maxDuration(a, b time.Duration) time.Duration {
@@ -95,6 +103,13 @@ func maxDuration(a, b time.Duration) time.Duration {
 }
 
 func minInt64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}
@@ -133,15 +148,51 @@ func (t *trzszTransfer) stopTransferringFiles() {
 		return
 	}
 	t.stopped.Store(true)
-	t.cleanTimeout = maxDuration(t.maxChunkTime*2, 500*time.Millisecond)
 	t.buffer.stopBuffer()
+
+	maxChunkTime := time.Duration(0)
+	for _, chunkTime := range t.lastChunkTimeArr {
+		if chunkTime > maxChunkTime {
+			maxChunkTime = chunkTime
+		}
+	}
+	waitTime := maxChunkTime * 2
+	beginTime := t.pauseBeginTime.Load()
+	if beginTime > 0 {
+		waitTime -= time.Since(time.UnixMilli(beginTime))
+	}
+	t.cleanTimeout = maxDuration(waitTime, 500*time.Millisecond)
+}
+
+func (t *trzszTransfer) pauseTransferringFiles() {
+	t.pausing.Store(true)
+	if t.pauseBeginTime.Load() == 0 {
+		t.pauseIdx.Add(1)
+		t.pauseBeginTime.CompareAndSwap(0, time.Now().UnixMilli())
+	}
+}
+
+func (t *trzszTransfer) resumeTransferringFiles() {
+	now := timeNowFunc()
+	t.resumeBeginTime.Store(&now)
+	t.pauseBeginTime.Store(0)
+	t.buffer.setNewTimeout(t.getNewTimeout())
+	t.pausing.Store(false)
 }
 
 func (t *trzszTransfer) checkStop() error {
 	if t.stopped.Load() {
-		return newSimpleTrzszError("Stopped")
+		return errStopped
 	}
 	return nil
+}
+
+func (t *trzszTransfer) setLastChunkTime(chunkTime time.Duration) {
+	t.lastChunkTimeArr[t.lastChunkTimeIdx] = chunkTime
+	t.lastChunkTimeIdx++
+	if t.lastChunkTimeIdx >= kLastChunkTimeCount {
+		t.lastChunkTimeIdx = 0
+	}
 }
 
 func (t *trzszTransfer) cleanInput(timeoutDuration time.Duration) {
@@ -208,6 +259,11 @@ func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 		idx := bytes.LastIndex(line, []byte("#"+expectType+":"))
 		if idx >= 0 {
 			line = line[idx:]
+		} else {
+			idx = bytes.LastIndexByte(line, '#')
+			if idx > 0 {
+				line = line[idx:]
+			}
 		}
 		return line, nil
 	}
@@ -224,6 +280,11 @@ func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 		idx := bytes.LastIndex(line, []byte("#"+expectType+":"))
 		if idx >= 0 {
 			line = line[idx:]
+		} else {
+			idx = bytes.LastIndexByte(line, '#')
+			if idx > 0 {
+				line = line[idx:]
+			}
 		}
 		line = t.stripTmuxStatusLine(line)
 	}
@@ -364,13 +425,21 @@ func (t *trzszTransfer) recvData() ([]byte, error) {
 	return unescapeData(data, t.transferConfig.EscapeCodes), nil
 }
 
-func (t *trzszTransfer) sendAction(confirm, remoteIsWindows bool) error {
+func (t *trzszTransfer) sendAction(confirm bool, serverVersion string, remoteIsWindows bool) error {
+	ver, err := parseTrzszVersion(serverVersion)
+	if err != nil {
+		return err
+	}
+	protocol := kProtocolVersion
+	if ver.compare(&trzszVersion{1, 1, 3}) <= 0 && ver.compare(&trzszVersion{1, 1, 0}) >= 0 {
+		protocol = 2 // compatible with older versions
+	}
 	action := &transferAction{
 		Lang:             "go",
 		Version:          kTrzszVersion,
 		Confirm:          confirm,
 		Newline:          "\n",
-		Protocol:         2,
+		Protocol:         protocol,
 		SupportBinary:    true,
 		SupportDirectory: true,
 	}
@@ -429,7 +498,7 @@ func (t *trzszTransfer) sendConfig(args *baseArgs, action *transferAction, escap
 		cfgMap["tmux_pane_width"] = tmuxPaneWidth
 	}
 	if action.Protocol > 0 {
-		cfgMap["protocol"] = action.Protocol
+		cfgMap["protocol"] = minInt(action.Protocol, kProtocolVersion)
 	}
 	cfgStr, err := json.Marshal(cfgMap)
 	if err != nil {
@@ -617,9 +686,7 @@ func (t *trzszTransfer) sendFileData(file *os.File, size int64, progress progres
 			bufSize = 1024
 			buffer = make([]byte, bufSize)
 		}
-		if chunkTime > t.maxChunkTime {
-			t.maxChunkTime = chunkTime
-		}
+		t.setLastChunkTime(chunkTime)
 	}
 	return hasher.Sum(nil), nil
 }
@@ -665,7 +732,7 @@ func (t *trzszTransfer) sendFiles(files []*trzszFile, progress progressCallback)
 		}
 
 		var digest []byte
-		if t.transferConfig.Protocol == 2 {
+		if t.transferConfig.Protocol >= 2 {
 			digest, err = t.sendFileDataV2(file, size, progress)
 		} else {
 			digest, err = t.sendFileData(file, size, progress)
@@ -864,10 +931,7 @@ func (t *trzszTransfer) recvFileData(file *os.File, size int64, progress progres
 		if _, err := hasher.Write(data); err != nil {
 			return nil, err
 		}
-		chunkTime := time.Since(beginTime)
-		if chunkTime > t.maxChunkTime {
-			t.maxChunkTime = chunkTime
-		}
+		t.setLastChunkTime(time.Since(beginTime))
 	}
 	return hasher.Sum(nil), nil
 }
@@ -918,7 +982,7 @@ func (t *trzszTransfer) recvFiles(path string, progress progressCallback) ([]str
 		}
 
 		var digest []byte
-		if t.transferConfig.Protocol == 2 {
+		if t.transferConfig.Protocol >= 2 {
 			digest, err = t.recvFileDataV2(file, size, progress)
 		} else {
 			digest, err = t.recvFileData(file, size, progress)

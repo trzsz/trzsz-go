@@ -39,6 +39,8 @@ import (
 	"time"
 )
 
+const kAckChanBufferSize = 5
+
 type pipelineContext struct {
 	context.Context
 	cancel context.CancelCauseFunc
@@ -185,6 +187,95 @@ func newCompressedWriter(transfer *trzszTransfer, ctx *pipelineContext, sendData
 	return &compressedWriter{writer, encoder}
 }
 
+func (t *trzszTransfer) checkStopAndPause(typ string) error {
+	if t.transferConfig.Protocol >= 3 {
+		for t.pausing.Load() {
+			if err := t.checkStop(); err != nil {
+				return err
+			}
+			if err := t.writeAll([]byte(fmt.Sprintf("#%s:=%s", typ, t.transferConfig.Newline))); err != nil {
+				return err
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	return t.checkStop()
+}
+
+func (t *trzszTransfer) recvCheckV2(expectType string) ([]byte, *time.Time, bool, error) {
+	pause := false
+	var pauseIdx uint32
+	for {
+		if t.transferConfig.Protocol >= 3 {
+			for t.pausing.Load() {
+				pause = true
+				time.Sleep(100 * time.Millisecond)
+			}
+			pauseIdx = t.pauseIdx.Load()
+		}
+
+		beginTime := timeNowFunc()
+		line, err := t.recvLine(expectType, false, t.getNewTimeout())
+
+		if t.transferConfig.Protocol >= 3 &&
+			err == errReceiveDataTimeout && pauseIdx < t.pauseIdx.Load() { // pause after read, read again
+			pause = true
+			continue
+		}
+		if err != nil {
+			return nil, nil, pause, err
+		}
+
+		idx := bytes.IndexByte(line, ':')
+		if idx < 1 {
+			return nil, nil, pause, newTrzszError(encodeBytes(line), "colon", true)
+		}
+		typ := line[1:idx]
+		buf := line[idx+1:]
+		if string(typ) != expectType {
+			return nil, nil, pause, newTrzszError(string(buf), string(typ), true)
+		}
+
+		if t.transferConfig.Protocol >= 3 {
+			if len(buf) == 1 && buf[0] == '=' { // client pausing, read again
+				pause = true
+				continue
+			}
+			if rbt := t.resumeBeginTime.Load(); rbt != nil && beginTime.Before(*rbt) {
+				t.resumeBeginTime.CompareAndSwap(rbt, nil)
+				beginTime = *rbt
+				pause = true
+			}
+		}
+
+		return buf, &beginTime, pause, nil
+	}
+}
+
+func (t *trzszTransfer) sendDataV2(buffer []byte, length int, encoded bool) (*time.Time, error) {
+	if err := t.checkStopAndPause("DATA"); err != nil {
+		return nil, err
+	}
+	beginTime := timeNowFunc()
+	if encoded {
+		return &beginTime, t.writeAll(buffer)
+	}
+	if t.transferConfig.Binary {
+		if err := t.writeAll([]byte(fmt.Sprintf("#DATA:%d%s", length, t.transferConfig.Newline))); err != nil {
+			return nil, err
+		}
+		return &beginTime, t.writeAll(buffer)
+	} else {
+		if err := t.writeAll([]byte("#DATA:")); err != nil {
+			return nil, err
+		}
+		if err := t.writeAll(buffer); err != nil {
+			return nil, err
+		}
+		return &beginTime, t.writeAll([]byte(t.transferConfig.Newline))
+	}
+}
+
 func (t *trzszTransfer) pipelineCalculateMD5(ctx *pipelineContext, md5SourceChan <-chan []byte) <-chan []byte {
 	md5DigestChan := make(chan []byte, 1)
 	go func() {
@@ -285,29 +376,6 @@ func (t *trzszTransfer) pipelineEncodeData(ctx *pipelineContext, fileDataChan <-
 	return sendDataChan
 }
 
-func (t *trzszTransfer) sendDataV2(buffer []byte, length int, encoded bool) error {
-	if err := t.checkStop(); err != nil {
-		return err
-	}
-	if encoded {
-		return t.writeAll(buffer)
-	}
-	if t.transferConfig.Binary {
-		if err := t.writeAll([]byte(fmt.Sprintf("#DATA:%d%s", length, t.transferConfig.Newline))); err != nil {
-			return err
-		}
-		return t.writeAll(buffer)
-	} else {
-		if err := t.writeAll([]byte("#DATA:")); err != nil {
-			return err
-		}
-		if err := t.writeAll(buffer); err != nil {
-			return err
-		}
-		return t.writeAll([]byte(t.transferConfig.Newline))
-	}
-}
-
 func (t *trzszTransfer) pipelineEscapeData(ctx *pipelineContext, fileDataChan <-chan []byte) <-chan trzszData {
 	sendDataChan := make(chan trzszData, 5)
 	deliver := func(data []byte) bool {
@@ -369,35 +437,38 @@ func (t *trzszTransfer) pipelineEscapeData(ctx *pipelineContext, fileDataChan <-
 	return sendDataChan
 }
 
-func (t *trzszTransfer) pipelineRecvCurrentAck() (int64, int64, error) {
-	timeout := t.getNewTimeout()
-	resp, err := t.recvCheck("SUCC", false, timeout)
+func (t *trzszTransfer) pipelineRecvCurrentAck() (int64, int64, bool, error) {
+	resp, _, pause, err := t.recvCheckV2("SUCC")
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, pause, err
 	}
 
-	tokens := strings.Split(resp, "/")
+	tokens := strings.Split(string(resp), "/")
 	if len(tokens) != 2 {
-		return 0, 0, newSimpleTrzszError(fmt.Sprintf("Response number is not 2 but %d", len(tokens)))
+		return 0, 0, pause, newSimpleTrzszError(fmt.Sprintf("Response number is not 2 but %d", len(tokens)))
 	}
 
 	length, err := strconv.ParseInt(tokens[0], 10, 64)
 	if err != nil {
-		return 0, 0, newSimpleTrzszError(fmt.Sprintf("Parse int from %s error: %v", tokens[0], err))
+		return 0, 0, pause, newSimpleTrzszError(fmt.Sprintf("Parse int from %s error: %v", tokens[0], err))
 	}
 
 	step, err := strconv.ParseInt(tokens[1], 10, 64)
 	if err != nil {
-		return 0, 0, newSimpleTrzszError(fmt.Sprintf("Parse int from %s error: %v", tokens[1], err))
+		return 0, 0, pause, newSimpleTrzszError(fmt.Sprintf("Parse int from %s error: %v", tokens[1], err))
 	}
 
-	return length, step, nil
+	return length, step, pause, nil
 }
 
 func (t *trzszTransfer) pipelineRecvFinalAck(ctx *pipelineContext, size int64, progressChan chan<- int64) {
 	for ctx.Err() == nil {
-		timeout := t.getNewTimeout()
-		step, err := t.recvInteger("SUCC", false, timeout)
+		resp, _, _, err := t.recvCheckV2("SUCC")
+		if err != nil {
+			ctx.cancel(err)
+			return
+		}
+		step, err := strconv.ParseInt(string(resp), 10, 64)
 		if err != nil {
 			ctx.cancel(err)
 			return
@@ -426,14 +497,14 @@ func (t *trzszTransfer) pipelineRecvFinalAck(ctx *pipelineContext, size int64, p
 }
 
 func (t *trzszTransfer) pipelineSendData(ctx *pipelineContext, sendDataChan <-chan trzszData) <-chan trzszAck {
-	ackChan := make(chan trzszAck, 5)
+	ackChan := make(chan trzszAck, kAckChanBufferSize)
 	deliver := func(buffer []byte, length int, encoded bool) error {
-		beginTime := timeNowFunc()
-		if err := t.sendDataV2(buffer, length, encoded); err != nil {
+		beginTime, err := t.sendDataV2(buffer, length, encoded)
+		if err != nil {
 			return err
 		}
 		select {
-		case ackChan <- trzszAck{beginTime, int64(length)}:
+		case ackChan <- trzszAck{*beginTime, int64(length)}:
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
@@ -484,8 +555,9 @@ func (t *trzszTransfer) pipelineRecvAck(ctx *pipelineContext, size int64, ackCha
 		if showProgress {
 			defer close(progressChan)
 		}
+		ignoreChunkTimeCount := 0
 		for ack := range ackChan {
-			length, step, err := t.pipelineRecvCurrentAck()
+			length, step, pause, err := t.pipelineRecvCurrentAck()
 			if err != nil {
 				ctx.cancel(err)
 				return
@@ -503,31 +575,38 @@ func (t *trzszTransfer) pipelineRecvAck(ctx *pipelineContext, size int64, ackCha
 				}
 			}
 
-			chunkTime := time.Since(ack.begin)
-			bufSize := t.bufferSize.Load()
+			if pause {
+				ignoreChunkTimeCount = kAckChanBufferSize + 2
+			}
 
-			if length == bufSize && chunkTime < 500*time.Millisecond && bufSize < t.transferConfig.MaxBufSize {
-				t.bufferSize.Store(minInt64(bufSize*2, t.transferConfig.MaxBufSize))
-				if t.bufInitPhase.Load() {
-					t.bufInitWG.Done()
-				}
-			} else {
-				if t.bufInitPhase.Load() {
-					t.bufInitPhase.Store(false)
-					t.bufInitWG.Done()
-				}
-				if chunkTime >= 2*time.Second && length <= bufSize {
-					bufSize = bufSize / int64(chunkTime/time.Second)
-					if bufSize < 1024 {
-						bufSize = 1024
+			if ignoreChunkTimeCount <= 0 || t.bufInitPhase.Load() {
+				chunkTime := time.Since(ack.begin)
+				bufSize := t.bufferSize.Load()
+
+				if length == bufSize && chunkTime < 500*time.Millisecond && bufSize < t.transferConfig.MaxBufSize {
+					t.bufferSize.Store(minInt64(bufSize*2, t.transferConfig.MaxBufSize))
+					if t.bufInitPhase.Load() {
+						t.bufInitWG.Done()
 					}
-					t.bufferSize.Store(bufSize)
+				} else {
+					if t.bufInitPhase.Load() {
+						t.bufInitPhase.Store(false)
+						t.bufInitWG.Done()
+					}
+					if chunkTime >= 2*time.Second && length <= bufSize {
+						bufSize = bufSize / int64(chunkTime/time.Second)
+						if bufSize < 1024 {
+							bufSize = 1024
+						}
+						t.bufferSize.Store(bufSize)
+					}
 				}
+
+				t.setLastChunkTime(chunkTime)
+			} else {
+				ignoreChunkTimeCount--
 			}
 
-			if chunkTime > t.maxChunkTime {
-				t.maxChunkTime = chunkTime
-			}
 			if ctx.Err() != nil {
 				return
 			}
@@ -585,46 +664,34 @@ func (t *trzszTransfer) sendFileDataV2(file *os.File, size int64, progress progr
 	}
 }
 
-func (t *trzszTransfer) pipelineRecvBase64Data() ([]byte, error) {
-	timeout := t.getNewTimeout()
-	line, err := t.recvLine("DATA", false, timeout)
-	if err != nil {
-		return nil, err
-	}
-
-	idx := bytes.IndexByte(line, ':')
-	if idx < 1 {
-		return nil, newTrzszError(encodeBytes(line), "colon", true)
-	}
-
-	typ := line[1:idx]
-	buf := line[idx+1:]
-	if bytes.Compare(typ, []byte("DATA")) != 0 { // nolint:all
-		return nil, newTrzszError(string(buf), string(typ), true)
-	}
-
-	return buf, nil
+func (t *trzszTransfer) pipelineRecvBase64Data() ([]byte, *time.Time, error) {
+	buf, beginTime, _, err := t.recvCheckV2("DATA")
+	return buf, beginTime, err
 }
 
-func (t *trzszTransfer) pipelineRecvBinaryData() ([]byte, error) {
-	timeout := t.getNewTimeout()
-	size, err := t.recvInteger("DATA", false, timeout)
+func (t *trzszTransfer) pipelineRecvBinaryData() ([]byte, *time.Time, error) {
+	buf, beginTime, _, err := t.recvCheckV2("DATA")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+
+	size, err := strconv.ParseInt(string(buf), 10, 64)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	if size == 0 {
-		return []byte{}, nil
+		return []byte{}, beginTime, nil
 	}
 
-	data, err := t.buffer.readBinary(int(size), timeout)
+	data, err := t.buffer.readBinary(int(size), t.getNewTimeout())
 	if err != nil {
 		if e := t.checkStop(); e != nil {
-			return nil, e
+			return nil, nil, e
 		}
-		return nil, err
+		return nil, nil, err
 	}
-	return data, nil
+	return data, beginTime, nil
 }
 
 func (t *trzszTransfer) pipelineSendAck(ctx *pipelineContext, size int64, ackChan <-chan int) chan<- struct{} {
@@ -632,9 +699,12 @@ func (t *trzszTransfer) pipelineSendAck(ctx *pipelineContext, size int64, ackCha
 	go func() {
 		// send an ack for each step
 		for length := range ackChan {
+			if err := t.checkStopAndPause("SUCC"); err != nil {
+				ctx.cancel(err)
+				return
+			}
 			step := t.savedSteps.Load()
-			err := t.writeAll([]byte(fmt.Sprintf("#SUCC:%d/%d%s", length, step, t.transferConfig.Newline)))
-			if err != nil {
+			if err := t.writeAll([]byte(fmt.Sprintf("#SUCC:%d/%d%s", length, step, t.transferConfig.Newline))); err != nil {
 				ctx.cancel(err)
 				return
 			}
@@ -645,6 +715,10 @@ func (t *trzszTransfer) pipelineSendAck(ctx *pipelineContext, size int64, ackCha
 
 		// send ack until all data is saved to disk
 		for ctx.Err() == nil {
+			if err := t.checkStopAndPause("SUCC"); err != nil {
+				ctx.cancel(err)
+				return
+			}
 			step := t.savedSteps.Load()
 			if err := t.sendInteger("SUCC", step); err != nil {
 				ctx.cancel(err)
@@ -680,13 +754,13 @@ func (t *trzszTransfer) pipelineRecvData(ctx *pipelineContext) (<-chan int, <-ch
 		defer close(recvDataChan)
 		t.savedSteps.Store(0)
 		for ctx.Err() == nil {
-			beginTime := time.Now()
 			var err error
 			var data []byte
+			var beginTime *time.Time
 			if t.transferConfig.Binary {
-				data, err = t.pipelineRecvBinaryData()
+				data, beginTime, err = t.pipelineRecvBinaryData()
 			} else {
-				data, err = t.pipelineRecvBase64Data()
+				data, beginTime, err = t.pipelineRecvBase64Data()
 			}
 			if err != nil {
 				ctx.cancel(err)
@@ -699,10 +773,7 @@ func (t *trzszTransfer) pipelineRecvData(ctx *pipelineContext) (<-chan int, <-ch
 				return
 			}
 
-			chunkTime := time.Since(beginTime)
-			if chunkTime > t.maxChunkTime {
-				t.maxChunkTime = chunkTime
-			}
+			t.setLastChunkTime(time.Since(*beginTime))
 
 			if len(data) == 0 {
 				break

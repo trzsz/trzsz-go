@@ -251,8 +251,8 @@ func (r *trzszRelay) handshake() {
 	r.clientIsWindows = action.Newline == "!\n"
 
 	action.SupportBinary = false
-	if action.Protocol > 2 {
-		action.Protocol = 2
+	if action.Protocol > kProtocolVersion {
+		action.Protocol = kProtocolVersion
 	}
 	if e := r.sendAction(action); e != nil {
 		err = newSimpleTrzszError(fmt.Sprintf("Relay send action error: %v", e))
@@ -352,7 +352,7 @@ func (r *trzszRelay) wrapOutput() {
 
 			var mode *byte
 			var serverIsWindows bool
-			buf, mode, serverIsWindows = detector.detectTrzsz(buf)
+			buf, mode, _, serverIsWindows = detector.detectTrzsz(buf)
 			if mode != nil {
 				r.relayStatus.Store(kRelayHandshaking) // store status before send to client
 				r.serverIsWindows = serverIsWindows
