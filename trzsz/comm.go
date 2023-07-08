@@ -347,13 +347,13 @@ func checkTmux() (tmuxModeType, *os.File, int32, error) {
 	cmd.Stdin = os.Stdin
 	out, err := cmd.Output()
 	if err != nil {
-		return 0, nil, -1, err
+		return 0, nil, -1, fmt.Errorf("Get tmux output failed: %v", err)
 	}
 
 	output := strings.TrimSpace(string(out))
 	tokens := strings.Split(output, ":")
 	if len(tokens) != 3 {
-		return 0, nil, -1, fmt.Errorf("tmux unexpect output: %s", output)
+		return 0, nil, -1, fmt.Errorf("Unexpect tmux output: %s", output)
 	}
 	tmuxTty, controlMode, paneWidth := tokens[0], tokens[1], tokens[2]
 
@@ -366,13 +366,13 @@ func checkTmux() (tmuxModeType, *os.File, int32, error) {
 
 	tmuxStdout, err := os.OpenFile(tmuxTty, os.O_WRONLY, 0)
 	if err != nil {
-		return 0, nil, -1, err
+		return 0, nil, -1, fmt.Errorf("Open tmux tty [%s] failed: %v", tmuxTty, err)
 	}
 	tmuxPaneWidth := -1
 	if len(paneWidth) > 0 {
 		tmuxPaneWidth, err = strconv.Atoi(paneWidth)
 		if err != nil {
-			return 0, nil, -1, err
+			return 0, nil, -1, fmt.Errorf("Parse tmux pane width [%s] failed: %v", paneWidth, err)
 		}
 	}
 	return tmuxNormalMode, tmuxStdout, int32(tmuxPaneWidth), nil

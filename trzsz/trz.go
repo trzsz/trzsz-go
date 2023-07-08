@@ -112,7 +112,7 @@ func TrzMain() int {
 	var err error
 	args.Path, err = filepath.Abs(args.Path)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "Get absolute path of [%s] failed: %v\r\n", args.Path, err)
 		return -1
 	}
 	if err := checkPathWritable(args.Path); err != nil {
@@ -159,12 +159,16 @@ func TrzMain() int {
 	os.Stdout.WriteString(fmt.Sprintf("\x1b7\x07::TRZSZ:TRANSFER:%s:%s:%013d\r\n", mode, kTrzszVersion, uniqueID))
 	os.Stdout.Sync()
 
-	state, err := term.MakeRaw(int(os.Stdin.Fd()))
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return -4
+	var state *term.State
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		state, err = term.MakeRaw(fd)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Make stdin raw failed: %v\r\n", err)
+			return -4
+		}
+		defer func() { _ = term.Restore(fd, state) }()
 	}
-	defer func() { _ = term.Restore(int(os.Stdin.Fd()), state) }()
 
 	transfer := newTransfer(realStdout, state, false, nil)
 	defer func() {
