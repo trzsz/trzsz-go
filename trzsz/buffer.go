@@ -40,7 +40,7 @@ type trzszBuffer struct {
 }
 
 func newTrzszBuffer() *trzszBuffer {
-	return &trzszBuffer{bufCh: make(chan []byte, 100), stopCh: make(chan bool, 1)}
+	return &trzszBuffer{bufCh: make(chan []byte, 10000), stopCh: make(chan bool, 1)}
 }
 
 func (b *trzszBuffer) addBuffer(buf []byte) {

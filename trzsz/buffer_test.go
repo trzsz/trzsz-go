@@ -235,11 +235,12 @@ func TestBufferOthers(t *testing.T) {
 
 	// new timeout
 	go func() {
+		time.Sleep(50 * time.Millisecond)
 		tb.setNewTimeout(time.NewTimer(200 * time.Millisecond).C)
 		time.Sleep(100 * time.Millisecond)
 		tb.addBuffer([]byte("test message\n"))
 	}()
-	line, err := tb.readLine(false, time.NewTimer(50*time.Millisecond).C)
+	line, err := tb.readLine(false, time.NewTimer(100*time.Millisecond).C)
 	assert.Nil(err)
 	assert.Equal([]byte("test message"), line)
 

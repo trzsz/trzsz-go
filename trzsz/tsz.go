@@ -65,7 +65,7 @@ func parseTszArgs(osArgs []string) *tszArgs {
 	return &args
 }
 
-func sendFiles(transfer *trzszTransfer, files []*trzszFile, args *tszArgs, tmuxMode tmuxModeType, tmuxPaneWidth int32) error {
+func sendFiles(transfer *trzszTransfer, files []*sourceFile, args *tszArgs, tmuxMode tmuxModeType, tmuxPaneWidth int32) error {
 	action, err := transfer.recvAction()
 	if err != nil {
 		return err

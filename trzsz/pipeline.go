@@ -33,7 +33,6 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"io"
 	"os"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -188,7 +187,7 @@ func newCompressedWriter(transfer *trzszTransfer, ctx *pipelineContext, sendData
 }
 
 func (t *trzszTransfer) checkStopAndPause(typ string) error {
-	if t.transferConfig.Protocol >= 3 {
+	if t.transferConfig.Protocol >= kProtocolVersion3 {
 		for t.pausing.Load() {
 			if err := t.checkStop(); err != nil {
 				return err
@@ -206,18 +205,21 @@ func (t *trzszTransfer) recvCheckV2(expectType string) ([]byte, *time.Time, bool
 	pause := false
 	var pauseIdx uint32
 	for {
-		if t.transferConfig.Protocol >= 3 {
+		if t.transferConfig.Protocol >= kProtocolVersion3 {
+			pauseIdx = t.pauseIdx.Load()
 			for t.pausing.Load() {
 				pause = true
+				if err := t.checkStop(); err != nil {
+					return nil, nil, pause, err
+				}
 				time.Sleep(100 * time.Millisecond)
 			}
-			pauseIdx = t.pauseIdx.Load()
 		}
 
 		beginTime := timeNowFunc()
 		line, err := t.recvLine(expectType, false, t.getNewTimeout())
 
-		if t.transferConfig.Protocol >= 3 &&
+		if t.transferConfig.Protocol >= kProtocolVersion3 &&
 			err == errReceiveDataTimeout && pauseIdx < t.pauseIdx.Load() { // pause after read, read again
 			pause = true
 			continue
@@ -236,7 +238,7 @@ func (t *trzszTransfer) recvCheckV2(expectType string) ([]byte, *time.Time, bool
 			return nil, nil, pause, newTrzszError(string(buf), string(typ), true)
 		}
 
-		if t.transferConfig.Protocol >= 3 {
+		if t.transferConfig.Protocol >= kProtocolVersion3 {
 			if len(buf) == 1 && buf[0] == '=' { // client pausing, read again
 				pause = true
 				continue
@@ -284,6 +286,9 @@ func (t *trzszTransfer) pipelineCalculateMD5(ctx *pipelineContext, md5SourceChan
 		for buf := range md5SourceChan {
 			if _, err := hasher.Write(buf); err != nil {
 				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("MD5 write error: %v", err)))
+				return
+			}
+			if ctx.Err() != nil {
 				return
 			}
 		}
@@ -649,7 +654,7 @@ func (t *trzszTransfer) sendFileDataV2(file *os.File, size int64, progress progr
 
 	ackChan := t.pipelineSendData(ctx, sendDataChan)
 
-	showProgress := progress != nil && !reflect.ValueOf(progress).IsNil()
+	showProgress := progress != nil
 	progressChan := t.pipelineRecvAck(ctx, size, ackChan, showProgress)
 
 	if showProgress {
@@ -957,7 +962,7 @@ func (t *trzszTransfer) recvFileDataV2(file *os.File, size int64, progress progr
 
 	md5DigestChan := t.pipelineCalculateMD5(ctx, md5SourceChan)
 
-	showProgress := progress != nil && !reflect.ValueOf(progress).IsNil()
+	showProgress := progress != nil
 	progressChan := t.pipelineSaveData(ctx, file, size, fileDataChan, ackImmediatelyChan, showProgress)
 
 	if showProgress {

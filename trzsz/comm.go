@@ -28,6 +28,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -80,6 +81,7 @@ type progressCallback interface {
 	onSize(size int64)
 	onStep(step int64)
 	onDone()
+	setPreSize(size int64)
 }
 
 type bufferSize struct {
@@ -230,14 +232,65 @@ func checkPathWritable(path string) error {
 	return nil
 }
 
-type trzszFile struct {
+type sourceFile struct {
 	PathID  int      `json:"path_id"`
 	AbsPath string   `json:"-"`
 	RelPath []string `json:"path_name"`
 	IsDir   bool     `json:"is_dir"`
 }
 
-func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*trzszFile, relPath []string, visitedDir map[string]bool) error {
+func (f *sourceFile) getFileName() string {
+	if len(f.RelPath) == 0 {
+		return ""
+	}
+	return f.RelPath[len(f.RelPath)-1]
+}
+
+func (f *sourceFile) marshalSourceFile() (string, error) {
+	jstr, err := json.Marshal(f)
+	if err != nil {
+		return "", err
+	}
+	return string(jstr), nil
+}
+
+func unmarshalSourceFile(source string) (*sourceFile, error) {
+	var file sourceFile
+	if err := json.Unmarshal([]byte(source), &file); err != nil {
+		return nil, err
+	}
+	if len(file.RelPath) < 1 {
+		return nil, newSimpleTrzszError(fmt.Sprintf("Invalid source file: %s", source))
+	}
+	return &file, nil
+}
+
+type targetFile struct {
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+}
+
+func (f *targetFile) marshalTargetFile() (string, error) {
+	jstr, err := json.Marshal(f)
+	if err != nil {
+		return "", err
+	}
+	return string(jstr), nil
+}
+
+func unmarshalTargetFile(target string) (*targetFile, error) {
+	var file targetFile
+	if err := json.Unmarshal([]byte(target), &file); err != nil {
+		return nil, err
+	}
+	if file.Size < 0 {
+		return nil, newSimpleTrzszError(fmt.Sprintf("Invalid target file: %s", target))
+	}
+	return &file, nil
+}
+
+func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*sourceFile,
+	relPath []string, visitedDir map[string]bool) error {
 	if !info.IsDir() {
 		if !info.Mode().IsRegular() {
 			return newSimpleTrzszError(fmt.Sprintf("Not a regular file: %s", path))
@@ -245,7 +298,7 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*trzsz
 		if syscallAccessRok(path) != nil {
 			return newSimpleTrzszError(fmt.Sprintf("No permission to read: %s", path))
 		}
-		*list = append(*list, &trzszFile{pathID, path, relPath, false})
+		*list = append(*list, &sourceFile{pathID, path, relPath, false})
 		return nil
 	}
 	realPath, err := filepath.EvalSymlinks(path)
@@ -256,12 +309,12 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*trzsz
 		return newSimpleTrzszError(fmt.Sprintf("Duplicate link: %s", path))
 	}
 	visitedDir[realPath] = true
-	*list = append(*list, &trzszFile{pathID, path, relPath, true})
-	f, err := os.Open(path)
+	*list = append(*list, &sourceFile{pathID, path, relPath, true})
+	fileObj, err := os.Open(path)
 	if err != nil {
 		return newSimpleTrzszError(fmt.Sprintf("Open [%s] error: %v", path, err))
 	}
-	files, err := f.Readdir(-1)
+	files, err := fileObj.Readdir(-1)
 	if err != nil {
 		return newSimpleTrzszError(fmt.Sprintf("Readdir [%s] error: %v", path, err))
 	}
@@ -281,8 +334,8 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*trzsz
 	return nil
 }
 
-func checkPathsReadable(paths []string, directory bool) ([]*trzszFile, error) {
-	var list []*trzszFile
+func checkPathsReadable(paths []string, directory bool) ([]*sourceFile, error) {
+	var list []*sourceFile
 	for i, p := range paths {
 		path, err := filepath.Abs(p)
 		if err != nil {
@@ -305,10 +358,10 @@ func checkPathsReadable(paths []string, directory bool) ([]*trzszFile, error) {
 	return list, nil
 }
 
-func checkDuplicateNames(list []*trzszFile) error {
+func checkDuplicateNames(sourceFiles []*sourceFile) error {
 	m := make(map[string]bool)
-	for _, f := range list {
-		p := filepath.Join(f.RelPath...)
+	for _, srcFile := range sourceFiles {
+		p := filepath.Join(srcFile.RelPath...)
 		if _, ok := m[p]; ok {
 			return newSimpleTrzszError(fmt.Sprintf("Duplicate name: %s", p))
 		}

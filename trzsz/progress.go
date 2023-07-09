@@ -143,6 +143,7 @@ type textProgressBar struct {
 	fileCount       int
 	fileIdx         int
 	fileName        string
+	preSize         int64
 	fileSize        int64
 	fileStep        int64
 	startTime       *time.Time
@@ -165,6 +166,9 @@ func newTextProgressBar(writer io.Writer, columns int32, tmuxPaneColumns int32) 
 }
 
 func (p *textProgressBar) setTerminalColumns(columns int32) {
+	if p == nil {
+		return
+	}
 	p.columns.Store(columns)
 	// resizing tmux panes is not supported
 	if p.tmuxPaneColumns.Load() > 0 {
@@ -173,10 +177,16 @@ func (p *textProgressBar) setTerminalColumns(columns int32) {
 }
 
 func (p *textProgressBar) onNum(num int64) {
+	if p == nil {
+		return
+	}
 	p.fileCount = int(num)
 }
 
 func (p *textProgressBar) onName(name string) {
+	if p == nil {
+		return
+	}
 	p.fileName = name
 	p.fileIdx++
 	now := timeNowFunc()
@@ -185,14 +195,22 @@ func (p *textProgressBar) onName(name string) {
 	p.stepArray[0] = 0
 	p.speedCnt = 1
 	p.speedIdx = 1
+	p.preSize = 0
 	p.fileStep = -1
 }
 
 func (p *textProgressBar) onSize(size int64) {
-	p.fileSize = size
+	if p == nil {
+		return
+	}
+	p.fileSize = p.preSize + size
 }
 
 func (p *textProgressBar) onStep(step int64) {
+	if p == nil {
+		return
+	}
+	step += p.preSize
 	if step <= p.fileStep {
 		return
 	}
@@ -201,6 +219,9 @@ func (p *textProgressBar) onStep(step int64) {
 }
 
 func (p *textProgressBar) onDone() {
+	if p == nil {
+		return
+	}
 	if !p.firstWrite {
 		if p.tmuxPaneColumns.Load() > 0 {
 			_ = writeAll(p.writer, []byte(fmt.Sprintf("\x1b[%dD", p.columns.Load())))
@@ -209,6 +230,13 @@ func (p *textProgressBar) onDone() {
 		}
 		p.firstWrite = true
 	}
+}
+
+func (p *textProgressBar) setPreSize(size int64) {
+	if p == nil {
+		return
+	}
+	p.preSize = size
 }
 
 func (p *textProgressBar) showProgress() {
