@@ -84,7 +84,7 @@ func recvFiles(transfer *trzszTransfer, args *trzArgs, tmuxMode tmuxModeType, tm
 
 	// check if the client doesn't support transfer directory
 	if args.Directory && !action.SupportDirectory {
-		return newSimpleTrzszError("The client doesn't support transfer directory")
+		return simpleTrzszError("The client doesn't support transfer directory")
 	}
 
 	escapeChars := getEscapeChars(args.Escape)

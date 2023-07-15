@@ -245,7 +245,7 @@ func (r *trzszRelay) handshake() {
 
 	action, err := r.recvAction()
 	if err != nil {
-		err = newSimpleTrzszError(fmt.Sprintf("Relay recv action error: %v", err))
+		err = simpleTrzszError("Relay recv action error: %v", err)
 		return
 	}
 	r.clientIsWindows = action.Newline == "!\n"
@@ -255,7 +255,7 @@ func (r *trzszRelay) handshake() {
 		action.Protocol = kProtocolVersion
 	}
 	if e := r.sendAction(action); e != nil {
-		err = newSimpleTrzszError(fmt.Sprintf("Relay send action error: %v", e))
+		err = simpleTrzszError("Relay send action error: %v", e)
 		return
 	}
 
@@ -265,7 +265,7 @@ func (r *trzszRelay) handshake() {
 
 	config, err := r.recvConfig()
 	if err != nil {
-		err = newSimpleTrzszError(fmt.Sprintf("Relay recv config error: %v", err))
+		err = simpleTrzszError("Relay recv config error: %v", err)
 		return
 	}
 
@@ -274,7 +274,7 @@ func (r *trzszRelay) handshake() {
 		config.TmuxPaneColumns = r.tmuxPaneWidth
 	}
 	if e := r.sendConfig(config); e != nil {
-		err = newSimpleTrzszError(fmt.Sprintf("Relay send config error: %v", e))
+		err = simpleTrzszError("Relay send config error: %v", e)
 		return
 	}
 

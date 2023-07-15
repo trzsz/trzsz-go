@@ -30,12 +30,13 @@ import (
 	"crypto/md5"
 	"encoding/base64"
 	"fmt"
-	"github.com/klauspost/compress/zstd"
 	"io"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 const kAckChanBufferSize = 5
@@ -57,14 +58,24 @@ type trzszAck struct {
 	length int64
 }
 
-type base64Reader struct {
+type readCloser interface {
+	io.Reader
+	Close()
+}
+
+type writeCloseFlusher interface {
+	io.WriteCloser
+	Flush() error
+}
+
+type recvDataReader struct {
 	dataChan <-chan []byte
 	ctx      *pipelineContext
 	buf      []byte
 	eof      bool
 }
 
-func (r *base64Reader) Read(p []byte) (int, error) {
+func (r *recvDataReader) Read(p []byte) (int, error) {
 	if r.eof {
 		return 0, io.EOF
 	}
@@ -85,11 +96,11 @@ func (r *base64Reader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func newBase64Reader(ctx *pipelineContext, dataChan <-chan []byte) *base64Reader {
-	return &base64Reader{ctx: ctx, dataChan: dataChan}
+func newRecvDataReader(ctx *pipelineContext, dataChan <-chan []byte) *recvDataReader {
+	return &recvDataReader{ctx: ctx, dataChan: dataChan}
 }
 
-type base64Writer struct {
+type sendDataWriter struct {
 	transfer     *trzszTransfer
 	ctx          *pipelineContext
 	sendDataChan chan<- trzszData
@@ -97,11 +108,17 @@ type base64Writer struct {
 	bufSize      int64
 }
 
-func (b *base64Writer) deliver(data []byte) bool {
-	buffer := bytes.NewBuffer(make([]byte, 0, len(data)+0x10))
+func (b *sendDataWriter) deliver(data []byte) bool {
+	buffer := bytes.NewBuffer(make([]byte, 0, len(data)+0x20))
 	buffer.Write([]byte("#DATA:"))
-	buffer.Write(data)
-	buffer.Write([]byte(b.transfer.transferConfig.Newline))
+	if b.transfer.transferConfig.Binary {
+		buffer.Write([]byte(strconv.Itoa(len(data))))
+		buffer.Write([]byte(b.transfer.transferConfig.Newline))
+		buffer.Write(data)
+	} else {
+		buffer.Write(data)
+		buffer.Write([]byte(b.transfer.transferConfig.Newline))
+	}
 	select {
 	case b.sendDataChan <- trzszData{data, buffer.Bytes(), 0}:
 		return true
@@ -110,7 +127,7 @@ func (b *base64Writer) deliver(data []byte) bool {
 	}
 }
 
-func (b *base64Writer) Write(p []byte) (int, error) {
+func (b *sendDataWriter) Write(p []byte) (int, error) {
 	m := 0
 	for {
 		space := b.buffer.Cap() - b.buffer.Len()
@@ -146,7 +163,7 @@ func (b *base64Writer) Write(p []byte) (int, error) {
 	}
 }
 
-func (b *base64Writer) Close() error {
+func (b *sendDataWriter) Close() error {
 	b.transfer.bufInitPhase.Store(false)
 	if b.buffer.Len() > 0 {
 		if !b.deliver(b.buffer.Bytes()) {
@@ -157,33 +174,167 @@ func (b *base64Writer) Close() error {
 	return nil
 }
 
-func newBase64Writer(transfer *trzszTransfer, ctx *pipelineContext, sendDataChan chan<- trzszData) *base64Writer {
+func newSendDataWriter(transfer *trzszTransfer, ctx *pipelineContext, sendDataChan chan<- trzszData) *sendDataWriter {
 	bufSize := transfer.bufferSize.Load()
 	buffer := bytes.NewBuffer(make([]byte, 0, bufSize))
-	return &base64Writer{transfer, ctx, sendDataChan, buffer, bufSize}
+	return &sendDataWriter{transfer, ctx, sendDataChan, buffer, bufSize}
 }
 
-type compressedWriter struct {
-	base64Writer  *base64Writer
-	base64Encoder io.WriteCloser
+type base64Reader struct {
+	decoder io.Reader
 }
 
-func (c *compressedWriter) Write(p []byte) (int, error) {
-	return c.base64Encoder.Write(p)
+func (b *base64Reader) Read(p []byte) (n int, err error) {
+	return b.decoder.Read(p)
 }
 
-func (c *compressedWriter) Close() error {
-	err := c.base64Encoder.Close()
-	if err != nil {
+func (b *base64Reader) Close() {
+}
+
+func newBase64Reader(reader io.Reader) readCloser {
+	decoder := base64.NewDecoder(base64.StdEncoding, reader)
+	return &base64Reader{decoder}
+}
+
+type base64Writer struct {
+	encoder io.WriteCloser
+	writer  io.WriteCloser
+}
+
+func (b *base64Writer) Write(p []byte) (int, error) {
+	return b.encoder.Write(p)
+}
+
+func (b *base64Writer) Close() error {
+	if err := b.encoder.Close(); err != nil {
 		return err
 	}
-	return c.base64Writer.Close()
+	return b.writer.Close()
 }
 
-func newCompressedWriter(transfer *trzszTransfer, ctx *pipelineContext, sendDataChan chan<- trzszData) *compressedWriter {
-	writer := newBase64Writer(transfer, ctx, sendDataChan)
+func (b *base64Writer) Flush() error {
+	return nil
+}
+
+func newBase64Writer(writer io.WriteCloser) writeCloseFlusher {
 	encoder := base64.NewEncoder(base64.StdEncoding, writer)
-	return &compressedWriter{writer, encoder}
+	return &base64Writer{encoder, writer}
+}
+
+type escapeReader struct {
+	transfer *trzszTransfer
+	reader   io.Reader
+	buffer   []byte
+}
+
+func (e *escapeReader) Read(p []byte) (n int, err error) {
+	if len(e.transfer.transferConfig.EscapeCodes) == 0 {
+		return e.reader.Read(p)
+	}
+	for {
+		var idx int
+		if len(e.buffer) > 0 {
+			buf, remaining, err := unescapeData(e.buffer, e.transfer.transferConfig.EscapeCodes, p)
+			if err != nil {
+				return 0, err
+			}
+			if len(buf) > 0 {
+				e.buffer = remaining
+				return len(buf), nil
+			}
+			e.buffer = make([]byte, 32*1024)
+			copy(e.buffer, remaining)
+			idx = len(remaining)
+		} else {
+			e.buffer = make([]byte, 32*1024)
+			idx = 0
+		}
+		n, err := e.reader.Read(e.buffer[idx:])
+		if err != nil {
+			return 0, err
+		}
+		e.buffer = e.buffer[:idx+n]
+	}
+}
+
+func (e *escapeReader) Close() {
+}
+
+func newEscapeReader(transfer *trzszTransfer, reader io.Reader) readCloser {
+	return &escapeReader{transfer, reader, nil}
+}
+
+type escapeWriter struct {
+	transfer *trzszTransfer
+	writer   io.WriteCloser
+}
+
+func (e *escapeWriter) Write(p []byte) (int, error) {
+	buf := escapeData(p, e.transfer.transferConfig.EscapeCodes)
+	if err := writeAll(e.writer, buf); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (e *escapeWriter) Close() error {
+	return e.writer.Close()
+}
+
+func (e *escapeWriter) Flush() error {
+	return nil
+}
+
+func newEscapeWriter(transfer *trzszTransfer, writer io.WriteCloser) writeCloseFlusher {
+	return &escapeWriter{transfer, writer}
+}
+
+type zstdReader struct {
+	decoder *zstd.Decoder
+}
+
+func (z *zstdReader) Read(p []byte) (n int, err error) {
+	return z.decoder.Read(p)
+}
+
+func (z *zstdReader) Close() {
+	z.decoder.Close()
+}
+
+func newZstdReader(reader io.Reader) (readCloser, error) {
+	decoder, err := zstd.NewReader(reader)
+	if err != nil {
+		return nil, simpleTrzszError("New zstd reader error: %v", err)
+	}
+	return &zstdReader{decoder}, nil
+}
+
+type zstdWriter struct {
+	encoder *zstd.Encoder
+	writer  io.WriteCloser
+}
+
+func (z *zstdWriter) Write(p []byte) (int, error) {
+	return z.encoder.Write(p)
+}
+
+func (c *zstdWriter) Close() error {
+	if err := c.encoder.Close(); err != nil {
+		return err
+	}
+	return c.writer.Close()
+}
+
+func (c *zstdWriter) Flush() error {
+	return c.encoder.Flush()
+}
+
+func newZstdWriter(writer io.WriteCloser) (writeCloseFlusher, error) {
+	encoder, err := zstd.NewWriter(writer)
+	if err != nil {
+		return nil, simpleTrzszError("New zstd writer error: %v", err)
+	}
+	return &zstdWriter{encoder, writer}, nil
 }
 
 func (t *trzszTransfer) checkStopAndPause(typ string) error {
@@ -278,6 +429,56 @@ func (t *trzszTransfer) sendDataV2(buffer []byte, length int, encoded bool) (*ti
 	}
 }
 
+func (t *trzszTransfer) isCompressFixed(size int64) (fixed bool, compress bool) {
+	if t.transferConfig.Protocol < kProtocolVersion3 {
+		return true, !t.transferConfig.Binary
+	}
+	if t.transferConfig.CompressType == kCompressYes {
+		return true, true
+	}
+	if t.transferConfig.CompressType == kCompressNo {
+		return true, false
+	}
+	if size < 512 {
+		return true, false
+	}
+	if size < 128*1024 {
+		return true, true
+	}
+	return false, false
+}
+
+func (t *trzszTransfer) sendCompressFlag(file *os.File, size int64) (bool, error) {
+	fixed, compress := t.isCompressFixed(size)
+	if fixed {
+		return compress, nil
+	}
+	compress, err := isCompressionProfitable(file, size)
+	if err != nil {
+		return false, fmt.Errorf("Compression detect failed: %v", err)
+	}
+	return compress, t.sendLine("COMP", strconv.FormatBool(compress))
+}
+
+func (t *trzszTransfer) recvCompressFlag(size int64) (bool, error) {
+	fixed, compress := t.isCompressFixed(size)
+	if fixed {
+		return compress, nil
+	}
+	flag, err := t.recvCheck("COMP", false, t.getNewTimeout())
+	if err != nil {
+		return false, err
+	}
+	switch flag {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, simpleTrzszError("Unknown compress flag: %s", flag)
+	}
+}
+
 func (t *trzszTransfer) pipelineCalculateMD5(ctx *pipelineContext, md5SourceChan <-chan []byte) <-chan []byte {
 	md5DigestChan := make(chan []byte, 1)
 	go func() {
@@ -285,7 +486,7 @@ func (t *trzszTransfer) pipelineCalculateMD5(ctx *pipelineContext, md5SourceChan
 		hasher := md5.New()
 		for buf := range md5SourceChan {
 			if _, err := hasher.Write(buf); err != nil {
-				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("MD5 write error: %v", err)))
+				ctx.cancel(simpleTrzszError("MD5 write error: %v", err))
 				return
 			}
 			if ctx.Err() != nil {
@@ -329,7 +530,7 @@ func (t *trzszTransfer) pipelineReadData(ctx *pipelineContext, file *os.File, si
 				step += int64(n)
 			}
 			if err != nil {
-				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("Read file error: %v", err)))
+				ctx.cancel(simpleTrzszError("Read file error: %v", err))
 				return
 			}
 		}
@@ -337,39 +538,45 @@ func (t *trzszTransfer) pipelineReadData(ctx *pipelineContext, file *os.File, si
 	return fileDataChan, md5SourceChan
 }
 
-func (t *trzszTransfer) pipelineEncodeData(ctx *pipelineContext, fileDataChan <-chan []byte) <-chan trzszData {
+func (t *trzszTransfer) pipelineEncodeData(ctx *pipelineContext, fileDataChan <-chan []byte, compress bool) <-chan trzszData {
 	sendDataChan := make(chan trzszData, 5)
 	go func() {
 		defer close(sendDataChan)
 
-		c := newCompressedWriter(t, ctx, sendDataChan)
-		defer func() {
-			err := c.Close()
-			if err != nil {
-				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("Close compressed writer error: %v", err)))
+		var err error
+		var writer writeCloseFlusher
+		if t.transferConfig.Binary {
+			if compress {
+				writer, err = newZstdWriter(newEscapeWriter(t, newSendDataWriter(t, ctx, sendDataChan)))
+			} else {
+				writer = newEscapeWriter(t, newSendDataWriter(t, ctx, sendDataChan))
 			}
-		}()
-
-		z, err := zstd.NewWriter(c)
+		} else {
+			if compress {
+				writer, err = newZstdWriter(newBase64Writer(newSendDataWriter(t, ctx, sendDataChan)))
+			} else {
+				writer = newBase64Writer(newSendDataWriter(t, ctx, sendDataChan))
+			}
+		}
 		if err != nil {
-			ctx.cancel(newSimpleTrzszError(fmt.Sprintf("New zstd writer error: %v", err)))
+			ctx.cancel(simpleTrzszError("New encode writer error: %v", err))
 			return
 		}
+
 		defer func() {
-			err := z.Close()
-			if err != nil {
-				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("Close zstd writer error: %v", err)))
+			if err := writer.Close(); err != nil {
+				ctx.cancel(simpleTrzszError("Close encode writer error: %v", err))
 			}
 		}()
 
 		for data := range fileDataChan {
-			if err := writeAll(z, data); err != nil {
-				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("Write to zstd error: %v", err)))
+			if err := writeAll(writer, data); err != nil {
+				ctx.cancel(simpleTrzszError("Write to encode writer error: %v", err))
 				return
 			}
 			if t.flushInTime {
-				if err := z.Flush(); err != nil {
-					ctx.cancel(newSimpleTrzszError(fmt.Sprintf("Flush to zstd error: %v", err)))
+				if err := writer.Flush(); err != nil {
+					ctx.cancel(simpleTrzszError("Flush to encode writer error: %v", err))
 					return
 				}
 			}
@@ -377,67 +584,6 @@ func (t *trzszTransfer) pipelineEncodeData(ctx *pipelineContext, fileDataChan <-
 				return
 			}
 		}
-	}()
-	return sendDataChan
-}
-
-func (t *trzszTransfer) pipelineEscapeData(ctx *pipelineContext, fileDataChan <-chan []byte) <-chan trzszData {
-	sendDataChan := make(chan trzszData, 5)
-	deliver := func(data []byte) bool {
-		buffer := bytes.NewBuffer(make([]byte, 0, len(data)+0x20))
-		buffer.Write([]byte(("#DATA:")))
-		buffer.Write([]byte(strconv.Itoa(len(data))))
-		buffer.Write([]byte(t.transferConfig.Newline))
-		buffer.Write(data)
-		select {
-		case sendDataChan <- trzszData{data, buffer.Bytes(), 0}:
-			return true
-		case <-ctx.Done():
-			return false
-		}
-	}
-	go func() {
-		defer close(sendDataChan)
-		bufSize := int(t.bufferSize.Load())
-		buffer := new(bytes.Buffer)
-		for data := range fileDataChan {
-			buf := escapeData(data, t.transferConfig.EscapeCodes)
-			if buffer.Len() == 0 {
-				buffer = bytes.NewBuffer(buf)
-			} else {
-				buffer.Grow(bufSize)
-				buffer.Write(buf)
-			}
-			for buffer.Len() >= bufSize {
-				if t.bufInitPhase.Load() {
-					t.bufInitWG.Add(1)
-				}
-
-				b := buffer.Bytes()
-				if !deliver(b[:bufSize]) {
-					return
-				}
-				buffer = bytes.NewBuffer(b[bufSize:])
-
-				if t.bufInitPhase.Load() {
-					t.bufInitWG.Wait()
-				}
-				bufSize = int(t.bufferSize.Load())
-			}
-			if ctx.Err() != nil {
-				return
-			}
-		}
-		if ctx.Err() != nil {
-			return
-		}
-		t.bufInitPhase.Store(false)
-		if buffer.Len() > 0 {
-			if !deliver(buffer.Bytes()) {
-				return
-			}
-		}
-		deliver([]byte{}) // send the finish flag
 	}()
 	return sendDataChan
 }
@@ -450,17 +596,17 @@ func (t *trzszTransfer) pipelineRecvCurrentAck() (int64, int64, bool, error) {
 
 	tokens := strings.Split(string(resp), "/")
 	if len(tokens) != 2 {
-		return 0, 0, pause, newSimpleTrzszError(fmt.Sprintf("Response number is not 2 but %d", len(tokens)))
+		return 0, 0, pause, simpleTrzszError("Response number is not 2 but %d", len(tokens))
 	}
 
 	length, err := strconv.ParseInt(tokens[0], 10, 64)
 	if err != nil {
-		return 0, 0, pause, newSimpleTrzszError(fmt.Sprintf("Parse int from %s error: %v", tokens[0], err))
+		return 0, 0, pause, simpleTrzszError("Parse int from %s error: %v", tokens[0], err)
 	}
 
 	step, err := strconv.ParseInt(tokens[1], 10, 64)
 	if err != nil {
-		return 0, 0, pause, newSimpleTrzszError(fmt.Sprintf("Parse int from %s error: %v", tokens[1], err))
+		return 0, 0, pause, simpleTrzszError("Parse int from %s error: %v", tokens[1], err)
 	}
 
 	return length, step, pause, nil
@@ -480,7 +626,7 @@ func (t *trzszTransfer) pipelineRecvFinalAck(ctx *pipelineContext, size int64, p
 		}
 
 		if step > size {
-			ctx.cancel(newSimpleTrzszError(fmt.Sprintf("RecvFinalAck expected step %d but was %d", size, step)))
+			ctx.cancel(simpleTrzszError("RecvFinalAck expected step %d but was %d", size, step))
 			return
 		}
 
@@ -568,7 +714,7 @@ func (t *trzszTransfer) pipelineRecvAck(ctx *pipelineContext, size int64, ackCha
 				return
 			}
 			if length != ack.length {
-				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("SendData length check [%d] <> [%d]", length, ack.length)))
+				ctx.cancel(simpleTrzszError("SendData length check [%d] <> [%d]", length, ack.length))
 				return
 			}
 
@@ -636,6 +782,11 @@ func (t *trzszTransfer) pipelineShowProgress(ctx *pipelineContext, progress prog
 }
 
 func (t *trzszTransfer) sendFileDataV2(file *os.File, size int64, progress progressCallback) ([]byte, error) {
+	compress, err := t.sendCompressFlag(file, size)
+	if err != nil {
+		return nil, err
+	}
+
 	c, cancel := context.WithCancelCause(context.Background())
 	ctx := &pipelineContext{c, cancel, make(chan struct{}, 1)}
 	defer ctx.cancel(nil)
@@ -645,12 +796,7 @@ func (t *trzszTransfer) sendFileDataV2(file *os.File, size int64, progress progr
 
 	md5DigestChan := t.pipelineCalculateMD5(ctx, md5SourceChan)
 
-	var sendDataChan <-chan trzszData
-	if t.transferConfig.Binary {
-		sendDataChan = t.pipelineEscapeData(ctx, fileDataChan)
-	} else {
-		sendDataChan = t.pipelineEncodeData(ctx, fileDataChan)
-	}
+	sendDataChan := t.pipelineEncodeData(ctx, fileDataChan, compress)
 
 	ackChan := t.pipelineSendData(ctx, sendDataChan)
 
@@ -731,7 +877,7 @@ func (t *trzszTransfer) pipelineSendAck(ctx *pipelineContext, size int64, ackCha
 			}
 
 			if step > size {
-				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("SendFinalAck expected step %d but was %d", size, step)))
+				ctx.cancel(simpleTrzszError("SendFinalAck expected step %d but was %d", size, step))
 				return
 			}
 
@@ -796,21 +942,35 @@ func (t *trzszTransfer) pipelineRecvData(ctx *pipelineContext) (<-chan int, <-ch
 	return ackChan, recvDataChan
 }
 
-func (t *trzszTransfer) pipelineDecodeData(ctx *pipelineContext, recvDataChan <-chan []byte) (<-chan []byte, <-chan []byte) {
+func (t *trzszTransfer) pipelineDecodeData(ctx *pipelineContext, recvDataChan <-chan []byte, compress bool) (<-chan []byte, <-chan []byte) {
 	fileDataChan := make(chan []byte, 100)
 	md5SourceChan := make(chan []byte, 100)
 	go func() {
 		defer close(fileDataChan)
 		defer close(md5SourceChan)
-		z, err := zstd.NewReader(base64.NewDecoder(base64.StdEncoding, newBase64Reader(ctx, recvDataChan)))
+		var err error
+		var reader readCloser
+		if t.transferConfig.Binary {
+			if compress {
+				reader, err = newZstdReader(newEscapeReader(t, newRecvDataReader(ctx, recvDataChan)))
+			} else {
+				reader = newEscapeReader(t, newRecvDataReader(ctx, recvDataChan))
+			}
+		} else {
+			if compress {
+				reader, err = newZstdReader(newBase64Reader(newRecvDataReader(ctx, recvDataChan)))
+			} else {
+				reader = newBase64Reader(newRecvDataReader(ctx, recvDataChan))
+			}
+		}
 		if err != nil {
-			ctx.cancel(newSimpleTrzszError(fmt.Sprintf("New zstd reader error: %v", err)))
+			ctx.cancel(simpleTrzszError("New decode reader error: %v", err))
 			return
 		}
-		defer z.Close()
+		defer reader.Close()
 		for ctx.Err() == nil {
 			buffer := make([]byte, 32*1024)
-			n, err := z.Read(buffer)
+			n, err := reader.Read(buffer)
 			if n > 0 {
 				select {
 				case fileDataChan <- buffer[:n]:
@@ -827,73 +987,9 @@ func (t *trzszTransfer) pipelineDecodeData(ctx *pipelineContext, recvDataChan <-
 				break
 			}
 			if err != nil {
-				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("Read from zstd error: %v", err)))
+				ctx.cancel(simpleTrzszError("Read from decode reader error: %v", err))
 				return
 			}
-		}
-	}()
-	return fileDataChan, md5SourceChan
-}
-
-func (t *trzszTransfer) pipelineUnescapeData(ctx *pipelineContext, recvDataChan <-chan []byte) (<-chan []byte, <-chan []byte) {
-	fileDataChan := make(chan []byte, 100)
-	md5SourceChan := make(chan []byte, 100)
-	deliver := func(data []byte) bool {
-		buffer := unescapeData(data, t.transferConfig.EscapeCodes)
-		select {
-		case fileDataChan <- buffer:
-		case <-ctx.Done():
-			return false
-		}
-		select {
-		case md5SourceChan <- buffer:
-		case <-ctx.Done():
-			return false
-		}
-		return true
-	}
-	go func() {
-		defer close(fileDataChan)
-		defer close(md5SourceChan)
-		remainingBuf := new(bytes.Buffer)
-		for data := range recvDataChan {
-			if remainingBuf.Len() > 0 {
-				idx := 0
-				for idx < len(data) {
-					b := data[idx]
-					idx++
-					remainingBuf.WriteByte(b)
-					if !isEscapeByte(b) {
-						if !deliver(remainingBuf.Bytes()) {
-							return
-						}
-						remainingBuf.Reset()
-						break
-					}
-				}
-				data = data[idx:]
-			}
-			idx := len(data)
-			for idx > 0 && isEscapeByte(data[idx-1]) {
-				idx--
-			}
-			remainingBuf.Write(data[idx:])
-			data = data[:idx]
-			if len(data) == 0 {
-				continue
-			}
-			if !deliver(data) {
-				return
-			}
-			if ctx.Err() != nil {
-				return
-			}
-		}
-		if ctx.Err() != nil {
-			return
-		}
-		if remainingBuf.Len() > 0 {
-			deliver(remainingBuf.Bytes())
 		}
 	}()
 	return fileDataChan, md5SourceChan
@@ -913,7 +1009,7 @@ func (t *trzszTransfer) pipelineSaveData(ctx *pipelineContext, file *os.File, si
 		step := int64(0)
 		for data := range fileDataChan {
 			if _, err := file.Write(data); err != nil {
-				ctx.cancel(newSimpleTrzszError(fmt.Sprintf("Write file error: %v", err)))
+				ctx.cancel(simpleTrzszError("Write file error: %v", err))
 				return
 			}
 			step += int64(len(data))
@@ -933,7 +1029,7 @@ func (t *trzszTransfer) pipelineSaveData(ctx *pipelineContext, file *os.File, si
 			return
 		}
 		if step != size {
-			ctx.cancel(newSimpleTrzszError(fmt.Sprintf("SaveFile expected step %d but was %d", size, step)))
+			ctx.cancel(simpleTrzszError("SaveFile expected step %d but was %d", size, step))
 			return
 		}
 		ackImmediatelyChan <- struct{}{}
@@ -943,6 +1039,12 @@ func (t *trzszTransfer) pipelineSaveData(ctx *pipelineContext, file *os.File, si
 
 func (t *trzszTransfer) recvFileDataV2(file *os.File, size int64, progress progressCallback) ([]byte, error) {
 	defer file.Close()
+
+	compress, err := t.recvCompressFlag(size)
+	if err != nil {
+		return nil, err
+	}
+
 	c, cancel := context.WithCancelCause(context.Background())
 	ctx := &pipelineContext{c, cancel, make(chan struct{}, 1)}
 	defer ctx.cancel(nil)
@@ -952,13 +1054,7 @@ func (t *trzszTransfer) recvFileDataV2(file *os.File, size int64, progress progr
 
 	ackImmediatelyChan := t.pipelineSendAck(ctx, size, ackChan)
 
-	var fileDataChan <-chan []byte
-	var md5SourceChan <-chan []byte
-	if t.transferConfig.Binary {
-		fileDataChan, md5SourceChan = t.pipelineUnescapeData(ctx, recvDataChan)
-	} else {
-		fileDataChan, md5SourceChan = t.pipelineDecodeData(ctx, recvDataChan)
-	}
+	fileDataChan, md5SourceChan := t.pipelineDecodeData(ctx, recvDataChan, compress)
 
 	md5DigestChan := t.pipelineCalculateMD5(ctx, md5SourceChan)
 

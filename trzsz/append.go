@@ -153,7 +153,7 @@ func (t *trzszTransfer) pipelineRecvHashAck(ctx context.Context, cancel context.
 				matchChan <- matchStep
 				return
 			} else if matchStep > size {
-				cancel(newSimpleTrzszError(fmt.Sprintf("Hash step check [%d] > [%d]", matchStep, size)))
+				cancel(simpleTrzszError("Hash step check [%d] > [%d]", matchStep, size))
 				return
 			}
 		}
@@ -169,6 +169,13 @@ func (t *trzszTransfer) sendPrefixHash(file *os.File, tgtFile *targetFile, progr
 
 	if tgtFile.Size <= 0 {
 		return stat.Size(), nil
+	}
+
+	if progress != nil {
+		progress.onSize(stat.Size())
+	}
+	if err := t.sendInteger("SIZE", stat.Size()); err != nil {
+		return 0, err
 	}
 
 	var stopNow atomic.Bool
@@ -246,6 +253,14 @@ func (t *trzszTransfer) recvPrefixHash(file *os.File, tgtFile *targetFile, progr
 		return nil
 	}
 
+	size, err := t.recvInteger("SIZE", false, t.getNewTimeout())
+	if err != nil {
+		return err
+	}
+	if progress != nil {
+		progress.onSize(size)
+	}
+
 	match := true
 	hasher := md5.New()
 	matchStep := int64(0)
@@ -304,12 +319,17 @@ func (t *trzszTransfer) recvFileNameV3(path string, progress progressCallback) (
 		return nil, "", err
 	}
 
-	stat, err := file.Stat()
-	if err != nil {
-		file.Close()
-		return nil, "", err
+	size := int64(0)
+	if file != nil {
+		stat, err := file.Stat()
+		if err != nil {
+			file.Close()
+			return nil, "", err
+		}
+		size = stat.Size()
 	}
-	tgtFile := &targetFile{Name: localName, Size: stat.Size()}
+
+	tgtFile := &targetFile{Name: localName, Size: size}
 	target, err := tgtFile.marshalTargetFile()
 	if err != nil {
 		file.Close()

@@ -64,6 +64,9 @@ func TestTrzArgs(t *testing.T) {
 	assertArgsEqual("-r", newTrzArgs(baseArgs{Directory: true, Recursive: true}, "."))
 	assertArgsEqual("-B 2k", newTrzArgs(baseArgs{Bufsize: bufferSize{2 * 1024}}, "."))
 	assertArgsEqual("-t 3", newTrzArgs(baseArgs{Timeout: 3}, "."))
+	assertArgsEqual("-cNo", newTrzArgs(baseArgs{Compress: kCompressNo}, "."))
+	assertArgsEqual("-c yes", newTrzArgs(baseArgs{Compress: kCompressYes}, "."))
+	assertArgsEqual("-c AUTO", newTrzArgs(baseArgs{Compress: kCompressAuto}, "."))
 
 	assertArgsEqual("--quiet", newTrzArgs(baseArgs{Quiet: true}, "."))
 	assertArgsEqual("--overwrite", newTrzArgs(baseArgs{Overwrite: true}, "."))
@@ -73,6 +76,9 @@ func TestTrzArgs(t *testing.T) {
 	assertArgsEqual("--recursive", newTrzArgs(baseArgs{Directory: true, Recursive: true}, "."))
 	assertArgsEqual("--bufsize 2M", newTrzArgs(baseArgs{Bufsize: bufferSize{2 * 1024 * 1024}}, "."))
 	assertArgsEqual("--timeout 55", newTrzArgs(baseArgs{Timeout: 55}, "."))
+	assertArgsEqual("--compress No", newTrzArgs(baseArgs{Compress: kCompressNo}, "."))
+	assertArgsEqual("--compress yes", newTrzArgs(baseArgs{Compress: kCompressYes}, "."))
+	assertArgsEqual("--compress AUTO", newTrzArgs(baseArgs{Compress: kCompressAuto}, "."))
 
 	assertArgsEqual("-B1024", newTrzArgs(baseArgs{Bufsize: bufferSize{1024}}, "."))
 	assertArgsEqual("-B1025b", newTrzArgs(baseArgs{Bufsize: bufferSize{1025}}, "."))
@@ -84,8 +90,8 @@ func TestTrzArgs(t *testing.T) {
 
 	assertArgsEqual("-yq", newTrzArgs(baseArgs{Quiet: true, Overwrite: true}, "."))
 	assertArgsEqual("-bed", newTrzArgs(baseArgs{Binary: true, Escape: true, Directory: true}, "."))
-	assertArgsEqual("-yrB 2096", newTrzArgs(baseArgs{Overwrite: true, Directory: true, Recursive: true,
-		Bufsize: bufferSize{2096}}, "."))
+	assertArgsEqual("-yrB 2096 -cYes", newTrzArgs(baseArgs{Overwrite: true, Directory: true, Recursive: true,
+		Bufsize: bufferSize{2096}, Compress: kCompressYes}, "."))
 	assertArgsEqual("-ebt300", newTrzArgs(baseArgs{Binary: true, Escape: true, Timeout: 300}, "."))
 	assertArgsEqual("-yqB3K -eb -t 9 -d", newTrzArgs(baseArgs{Quiet: true, Overwrite: true,
 		Bufsize: bufferSize{3 * 1024}, Escape: true, Binary: true, Timeout: 9, Directory: true}, "."))
@@ -112,6 +118,7 @@ func TestTrzArgs(t *testing.T) {
 	assertArgsError("-B10", "less than 1K")
 	assertArgsError("-B10x", "invalid size 10x")
 	assertArgsError("-Bb", "invalid size b")
+	assertArgsError("-cy", "invalid compress type y")
 	assertArgsError("-tiii", "iii")
 	assertArgsError("-t --directory", "missing value")
 	assertArgsError("-x", "unknown argument -x")

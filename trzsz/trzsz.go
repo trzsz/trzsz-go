@@ -98,13 +98,15 @@ func handleSignal(pty *trzszPty, filter *TrzszFilter) {
 		}
 	}()
 
-	sigint := make(chan os.Signal, 1)
-	signal.Notify(sigint, os.Interrupt)
-	go func() {
-		for range sigint {
-			filter.StopTransferringFiles()
-		}
-	}()
+	if filter != nil {
+		sigint := make(chan os.Signal, 1)
+		signal.Notify(sigint, os.Interrupt)
+		go func() {
+			for range sigint {
+				filter.StopTransferringFiles()
+			}
+		}()
+	}
 }
 
 // TrzszMain is the main function of `trzsz` binary.
@@ -144,6 +146,8 @@ func TrzszMain() int {
 		NewTrzszRelay(os.Stdin, os.Stdout, pty.Stdin, pty.Stdout, TrzszOptions{
 			DetectTraceLog: args.TraceLog,
 		})
+		pty.OnResize(nil)
+		go handleSignal(pty, nil)
 	} else {
 		// new trzsz filter
 		columns, err := pty.GetColumns()

@@ -61,7 +61,7 @@ func TestTransferAction(t *testing.T) {
 
 	// client and server are Linux
 	SetAffectedByWindows(false)
-	err = clientTransfer.sendAction(true, "1.0.0", false)
+	err = clientTransfer.sendAction(true, nil, false)
 	assert.Nil(err)
 	writer.assertBufferCount(1)
 	assert.False(clientTransfer.windowsProtocol)
@@ -79,7 +79,7 @@ func TestTransferAction(t *testing.T) {
 
 	// client is Windows, server is Linux
 	SetAffectedByWindows(true)
-	err = clientTransfer.sendAction(true, "1.0.0", false)
+	err = clientTransfer.sendAction(true, nil, false)
 	assert.Nil(err)
 	writer.assertBufferCount(2)
 	assert.False(clientTransfer.windowsProtocol)
@@ -97,7 +97,7 @@ func TestTransferAction(t *testing.T) {
 
 	// client is Linux, server is Windows
 	SetAffectedByWindows(false)
-	err = clientTransfer.sendAction(true, "1.0.0", true)
+	err = clientTransfer.sendAction(true, nil, true)
 	assert.Nil(err)
 	writer.assertBufferCount(3)
 	assert.True(clientTransfer.windowsProtocol)
@@ -115,7 +115,7 @@ func TestTransferAction(t *testing.T) {
 
 	// client and server are Windows
 	SetAffectedByWindows(true)
-	err = clientTransfer.sendAction(true, "1.0.0", true)
+	err = clientTransfer.sendAction(true, nil, true)
 	assert.Nil(err)
 	writer.assertBufferCount(4)
 	assert.True(clientTransfer.windowsProtocol)

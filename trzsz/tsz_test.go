@@ -64,6 +64,9 @@ func TestTszArgs(t *testing.T) {
 	assertArgsEqual("-r a", newTszArgs(baseArgs{Directory: true, Recursive: true}, []string{"a"}))
 	assertArgsEqual("-B 2k a", newTszArgs(baseArgs{Bufsize: bufferSize{2 * 1024}}, []string{"a"}))
 	assertArgsEqual("-t 3 a", newTszArgs(baseArgs{Timeout: 3}, []string{"a"}))
+	assertArgsEqual("-cno a", newTszArgs(baseArgs{Compress: kCompressNo}, []string{"a"}))
+	assertArgsEqual("-c Yes a", newTszArgs(baseArgs{Compress: kCompressYes}, []string{"a"}))
+	assertArgsEqual("-c auto a", newTszArgs(baseArgs{Compress: kCompressAuto}, []string{"a"}))
 
 	assertArgsEqual("--quiet a", newTszArgs(baseArgs{Quiet: true}, []string{"a"}))
 	assertArgsEqual("--overwrite a", newTszArgs(baseArgs{Overwrite: true}, []string{"a"}))
@@ -73,6 +76,9 @@ func TestTszArgs(t *testing.T) {
 	assertArgsEqual("--recursive a", newTszArgs(baseArgs{Directory: true, Recursive: true}, []string{"a"}))
 	assertArgsEqual("--bufsize 2M a", newTszArgs(baseArgs{Bufsize: bufferSize{2 * 1024 * 1024}}, []string{"a"}))
 	assertArgsEqual("--timeout 55 a", newTszArgs(baseArgs{Timeout: 55}, []string{"a"}))
+	assertArgsEqual("--compress NO a", newTszArgs(baseArgs{Compress: kCompressNo}, []string{"a"}))
+	assertArgsEqual("--compress YES a", newTszArgs(baseArgs{Compress: kCompressYes}, []string{"a"}))
+	assertArgsEqual("--compress Auto a", newTszArgs(baseArgs{Compress: kCompressAuto}, []string{"a"}))
 
 	assertArgsEqual("-B1024 a", newTszArgs(baseArgs{Bufsize: bufferSize{1024}}, []string{"a"}))
 	assertArgsEqual("-B1025b a", newTszArgs(baseArgs{Bufsize: bufferSize{1025}}, []string{"a"}))
@@ -84,8 +90,8 @@ func TestTszArgs(t *testing.T) {
 
 	assertArgsEqual("-yq a", newTszArgs(baseArgs{Quiet: true, Overwrite: true}, []string{"a"}))
 	assertArgsEqual("-bed a", newTszArgs(baseArgs{Binary: true, Escape: true, Directory: true}, []string{"a"}))
-	assertArgsEqual("-yrB 2096 a", newTszArgs(baseArgs{Overwrite: true, Directory: true, Recursive: true,
-		Bufsize: bufferSize{2096}}, []string{"a"}))
+	assertArgsEqual("-yrB 2096 -cauto a", newTszArgs(baseArgs{Overwrite: true, Directory: true, Recursive: true,
+		Bufsize: bufferSize{2096}, Compress: kCompressAuto}, []string{"a"}))
 	assertArgsEqual("-ebt300 a", newTszArgs(baseArgs{Binary: true, Escape: true, Timeout: 300}, []string{"a"}))
 	assertArgsEqual("-yqB3K -eb -t 9 -d a", newTszArgs(baseArgs{Quiet: true, Overwrite: true,
 		Bufsize: bufferSize{3 * 1024}, Escape: true, Binary: true, Timeout: 9, Directory: true}, []string{"a"}))
@@ -113,6 +119,7 @@ func TestTszArgs(t *testing.T) {
 	assertArgsError("-B10 a", "less than 1K")
 	assertArgsError("-B10x a", "invalid size 10x")
 	assertArgsError("-Bb a", "invalid size b")
+	assertArgsError("-c y a", "invalid compress type y")
 	assertArgsError("-tiii a", "iii")
 	assertArgsError("-t --directory a", "missing value")
 	assertArgsError("-x a", "unknown argument -x")

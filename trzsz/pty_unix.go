@@ -75,7 +75,9 @@ func (t *trzszPty) OnResize(setTerminalColumns func(int32)) {
 				continue
 			}
 			_ = pty.Setsize(t.ptmx, size)
-			setTerminalColumns(int32(size.Cols))
+			if setTerminalColumns != nil {
+				setTerminalColumns(int32(size.Cols))
+			}
 		}
 	}()
 	t.ch <- syscall.SIGWINCH

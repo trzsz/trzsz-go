@@ -83,7 +83,7 @@ func sendFiles(transfer *trzszTransfer, files []*sourceFile, args *tszArgs, tmux
 
 	// check if the client doesn't support transfer directory
 	if args.Directory && !action.SupportDirectory {
-		return newSimpleTrzszError("The client doesn't support transfer directory")
+		return simpleTrzszError("The client doesn't support transfer directory")
 	}
 
 	var escapeChars [][]unicode

@@ -199,7 +199,9 @@ func (t *trzszPty) OnResize(setTerminalColumns func(int32)) {
 				t.width = width
 				t.height = height
 				t.cpty.Resize(width, height)
-				setTerminalColumns(int32(width))
+				if setTerminalColumns != nil {
+					setTerminalColumns(int32(width))
+				}
 			}
 		}
 	}()

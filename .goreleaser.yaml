@@ -32,11 +32,15 @@ builds:
       - darwin
 archives:
   - id: trzsz
-    replacements:
-      darwin: macos
-      386: i386
-      amd64: x86_64
-      arm64: aarch64
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- if eq .Os "darwin" }}macos_
+      {{- else }}{{ .Os }}_{{ end }}
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else if eq .Arch "arm64" }}aarch64
+      {{- else }}{{ .Arch }}{{ end }}
     wrap_in_directory: true
     format_overrides:
       - goos: windows
@@ -49,11 +53,15 @@ nfpms:
       - trz
       - tsz
       - trzsz
-    replacements:
-      amd64: 64-bit
-      386: 32-bit
-      darwin: macOS
-      linux: Tux
+    file_name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- if eq .Os "darwin" }}macos_
+      {{- else }}{{ .Os }}_{{ end }}
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else if eq .Arch "arm64" }}aarch64
+      {{- else }}{{ .Arch }}{{ end }}
     homepage: https://trzsz.github.io/
     maintainer: Lonny Wong <lonnywong@qq.com>
     description: |-
@@ -63,10 +71,6 @@ nfpms:
     formats:
       - rpm
     bindir: /usr/bin
-    overrides:
-      rpm:
-        replacements:
-          amd64: x86_64
     rpm:
       group: Unspecified
 snapshot:

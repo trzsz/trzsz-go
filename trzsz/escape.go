@@ -37,6 +37,8 @@ type unicode string
 
 type escapeArray [][]byte
 
+const escapeLeaderByte = '\xee'
+
 func (s unicode) MarshalJSON() ([]byte, error) {
 	b := new(bytes.Buffer)
 	b.WriteByte('"')
@@ -65,42 +67,41 @@ func getEscapeChars(escapeAll bool) [][]unicode {
 	return escapeChars
 }
 
-func isEscapeByte(b byte) bool {
-	return b == '\xee'
-}
-
 func escapeCharsToCodes(escapeChars []interface{}) ([][]byte, error) {
 	escapeCodes := make([][]byte, len(escapeChars))
 	encoder := charmap.ISO8859_1.NewEncoder()
 	for i, v := range escapeChars {
 		a, ok := v.([]interface{})
 		if !ok {
-			return nil, newSimpleTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
+			return nil, simpleTrzszError("Escape chars invalid: %#v", v)
 		}
 		if len(a) != 2 {
-			return nil, newSimpleTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
+			return nil, simpleTrzszError("Escape chars invalid: %#v", v)
 		}
 		b, ok := a[0].(string)
 		if !ok {
-			return nil, newSimpleTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
+			return nil, simpleTrzszError("Escape chars invalid: %#v", v)
 		}
 		bb, err := encoder.Bytes([]byte(b))
 		if err != nil {
 			return nil, err
 		}
 		if len(bb) != 1 {
-			return nil, newSimpleTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
+			return nil, simpleTrzszError("Escape chars invalid: %#v", v)
 		}
 		c, ok := a[1].(string)
 		if !ok {
-			return nil, newSimpleTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
+			return nil, simpleTrzszError("Escape chars invalid: %#v", v)
 		}
 		cc, err := encoder.Bytes([]byte(c))
 		if err != nil {
 			return nil, err
 		}
 		if len(cc) != 2 {
-			return nil, newSimpleTrzszError(fmt.Sprintf("escape chars invalid: %#v", v))
+			return nil, simpleTrzszError("Escape chars invalid: %#v", v)
+		}
+		if cc[0] != escapeLeaderByte {
+			return nil, simpleTrzszError("Escape chars invalid: %#v", v)
 		}
 		escapeCodes[i] = make([]byte, 3)
 		escapeCodes[i][0] = bb[0]
@@ -148,32 +149,42 @@ func escapeData(data []byte, escapeCodes [][]byte) []byte {
 	return buf[:idx]
 }
 
-func unescapeData(data []byte, escapeCodes [][]byte) []byte {
+func unescapeData(data []byte, escapeCodes [][]byte, dst []byte) ([]byte, []byte, error) {
 	if len(escapeCodes) == 0 {
-		return data
+		return data, nil, nil
 	}
 
 	size := len(data)
-	buf := make([]byte, size)
+	buf := dst
+	if len(buf) == 0 {
+		buf = make([]byte, size)
+	}
 	idx := 0
 	for i := 0; i < size; i++ {
-		escapeIdx := -1
-		if i < size-1 {
-			for j, e := range escapeCodes {
-				if data[i] == e[1] && data[i+1] == e[2] {
-					escapeIdx = j
+		if data[i] == escapeLeaderByte {
+			if i == size-1 {
+				return buf[:idx], data[i:], nil
+			}
+			i++
+			b := data[i]
+			escaped := false
+			for _, e := range escapeCodes {
+				if b == e[2] {
+					buf[idx] = e[0]
+					escaped = true
 					break
 				}
 			}
-		}
-		if escapeIdx < 0 {
-			buf[idx] = data[i]
-			idx++
+			if !escaped {
+				return nil, nil, simpleTrzszError("Unknown escape code: %#v", b)
+			}
 		} else {
-			buf[idx] = escapeCodes[escapeIdx][0]
-			idx++
-			i++
+			buf[idx] = data[i]
+		}
+		idx++
+		if idx == len(buf) {
+			return buf[:idx], data[i+1:], nil
 		}
 	}
-	return buf[:idx]
+	return buf[:idx], nil, nil
 }

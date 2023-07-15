@@ -62,17 +62,18 @@ type transferAction struct {
 }
 
 type transferConfig struct {
-	Quiet           bool        `json:"quiet"`
-	Binary          bool        `json:"binary"`
-	Directory       bool        `json:"directory"`
-	Overwrite       bool        `json:"overwrite"`
-	Timeout         int         `json:"timeout"`
-	Newline         string      `json:"newline"`
-	Protocol        int         `json:"protocol"`
-	MaxBufSize      int64       `json:"bufsize"`
-	EscapeCodes     escapeArray `json:"escape_chars"`
-	TmuxPaneColumns int32       `json:"tmux_pane_width"`
-	TmuxOutputJunk  bool        `json:"tmux_output_junk"`
+	Quiet           bool         `json:"quiet"`
+	Binary          bool         `json:"binary"`
+	Directory       bool         `json:"directory"`
+	Overwrite       bool         `json:"overwrite"`
+	Timeout         int          `json:"timeout"`
+	Newline         string       `json:"newline"`
+	Protocol        int          `json:"protocol"`
+	MaxBufSize      int64        `json:"bufsize"`
+	EscapeCodes     escapeArray  `json:"escape_chars"`
+	TmuxPaneColumns int32        `json:"tmux_pane_width"`
+	TmuxOutputJunk  bool         `json:"tmux_output_junk"`
+	CompressType    compressType `json:"compress"`
 }
 
 type trzszTransfer struct {
@@ -426,16 +427,20 @@ func (t *trzszTransfer) recvData() ([]byte, error) {
 		}
 		return nil, err
 	}
-	return unescapeData(data, t.transferConfig.EscapeCodes), nil
+	buf, remaining, err := unescapeData(data, t.transferConfig.EscapeCodes, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(remaining) != 0 {
+		return nil, simpleTrzszError("Unescape has bytes remaining: %#v", remaining)
+	}
+	return buf, nil
 }
 
-func (t *trzszTransfer) sendAction(confirm bool, serverVersion string, remoteIsWindows bool) error {
-	ver, err := parseTrzszVersion(serverVersion)
-	if err != nil {
-		return err
-	}
+func (t *trzszTransfer) sendAction(confirm bool, serverVersion *trzszVersion, remoteIsWindows bool) error {
 	protocol := kProtocolVersion
-	if ver.compare(&trzszVersion{1, 1, 3}) <= 0 && ver.compare(&trzszVersion{1, 1, 0}) >= 0 {
+	if serverVersion != nil &&
+		serverVersion.compare(&trzszVersion{1, 1, 3}) <= 0 && serverVersion.compare(&trzszVersion{1, 1, 0}) >= 0 {
 		protocol = 2 // compatible with older versions
 	}
 	action := &transferAction{
@@ -503,6 +508,9 @@ func (t *trzszTransfer) sendConfig(args *baseArgs, action *transferAction, escap
 	}
 	if action.Protocol > 0 {
 		cfgMap["protocol"] = minInt(action.Protocol, kProtocolVersion)
+	}
+	if args.Compress != kCompressAuto {
+		cfgMap["compress"] = args.Compress
 	}
 	cfgStr, err := json.Marshal(cfgMap)
 	if err != nil {
@@ -790,13 +798,13 @@ func (t *trzszTransfer) doCreateFile(path string, truncate bool) (*os.File, erro
 		if e, ok := err.(*fs.PathError); ok {
 			if errno, ok := e.Unwrap().(syscall.Errno); ok {
 				if (!isRunningOnWindows() && errno == 13) || (isRunningOnWindows() && errno == 5) {
-					return nil, newSimpleTrzszError(fmt.Sprintf("No permission to write: %s", path))
+					return nil, simpleTrzszError("No permission to write: %s", path)
 				} else if (!isRunningOnWindows() && errno == 21) || (isRunningOnWindows() && errno == 0x2000002a) {
-					return nil, newSimpleTrzszError(fmt.Sprintf("Is a directory: %s", path))
+					return nil, simpleTrzszError("Is a directory: %s", path)
 				}
 			}
 		}
-		return nil, newSimpleTrzszError(fmt.Sprintf("%v", err))
+		return nil, simpleTrzszError("Create file [%s] failed: %v", path, err)
 	}
 	return file, nil
 }
@@ -809,7 +817,7 @@ func (t *trzszTransfer) doCreateDirectory(path string) error {
 		return err
 	}
 	if !stat.IsDir() {
-		return newSimpleTrzszError(fmt.Sprintf("Not a directory: %s", path))
+		return simpleTrzszError("Not a directory: %s", path)
 	}
 	return nil
 }
@@ -959,7 +967,7 @@ func (t *trzszTransfer) recvFileMD5(digest []byte, progress progressCallback) er
 		return err
 	}
 	if bytes.Compare(digest, expectDigest) != 0 { // nolint:all
-		return newSimpleTrzszError("Check MD5 failed")
+		return simpleTrzszError("Check MD5 failed")
 	}
 	if err := t.sendBinary("SUCC", digest); err != nil {
 		return err

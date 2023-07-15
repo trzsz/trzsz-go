@@ -153,7 +153,7 @@ func TestTrzszVersion(t *testing.T) {
 func TestTrzszDetector(t *testing.T) {
 	assert := assert.New(t)
 	detector := newTrzszDetector(false, false)
-	assertDetectTrzsz := func(output string, mode *byte, ver string, win bool) {
+	assertDetectTrzsz := func(output string, mode *byte, ver *trzszVersion, win bool) {
 		t.Helper()
 		buf, m, v, w := detector.detectTrzsz([]byte(output))
 		if mode == nil {
@@ -166,58 +166,58 @@ func TestTrzszDetector(t *testing.T) {
 		assert.Equal(win, w)
 	}
 
-	assertDetectTrzsz("", nil, "", false)
-	assertDetectTrzsz("ABC", nil, "", false)
-	assertDetectTrzsz(strings.Repeat("A::", 10), nil, "", false)
-	assertDetectTrzsz("::TRZSZ:TRANSFER:R:", nil, "", false)
+	assertDetectTrzsz("", nil, nil, false)
+	assertDetectTrzsz("ABC", nil, nil, false)
+	assertDetectTrzsz(strings.Repeat("A::", 10), nil, nil, false)
+	assertDetectTrzsz("::TRZSZ:TRANSFER:R:", nil, nil, false)
 
 	// normal trzsz trigger
 	R := byte('R')
 	D := byte('D')
 	S := byte('S')
-	assertDetectTrzsz("::TRZSZ:TRANSFER:"+"R:1.0.0:0", &R, "1.0.0", false)
-	assertDetectTrzsz("ABC::TRZSZ:TRANSFER:"+"D:1.0.0:123", &D, "1.0.0", false)
-	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1", &S, "1.0.0", true)
-	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:1234", &S, "1.0.0", true)
-	assertDetectTrzsz("XYX\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:7890", &S, "1.0.0", true)
-	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:1234ABC\n", &S, "1.0.0", true)
-	assertDetectTrzsz("XYX\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:7890EFG\r\n", &S, "1.0.0", true)
+	assertDetectTrzsz("::TRZSZ:TRANSFER:"+"R:1.0.0:0", &R, &trzszVersion{1, 0, 0}, false)
+	assertDetectTrzsz("ABC::TRZSZ:TRANSFER:"+"D:1.0.0:123", &D, &trzszVersion{1, 0, 0}, false)
+	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1", &S, &trzszVersion{1, 0, 0}, true)
+	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:1234", &S, &trzszVersion{1, 0, 0}, true)
+	assertDetectTrzsz("XYX\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:7890", &S, &trzszVersion{1, 0, 0}, true)
+	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:1234ABC\n", &S, &trzszVersion{1, 0, 0}, true)
+	assertDetectTrzsz("XYX\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:7890EFG\r\n", &S, &trzszVersion{1, 0, 0}, true)
 
 	// repeated trigger
 	uniqueID := time.Now().UnixMilli() % 10e10
-	assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", uniqueID*100+10), &R, "1.1.0", true)
+	assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", uniqueID*100+10), &R, &trzszVersion{1, 1, 0}, true)
 	for i := 0; i <= 100; i++ {
-		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), &R, "1.1.0", true)
-		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), nil, "", false)
+		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), &R, &trzszVersion{1, 1, 0}, true)
+		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), nil, nil, false)
 		if i > 0 {
-			assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", (i-1)*100+10), nil, "", false)
+			assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", (i-1)*100+10), nil, nil, false)
 		}
 	}
 	for i := 0; i < 49; i++ {
-		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), &R, "1.1.0", true)
-		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), nil, "", false)
+		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), &R, &trzszVersion{1, 1, 0}, true)
+		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), nil, nil, false)
 		if i > 0 {
-			assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", (i-1)*100+10), nil, "", false)
+			assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", (i-1)*100+10), nil, nil, false)
 		}
 	}
 
 	// ignore tmux control mode
-	assertDetectTrzsz("%output %1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", nil, "", false)
-	assertDetectTrzsz("%output %23 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", nil, "", false)
-	assertDetectTrzsz("%extended-output %0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", nil, "", false)
-	assertDetectTrzsz("%extended-output %10 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", nil, "", false)
+	assertDetectTrzsz("%output %1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", nil, nil, false)
+	assertDetectTrzsz("%output %23 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", nil, nil, false)
+	assertDetectTrzsz("%extended-output %0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", nil, nil, false)
+	assertDetectTrzsz("%extended-output %10 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", nil, nil, false)
 
-	assertDetectTrzsz("%output %x \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, "1.0.0", false)
-	assertDetectTrzsz("%output 1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, "1.0.0", false)
-	assertDetectTrzsz("%output % \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, "1.0.0", false)
-	assertDetectTrzsz("output %1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, "1.0.0", false)
+	assertDetectTrzsz("%output %x \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
+	assertDetectTrzsz("%output 1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
+	assertDetectTrzsz("%output % \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
+	assertDetectTrzsz("output %1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
 
-	assertDetectTrzsz("%extended-output %a 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, "1.0.0", false)
-	assertDetectTrzsz("%extended-output %0 b : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, "1.0.0", false)
-	assertDetectTrzsz("extended-output %0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, "1.0.0", false)
-	assertDetectTrzsz("%extended-output 0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, "1.0.0", false)
-	assertDetectTrzsz("%extended-output % 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, "1.0.0", false)
-	assertDetectTrzsz("%extended-output %0 0 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, "1.0.0", false)
+	assertDetectTrzsz("%extended-output %a 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
+	assertDetectTrzsz("%extended-output %0 b : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
+	assertDetectTrzsz("extended-output %0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
+	assertDetectTrzsz("%extended-output 0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
+	assertDetectTrzsz("%extended-output % 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
+	assertDetectTrzsz("%extended-output %0 0 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
 }
 
 func TestRelayDetector(t *testing.T) {
@@ -233,7 +233,7 @@ func TestRelayDetector(t *testing.T) {
 		assert.Equal(mode, m)
 		assert.Equal(win, w)
 		if mode != nil {
-			assert.Equal("1.0.0", v)
+			assert.Equal(&trzszVersion{1, 0, 0}, v)
 		}
 	}
 

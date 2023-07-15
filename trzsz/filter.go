@@ -59,7 +59,7 @@ type TrzszFilter struct {
 	options         TrzszOptions
 	transfer        atomic.Pointer[trzszTransfer]
 	progress        atomic.Pointer[textProgressBar]
-	serverVersion   string
+	serverVersion   *trzszVersion
 	remoteIsWindows bool
 	dragging        atomic.Bool
 	dragHasDir      atomic.Bool
@@ -135,10 +135,10 @@ func (filter *TrzszFilter) UploadFiles(filePaths []string) error {
 		}
 	}
 	if filter.IsTransferringFiles() {
-		return newSimpleTrzszError("Is transferring files now")
+		return simpleTrzszError("Is transferring files now")
 	}
 	if filter.dragging.Load() {
-		return newSimpleTrzszError("Is dragging files to upload")
+		return simpleTrzszError("Is dragging files to upload")
 	}
 	filter.addDragFiles(filePaths, hasDir, false)
 	return nil
@@ -435,14 +435,14 @@ func (filter *TrzszFilter) wrapOutput() {
 				buffer = make([]byte, bufSize)
 				continue
 			}
+			var win bool
 			var mode *byte
-			var serverVersion string
-			var remoteIsWindows bool
-			buf, mode, serverVersion, remoteIsWindows = detector.detectTrzsz(buf)
+			var ver *trzszVersion
+			buf, mode, ver, win = detector.detectTrzsz(buf)
 			if mode != nil {
 				_ = writeAll(filter.clientOut, buf)
-				filter.serverVersion = serverVersion
-				filter.remoteIsWindows = remoteIsWindows
+				filter.serverVersion = ver
+				filter.remoteIsWindows = win
 				go filter.handleTrzsz(*mode)
 				continue
 			}

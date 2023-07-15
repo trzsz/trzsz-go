@@ -43,6 +43,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 var timeNowFunc = time.Now
@@ -88,15 +90,24 @@ type bufferSize struct {
 	Size int64
 }
 
+type compressType int
+
+const (
+	kCompressAuto = 0
+	kCompressYes  = 1
+	kCompressNo   = 2
+)
+
 type baseArgs struct {
-	Quiet     bool       `arg:"-q" help:"quiet (hide progress bar)"`
-	Overwrite bool       `arg:"-y" help:"yes, overwrite existing file(s)"`
-	Binary    bool       `arg:"-b" help:"binary transfer mode, faster for binary files"`
-	Escape    bool       `arg:"-e" help:"escape all known control characters"`
-	Directory bool       `arg:"-d" help:"transfer directories and files"`
-	Recursive bool       `arg:"-r" help:"transfer directories and files, same as -d"`
-	Bufsize   bufferSize `arg:"-B" placeholder:"N" default:"10M" help:"max buffer chunk size (1K<=N<=1G). (default: 10M)"`
-	Timeout   int        `arg:"-t" placeholder:"N" default:"20" help:"timeout ( N seconds ) for each buffer chunk.\nN <= 0 means never timeout. (default: 20)"`
+	Quiet     bool         `arg:"-q" help:"quiet (hide progress bar)"`
+	Overwrite bool         `arg:"-y" help:"yes, overwrite existing file(s)"`
+	Binary    bool         `arg:"-b" help:"binary transfer mode, faster for binary files"`
+	Escape    bool         `arg:"-e" help:"escape all known control characters"`
+	Directory bool         `arg:"-d" help:"transfer directories and files"`
+	Recursive bool         `arg:"-r" help:"transfer directories and files, same as -d"`
+	Bufsize   bufferSize   `arg:"-B" placeholder:"N" default:"10M" help:"max buffer chunk size (1K<=N<=1G). (default: 10M)"`
+	Timeout   int          `arg:"-t" placeholder:"N" default:"20" help:"timeout ( N seconds ) for each buffer chunk.\nN <= 0 means never timeout. (default: 20)"`
+	Compress  compressType `arg:"-c" placeholder:"yes/no/auto" default:"auto" help:"compress type (default: auto)"`
 }
 
 var sizeRegexp = regexp.MustCompile(`(?i)^(\d+)(b|k|m|g|kb|mb|gb)?$`)
@@ -132,6 +143,32 @@ func (b *bufferSize) UnmarshalText(buf []byte) error {
 		return fmt.Errorf("greater than 1G")
 	}
 	b.Size = sizeValue
+	return nil
+}
+
+func (c *compressType) UnmarshalText(buf []byte) error {
+	str := strings.ToLower(strings.TrimSpace(string(buf)))
+	switch str {
+	case "auto":
+		*c = kCompressAuto
+		return nil
+	case "yes":
+		*c = kCompressYes
+		return nil
+	case "no":
+		*c = kCompressNo
+		return nil
+	default:
+		return fmt.Errorf("invalid compress type %s", str)
+	}
+}
+
+func (c *compressType) UnmarshalJSON(data []byte) error {
+	var compress int
+	if err := json.Unmarshal(data, &compress); err != nil {
+		return err
+	}
+	*c = compressType(compress)
 	return nil
 }
 
@@ -171,8 +208,8 @@ type trzszError struct {
 }
 
 var (
-	errStopped            = newSimpleTrzszError("Stopped")
-	errReceiveDataTimeout = newSimpleTrzszError("Receive data timeout")
+	errStopped            = simpleTrzszError("Stopped")
+	errReceiveDataTimeout = simpleTrzszError("Receive data timeout")
 )
 
 func newTrzszError(message string, errType string, trace bool) *trzszError {
@@ -193,8 +230,8 @@ func newTrzszError(message string, errType string, trace bool) *trzszError {
 	return err
 }
 
-func newSimpleTrzszError(message string) *trzszError {
-	return newTrzszError(message, "", false)
+func simpleTrzszError(format string, a ...any) *trzszError {
+	return newTrzszError(fmt.Sprintf(format, a...), "", false)
 }
 
 func (e *trzszError) Error() string {
@@ -219,15 +256,15 @@ func (e *trzszError) isRemoteFail() bool {
 func checkPathWritable(path string) error {
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
-		return newSimpleTrzszError(fmt.Sprintf("No such directory: %s", path))
+		return simpleTrzszError("No such directory: %s", path)
 	} else if err != nil {
 		return err
 	}
 	if !info.IsDir() {
-		return newSimpleTrzszError(fmt.Sprintf("Not a directory: %s", path))
+		return simpleTrzszError("Not a directory: %s", path)
 	}
 	if syscallAccessWok(path) != nil {
-		return newSimpleTrzszError(fmt.Sprintf("No permission to write: %s", path))
+		return simpleTrzszError("No permission to write: %s", path)
 	}
 	return nil
 }
@@ -260,7 +297,7 @@ func unmarshalSourceFile(source string) (*sourceFile, error) {
 		return nil, err
 	}
 	if len(file.RelPath) < 1 {
-		return nil, newSimpleTrzszError(fmt.Sprintf("Invalid source file: %s", source))
+		return nil, simpleTrzszError("Invalid source file: %s", source)
 	}
 	return &file, nil
 }
@@ -284,7 +321,7 @@ func unmarshalTargetFile(target string) (*targetFile, error) {
 		return nil, err
 	}
 	if file.Size < 0 {
-		return nil, newSimpleTrzszError(fmt.Sprintf("Invalid target file: %s", target))
+		return nil, simpleTrzszError("Invalid target file: %s", target)
 	}
 	return &file, nil
 }
@@ -293,10 +330,10 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*sourc
 	relPath []string, visitedDir map[string]bool) error {
 	if !info.IsDir() {
 		if !info.Mode().IsRegular() {
-			return newSimpleTrzszError(fmt.Sprintf("Not a regular file: %s", path))
+			return simpleTrzszError("Not a regular file: %s", path)
 		}
 		if syscallAccessRok(path) != nil {
-			return newSimpleTrzszError(fmt.Sprintf("No permission to read: %s", path))
+			return simpleTrzszError("No permission to read: %s", path)
 		}
 		*list = append(*list, &sourceFile{pathID, path, relPath, false})
 		return nil
@@ -306,17 +343,17 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*sourc
 		return err
 	}
 	if _, ok := visitedDir[realPath]; ok {
-		return newSimpleTrzszError(fmt.Sprintf("Duplicate link: %s", path))
+		return simpleTrzszError("Duplicate link: %s", path)
 	}
 	visitedDir[realPath] = true
 	*list = append(*list, &sourceFile{pathID, path, relPath, true})
 	fileObj, err := os.Open(path)
 	if err != nil {
-		return newSimpleTrzszError(fmt.Sprintf("Open [%s] error: %v", path, err))
+		return simpleTrzszError("Open [%s] error: %v", path, err)
 	}
 	files, err := fileObj.Readdir(-1)
 	if err != nil {
-		return newSimpleTrzszError(fmt.Sprintf("Readdir [%s] error: %v", path, err))
+		return simpleTrzszError("Readdir [%s] error: %v", path, err)
 	}
 	for _, file := range files {
 		p := filepath.Join(path, file.Name())
@@ -343,12 +380,12 @@ func checkPathsReadable(paths []string, directory bool) ([]*sourceFile, error) {
 		}
 		info, err := os.Stat(path)
 		if os.IsNotExist(err) {
-			return nil, newSimpleTrzszError(fmt.Sprintf("No such file: %s", path))
+			return nil, simpleTrzszError("No such file: %s", path)
 		} else if err != nil {
 			return nil, err
 		}
 		if !directory && info.IsDir() {
-			return nil, newSimpleTrzszError(fmt.Sprintf("Is a directory: %s", path))
+			return nil, simpleTrzszError("Is a directory: %s", path)
 		}
 		visitedDir := make(map[string]bool)
 		if err := checkPathReadable(i, path, info, &list, []string{info.Name()}, visitedDir); err != nil {
@@ -363,7 +400,7 @@ func checkDuplicateNames(sourceFiles []*sourceFile) error {
 	for _, srcFile := range sourceFiles {
 		p := filepath.Join(srcFile.RelPath...)
 		if _, ok := m[p]; ok {
-			return newSimpleTrzszError(fmt.Sprintf("Duplicate name: %s", p))
+			return simpleTrzszError("Duplicate name: %s", p)
 		}
 		m[p] = true
 	}
@@ -380,7 +417,7 @@ func getNewName(path, name string) (string, error) {
 			return newName, nil
 		}
 	}
-	return "", newSimpleTrzszError("Fail to assign new file name")
+	return "", simpleTrzszError("Fail to assign new file name")
 }
 
 type tmuxModeType int
@@ -526,13 +563,13 @@ type trzszVersion [3]uint32
 func parseTrzszVersion(ver string) (*trzszVersion, error) {
 	tokens := strings.Split(ver, ".")
 	if len(tokens) != 3 {
-		return nil, newSimpleTrzszError(fmt.Sprintf("version [%s] invalid", ver))
+		return nil, simpleTrzszError("Version [%s] invalid", ver)
 	}
 	var version trzszVersion
 	for i := 0; i < 3; i++ {
 		v, err := strconv.ParseUint(tokens[i], 10, 32)
 		if err != nil {
-			return nil, newSimpleTrzszError(fmt.Sprintf("version [%s] invalid", ver))
+			return nil, simpleTrzszError("Version [%s] invalid", ver)
 		}
 		version[i] = uint32(v)
 	}
@@ -598,13 +635,13 @@ func (detector *trzszDetector) addRelaySuffix(output []byte, idx int) []byte {
 	return buf.Bytes()
 }
 
-func (detector *trzszDetector) detectTrzsz(output []byte) ([]byte, *byte, string, bool) {
+func (detector *trzszDetector) detectTrzsz(output []byte) ([]byte, *byte, *trzszVersion, bool) {
 	if len(output) < 24 {
-		return output, nil, "", false
+		return output, nil, nil, false
 	}
 	idx := bytes.LastIndex(output, []byte("::TRZSZ:TRANSFER:"))
 	if idx < 0 {
-		return output, nil, "", false
+		return output, nil, nil, false
 	}
 
 	if detector.relay && detector.tmux {
@@ -612,12 +649,28 @@ func (detector *trzszDetector) detectTrzsz(output []byte) ([]byte, *byte, string
 		idx = bytes.LastIndex(output, []byte("::TRZSZ:TRANSFER:"))
 	}
 
-	match := trzszRegexp.FindSubmatch(output[idx:])
+	subOutput := output[idx:]
+	match := trzszRegexp.FindSubmatch(subOutput)
 	if len(match) < 3 {
-		return output, nil, "", false
+		return output, nil, nil, false
 	}
 	if tmuxControlModeRegexp.Match(output) {
-		return output, nil, "", false
+		return output, nil, nil, false
+	}
+
+	if len(subOutput) > 40 {
+		for _, s := range []string{"#CFG:", "Saved", "Cancelled", "Stopped", "Interrupted"} {
+			if bytes.Contains(subOutput[40:], []byte(s)) {
+				return output, nil, nil, false
+			}
+		}
+	}
+
+	mode := match[1][0]
+
+	serverVersion, err := parseTrzszVersion(string(match[2]))
+	if err != nil {
+		return output, nil, nil, false
 	}
 
 	uniqueID := ""
@@ -626,7 +679,7 @@ func (detector *trzszDetector) detectTrzsz(output []byte) ([]byte, *byte, string
 	}
 	if len(uniqueID) >= 8 && (isWindowsEnvironment() || !(len(uniqueID) == 14 && strings.HasSuffix(uniqueID, "00"))) {
 		if _, ok := detector.uniqueIDMap[uniqueID]; ok {
-			return output, nil, "", false
+			return output, nil, nil, false
 		}
 		if len(detector.uniqueIDMap) > 100 {
 			m := make(map[string]int)
@@ -651,7 +704,7 @@ func (detector *trzszDetector) detectTrzsz(output []byte) ([]byte, *byte, string
 		output = bytes.ReplaceAll(output, []byte("TRZSZ"), []byte("TRZSZGO"))
 	}
 
-	return output, &match[1][0], string(match[2]), remoteIsWindows
+	return output, &mode, serverVersion, remoteIsWindows
 }
 
 type traceLogger struct {
@@ -714,6 +767,71 @@ func (logger *traceLogger) writeTraceLog(buf []byte, typ string) []byte {
 		return bytes.ReplaceAll(buf, []byte("<ENABLE_TRZSZ_TRACE_LOG>"), []byte(msg))
 	}
 	return buf
+}
+
+const compressedBlockSize = 128 << 10
+
+func isCompressedFileContent(file *os.File, pos int64) (bool, error) {
+	if _, err := file.Seek(pos, io.SeekStart); err != nil {
+		return false, err
+	}
+
+	buffer := make([]byte, compressedBlockSize)
+	_, err := io.ReadFull(file, buffer)
+	if err != nil {
+		return false, err
+	}
+
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		return false, err
+	}
+	dst := make([]byte, 0, compressedBlockSize+0x20)
+	return len(encoder.EncodeAll(buffer, dst)) > compressedBlockSize*98/100, nil
+}
+
+func isCompressionProfitable(file *os.File, size int64) (bool, error) {
+	pos, err := file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return false, err
+	}
+
+	compressedCount := 0
+	if size >= compressedBlockSize {
+		compressed, err := isCompressedFileContent(file, pos)
+		if err != nil {
+			return false, err
+		}
+		if compressed {
+			compressedCount++
+		}
+	}
+
+	if size >= 2*compressedBlockSize {
+		compressed, err := isCompressedFileContent(file, pos+size-compressedBlockSize)
+		if err != nil {
+			return false, err
+		}
+		if compressed {
+			compressedCount++
+		}
+	}
+
+	if size >= 3*compressedBlockSize {
+		compressed, err := isCompressedFileContent(file, pos+(size/2)-(compressedBlockSize/2))
+		if err != nil {
+			return false, err
+		}
+		if compressed {
+			compressedCount++
+		}
+	}
+
+	if _, err := file.Seek(pos, io.SeekStart); err != nil {
+		return false, err
+	}
+
+	return compressedCount < 2, nil
 }
 
 func formatSavedFileNames(fileNames []string, dstPath string) string {

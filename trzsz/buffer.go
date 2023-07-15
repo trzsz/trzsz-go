@@ -124,7 +124,7 @@ func (b *trzszBuffer) readLine(mayHasJunk bool, timeout <-chan time.Time) ([]byt
 			b.nextIdx += len(buf)
 		}
 		if bytes.IndexByte(buf, '\x03') >= 0 { // `ctrl + c` to interrupt
-			return nil, newSimpleTrzszError("Interrupted")
+			return nil, simpleTrzszError("Interrupted")
 		}
 		b.readBuf.Write(buf)
 		if newLineIdx >= 0 {
@@ -205,7 +205,7 @@ func (b *trzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error
 		for i := 0; i < len(buf); i++ {
 			c := buf[i]
 			if c == '\x03' { // `ctrl + c` to interrupt
-				return nil, newSimpleTrzszError("Interrupted")
+				return nil, simpleTrzszError("Interrupted")
 			}
 			if c == '\n' {
 				hasNewline = true
