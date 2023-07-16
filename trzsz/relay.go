@@ -281,6 +281,12 @@ func (r *trzszRelay) handshake() {
 	confirm = true
 }
 
+func (r *trzszRelay) resetToStandby() {
+	if r.relayStatus.CompareAndSwap(kRelayTransferring, kRelayStandBy) {
+		tmuxRefreshClient()
+	}
+}
+
 func (r *trzszRelay) wrapInput() {
 	defer close(r.osStdinChan)
 	for {
@@ -304,11 +310,11 @@ func (r *trzszRelay) wrapInput() {
 			r.osStdinChan <- buf
 			if status == kRelayTransferring {
 				if buf[0] == '\x03' { // `ctrl + c` to stop
-					r.relayStatus.Store(kRelayStandBy)
+					r.resetToStandby()
 				} else if bytes.Contains(buf, []byte("#EXIT:")) { // transfer exit
-					r.relayStatus.Store(kRelayStandBy)
+					r.resetToStandby()
 				} else if bytes.Contains(buf, []byte("#FAIL:")) || bytes.Contains(buf, []byte("#fail:")) { // transfer error
-					r.relayStatus.Store(kRelayStandBy)
+					r.resetToStandby()
 				}
 			}
 		}
@@ -343,9 +349,9 @@ func (r *trzszRelay) wrapOutput() {
 			if status == kRelayTransferring {
 				r.bypassTmuxChan <- buf
 				if bytes.Contains(buf, []byte("#EXIT:")) { // transfer exit
-					r.relayStatus.Store(kRelayStandBy)
+					r.resetToStandby()
 				} else if bytes.Contains(buf, []byte("#FAIL:")) || bytes.Contains(buf, []byte("#fail:")) { // transfer error
-					r.relayStatus.Store(kRelayStandBy)
+					r.resetToStandby()
 				}
 				continue
 			}

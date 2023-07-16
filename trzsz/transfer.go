@@ -80,6 +80,7 @@ type trzszTransfer struct {
 	buffer           *trzszBuffer
 	writer           io.Writer
 	stopped          atomic.Bool
+	stopAndDelete    atomic.Bool
 	pausing          atomic.Bool
 	pauseIdx         atomic.Uint32
 	pauseBeginTime   atomic.Int64
@@ -98,6 +99,7 @@ type trzszTransfer struct {
 	savedSteps       atomic.Int64
 	transferConfig   transferConfig
 	logger           *traceLogger
+	createdFiles     []string
 }
 
 func maxDuration(a, b time.Duration) time.Duration {
@@ -148,10 +150,11 @@ func (t *trzszTransfer) addReceivedData(buf []byte) {
 	t.lastInputTime.Store(time.Now().UnixMilli())
 }
 
-func (t *trzszTransfer) stopTransferringFiles() {
+func (t *trzszTransfer) stopTransferringFiles(stopAndDelete bool) {
 	if t.stopped.Load() {
 		return
 	}
+	t.stopAndDelete.Store(stopAndDelete)
 	t.stopped.Store(true)
 	t.buffer.stopBuffer()
 
@@ -186,6 +189,9 @@ func (t *trzszTransfer) resumeTransferringFiles() {
 }
 
 func (t *trzszTransfer) checkStop() error {
+	if t.stopAndDelete.Load() {
+		return errStoppedAndDeleted
+	}
 	if t.stopped.Load() {
 		return errStopped
 	}
@@ -554,6 +560,22 @@ func (t *trzszTransfer) serverExit(msg string) {
 	}
 	os.Stdout.WriteString(msg)
 	os.Stdout.WriteString("\r\n")
+	if t.transferConfig.TmuxOutputJunk {
+		tmuxRefreshClient()
+	}
+}
+
+func (t *trzszTransfer) deleteCreatedFiles() []string {
+	var deletedFiles []string
+	for _, path := range t.createdFiles {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			continue
+		}
+		if err := os.RemoveAll(path); err == nil {
+			deletedFiles = append(deletedFiles, path)
+		}
+	}
+	return deletedFiles
 }
 
 func (t *trzszTransfer) clientError(err error) {
@@ -563,6 +585,14 @@ func (t *trzszTransfer) clientError(err error) {
 	if e, ok := err.(*trzszError); ok {
 		trace = e.isTraceBack()
 		if e.isRemoteExit() || e.isRemoteFail() {
+			return
+		}
+	}
+
+	if t.stopAndDelete.Load() {
+		deletedFiles := t.deleteCreatedFiles()
+		if len(deletedFiles) > 0 {
+			_ = t.sendString("fail", joinFileNames(err.Error()+":", deletedFiles))
 			return
 		}
 	}
@@ -579,6 +609,13 @@ func (t *trzszTransfer) serverError(err error) {
 
 	trace := true
 	if e, ok := err.(*trzszError); ok {
+		if e.isStopAndDelete() {
+			deletedFiles := t.deleteCreatedFiles()
+			if len(deletedFiles) > 0 {
+				t.serverExit(joinFileNames(err.Error()+":", deletedFiles))
+				return
+			}
+		}
 		trace = e.isTraceBack()
 		if e.isRemoteExit() || e.isRemoteFail() {
 			t.serverExit(e.Error())
@@ -788,6 +825,10 @@ func (t *trzszTransfer) recvFileNum(progress progressCallback) (int64, error) {
 	return num, nil
 }
 
+func (t *trzszTransfer) addCreatedFiles(path string) {
+	t.createdFiles = append(t.createdFiles, path)
+}
+
 func (t *trzszTransfer) doCreateFile(path string, truncate bool) (*os.File, error) {
 	flag := os.O_RDWR | os.O_CREATE
 	if truncate {
@@ -806,13 +847,19 @@ func (t *trzszTransfer) doCreateFile(path string, truncate bool) (*os.File, erro
 		}
 		return nil, simpleTrzszError("Create file [%s] failed: %v", path, err)
 	}
+	t.addCreatedFiles(path)
 	return file, nil
 }
 
 func (t *trzszTransfer) doCreateDirectory(path string) error {
 	stat, err := os.Stat(path)
 	if os.IsNotExist(err) {
-		return os.MkdirAll(path, 0755)
+		err := os.MkdirAll(path, 0755)
+		if err != nil {
+			return err
+		}
+		t.addCreatedFiles(path)
+		return nil
 	} else if err != nil {
 		return err
 	}

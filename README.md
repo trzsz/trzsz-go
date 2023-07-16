@@ -1,17 +1,23 @@
 # trzsz-go
 
-[trzsz](https://github.com/trzsz/trzsz) ( trz / tsz ) is a simple file transfer tools, similar to lrzsz ( rz / sz ), and compatible with tmux.
+[trzsz](https://trzsz.github.io/) ( trz / tsz ) is a simple file transfer tools, similar to lrzsz ( rz / sz ), and compatible with tmux.
+
+Website: [https://trzsz.github.io/go](https://trzsz.github.io/go) 　中文文档：[https://trzsz.github.io/cn/go](https://trzsz.github.io/cn/go)
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg?style=flat)](https://choosealicense.com/licenses/mit/)
 [![GitHub Release](https://img.shields.io/github/v/release/trzsz/trzsz-go)](https://github.com/trzsz/trzsz-go/releases)
 
-**_Please check [https://github.com/trzsz/trzsz](https://github.com/trzsz/trzsz) for more information of `trzsz`._**
+**_Please check [https://trzsz.github.io](https://trzsz.github.io) for more information of `trzsz`._**
 
 `trzsz-go` is the `go` version of `trzsz`, supports native terminals that support a local shell.
 
+⭐ It's recommended to use the `go` version of `trzsz` on the server.
+
 ## Installation
 
-- Install with apt on Ubuntu<details><summary><code>sudo apt install trzsz</code></summary>
+- Install with apt on Ubuntu
+
+  <details><summary><code>sudo apt install trzsz</code></summary>
 
   ```sh
   sudo apt update && sudo apt install software-properties-common
@@ -22,7 +28,9 @@
 
   </details>
 
-- Install with apt on Debian<details><summary><code>sudo apt install trzsz</code></summary>
+- Install with apt on Debian
+
+  <details><summary><code>sudo apt install trzsz</code></summary>
 
   ```sh
   sudo apt install curl gpg
@@ -37,21 +45,35 @@
 
   </details>
 
-- Install with yum on Linux<details><summary><code>sudo yum install trzsz</code></summary>
+- Install with yum on Linux
 
-  ```sh
-  echo '[trzsz]
-  name=Trzsz Repo
-  baseurl=https://yum.fury.io/trzsz/
-  enabled=1
-  gpgcheck=0' | sudo tee /etc/yum.repos.d/trzsz.repo
+  <details><summary><code>sudo yum install trzsz</code></summary>
 
-  sudo yum install trzsz
-  ```
+  - Install with [gemfury](https://gemfury.com/) repository.
+
+    ```sh
+    echo '[trzsz]
+    name=Trzsz Repo
+    baseurl=https://yum.fury.io/trzsz/
+    enabled=1
+    gpgcheck=0' | sudo tee /etc/yum.repos.d/trzsz.repo
+
+    sudo yum install trzsz
+    ```
+
+  - Install with [wlnmp](https://www.wlnmp.com/install) repository. It's not necessary to configure the epel repository for trzsz, take CentOS as an example:
+
+    ```sh
+    sudo rpm -ivh https://mirrors.wlnmp.com/centos/wlnmp-release-centos.noarch.rpm
+
+    sudo yum install trzsz
+    ```
 
   </details>
 
-- Install with [yay](https://github.com/Jguer/yay) on ArchLinux<details><summary><code>yay -S trzsz</code></summary>
+- Install with [yay](https://github.com/Jguer/yay) on ArchLinux
+
+  <details><summary><code>yay -S trzsz</code></summary>
 
   ```sh
   yay -Syu
@@ -60,7 +82,9 @@
 
   </details>
 
-- Install with [homebrew](https://brew.sh/) on MacOS<details><summary><code>brew install trzsz-go</code></summary>
+- Install with [homebrew](https://brew.sh/) on MacOS
+
+  <details><summary><code>brew install trzsz-go</code></summary>
 
   ```sh
   brew update
@@ -69,7 +93,9 @@
 
   </details>
 
-- Install with [scoop](https://scoop.sh/) on Windows<details><summary><code>scoop install trzsz</code></summary>
+- Install with [scoop](https://scoop.sh/) on Windows
+
+  <details><summary><code>scoop install trzsz</code></summary>
 
   ```sh
   scoop bucket add extras
@@ -79,7 +105,9 @@
 
   </details>
 
-- Install with Go ( Requires go 1.20 or later )<details><summary><code>go install github.com/trzsz/trzsz-go/cmd/...@latest</code></summary>
+- Install with Go ( Requires go 1.20 or later )
+
+  <details><summary><code>go install github.com/trzsz/trzsz-go/cmd/...@latest</code></summary>
 
   ```sh
   go install github.com/trzsz/trzsz-go/cmd/trz@latest
@@ -91,7 +119,9 @@
 
   </details>
 
-- Download from the [Releases](https://github.com/trzsz/trzsz-go/releases)<details><summary><code>Or build and install from the source code ( Requires go 1.20 or later )</code></summary>
+- Download from the [Releases](https://github.com/trzsz/trzsz-go/releases)
+
+  <details><summary><code>Or build and install from the source code ( Requires go 1.20 or later )</code></summary>
 
   ```sh
   git clone https://github.com/trzsz/trzsz-go.git
@@ -126,9 +156,9 @@
 - If using `tmux` on the jump server, use `trzsz --relay ssh` to login to the remote server, e.g.:
 
   ```sh
+  trzsz ssh jump_server
   tmux
-  trzsz -r ssh x.x.x.x
-  trzsz --relay ssh x.x.x.x
+  trzsz --relay ssh remote_server
   ```
 
 ### Use on the remote server
@@ -139,13 +169,13 @@
 
 ## Suggestion
 
-- It is recommended to set `alias ssh="trzsz ssh"` for convenience, `alias ssh="trzsz -d ssh"` for dragging files.
+- It is recommended to set `alias ssh="trzsz ssh"` for convenience, `alias ssh="trzsz -d ssh"` for dragging files to upload.
 
 - If using `tmux` on the local computer, run `tmux` ( without `trzsz` ) first, then `trzsz ssh` to login.
 
 ## Configuration
 
-`trzsz` looks for configuration at `~/.trzsz.conf`. The path have to end with `/`, e.g.:
+`trzsz` looks for configuration at `~/.trzsz.conf` ( `C:\Users\your_name\.trzsz.conf` on Windows ). The path have to end with `/`, e.g.:
 
 ```
 DefaultUploadPath =
@@ -168,7 +198,7 @@ DefaultDownloadPath = /Users/username/Downloads/
 
   - In `MSYS2`, e.g.: `winpty trzsz /c/Windows/System32/OpenSSH/ssh.exe x.x.x.x`.
   - In `Cygwin`, e.g.: `trzsz "C:\Windows\System32\OpenSSH\ssh.exe" x.x.x.x`.
-  - Or use [trzsz-ssh](https://github.com/trzsz/trzsz-ssh) instead, e.g.: `tssh alias` ( The `tssh` includes `trzsz ssh` ).
+  - ⭐ Recommended to use [trzsz-ssh](https://trzsz.github.io/ssh) ( tssh ) instead, `tssh` is same as `trzsz ssh`.
 
 - Dragging files doesn't upload?
   - Don't forget the `--dragfile` option. e.g.: `trzsz -d ssh x.x.x.x`.
@@ -179,7 +209,7 @@ DefaultDownloadPath = /Users/username/Downloads/
 
 ## Development
 
-Want to write your own ssh client that supports trzsz? Please check the [go ssh client example](examples/ssh_client.go).
+Want to write your own ssh client that supports trzsz? Please check the [go ssh client example](https://github.com/trzsz/trzsz-go/blob/main/examples/ssh_client.go).
 
 ## Screenshot
 
@@ -197,7 +227,7 @@ Want to write your own ssh client that supports trzsz? Please check the [go ssh 
 
 ## Contact
 
-Feel free to email the author <lonnywong@qq.com>. Welcome to join the QQ group: 318578930.
+Feel free to email the author <lonnywong@qq.com>, or create an [issue](https://github.com/trzsz/trzsz-go/issues). Welcome to join the QQ group: 318578930.
 
 ## Sponsor
 

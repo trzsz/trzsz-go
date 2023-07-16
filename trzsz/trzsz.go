@@ -103,7 +103,7 @@ func handleSignal(pty *trzszPty, filter *TrzszFilter) {
 		signal.Notify(sigint, os.Interrupt)
 		go func() {
 			for range sigint {
-				filter.StopTransferringFiles()
+				filter.StopTransferringFiles(false)
 			}
 		}()
 	}

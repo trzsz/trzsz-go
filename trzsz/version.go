@@ -24,4 +24,4 @@ SOFTWARE.
 
 package trzsz
 
-const kTrzszVersion = "1.1.3"
+const kTrzszVersion = "1.1.4"

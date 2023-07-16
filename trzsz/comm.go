@@ -84,6 +84,7 @@ type progressCallback interface {
 	onStep(step int64)
 	onDone()
 	setPreSize(size int64)
+	setPause(pausing bool)
 }
 
 type bufferSize struct {
@@ -209,6 +210,7 @@ type trzszError struct {
 
 var (
 	errStopped            = simpleTrzszError("Stopped")
+	errStoppedAndDeleted  = simpleTrzszError("Stopped and deleted")
 	errReceiveDataTimeout = simpleTrzszError("Receive data timeout")
 )
 
@@ -251,6 +253,13 @@ func (e *trzszError) isRemoteExit() bool {
 
 func (e *trzszError) isRemoteFail() bool {
 	return e.errType == "fail" || e.errType == "FAIL"
+}
+
+func (e *trzszError) isStopAndDelete() bool {
+	if e == nil || e.errType != "fail" {
+		return false
+	}
+	return e.message == errStoppedAndDeleted.message
 }
 
 func checkPathWritable(path string) error {
@@ -468,6 +477,12 @@ func checkTmux() (tmuxModeType, *os.File, int32, error) {
 	return tmuxNormalMode, tmuxStdout, int32(tmuxPaneWidth), nil
 }
 
+func tmuxRefreshClient() {
+	cmd := exec.Command("tmux", "refresh-client")
+	cmd.Stdout = os.Stdout
+	_ = cmd.Run()
+}
+
 func getTerminalColumns() int {
 	cmd := exec.Command("stty", "size")
 	cmd.Stdin = os.Stdin
@@ -495,7 +510,7 @@ func wrapStdinInput(transfer *trzszTransfer) {
 			buffer = make([]byte, bufSize)
 		}
 		if err == io.EOF {
-			transfer.stopTransferringFiles()
+			transfer.stopTransferringFiles(false)
 		}
 	}
 }
@@ -505,7 +520,7 @@ func handleServerSignal(transfer *trzszTransfer) {
 	signal.Notify(sigstop, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigstop
-		transfer.stopTransferringFiles()
+		transfer.stopTransferringFiles(false)
 	}()
 }
 
@@ -834,26 +849,32 @@ func isCompressionProfitable(file *os.File, size int64) (bool, error) {
 	return compressedCount < 2, nil
 }
 
-func formatSavedFileNames(fileNames []string, dstPath string) string {
-	var msg strings.Builder
-	msg.WriteString("Saved ")
-	msg.WriteString(strconv.Itoa(len(fileNames)))
+func formatSavedFiles(fileNames []string, destPath string) string {
+	var builder strings.Builder
+	builder.WriteString("Saved ")
+	builder.WriteString(strconv.Itoa(len(fileNames)))
 	if len(fileNames) > 1 {
-		msg.WriteString(" files/directories")
+		builder.WriteString(" files/directories")
 	} else {
-		msg.WriteString(" file/directory")
+		builder.WriteString(" file/directory")
 	}
-	if len(dstPath) != 0 {
-		msg.WriteString(" to ")
-		msg.WriteString(dstPath)
+	if len(destPath) > 0 {
+		builder.WriteString(" to ")
+		builder.WriteString(destPath)
 	}
-	msg.WriteString("\r\n")
-	for i, name := range fileNames {
-		if i > 0 {
-			msg.WriteString("\r\n")
-		}
-		msg.WriteString("- ")
-		msg.WriteString(name)
+	for _, name := range fileNames {
+		builder.WriteString("\r\n- ")
+		builder.WriteString(name)
 	}
-	return msg.String()
+	return builder.String()
+}
+
+func joinFileNames(header string, fileNames []string) string {
+	var builder strings.Builder
+	builder.WriteString(header)
+	for _, name := range fileNames {
+		builder.WriteString("\r\n- ")
+		builder.WriteString(name)
+	}
+	return builder.String()
 }

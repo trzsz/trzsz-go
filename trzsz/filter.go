@@ -35,6 +35,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/manifoldco/promptui"
 	"github.com/ncruces/zenity"
 )
 
@@ -59,6 +60,7 @@ type TrzszFilter struct {
 	options         TrzszOptions
 	transfer        atomic.Pointer[trzszTransfer]
 	progress        atomic.Pointer[textProgressBar]
+	promptPipe      atomic.Pointer[io.PipeWriter]
 	serverVersion   *trzszVersion
 	remoteIsWindows bool
 	dragging        atomic.Bool
@@ -110,9 +112,9 @@ func (filter *TrzszFilter) IsTransferringFiles() bool {
 }
 
 // StopTransferringFiles tell trzsz to stop if it is transferring files.
-func (filter *TrzszFilter) StopTransferringFiles() {
+func (filter *TrzszFilter) StopTransferringFiles(stopAndDelete bool) {
 	if transfer := filter.transfer.Load(); transfer != nil {
-		transfer.stopTransferringFiles()
+		transfer.stopTransferringFiles(stopAndDelete)
 	}
 }
 
@@ -177,6 +179,7 @@ var parentWindowID = getParentWindowID()
 func (filter *TrzszFilter) chooseDownloadPath() (string, error) {
 	savePath := filter.getTrzszConfig("DefaultDownloadPath")
 	if savePath != nil {
+		time.Sleep(50 * time.Millisecond) // wait for all output to show
 		return *savePath, nil
 	}
 	options := []zenity.Option{
@@ -238,6 +241,10 @@ func (filter *TrzszFilter) downloadFiles(transfer *trzszTransfer) error {
 		return err
 	}
 
+	if !filter.transfer.CompareAndSwap(nil, transfer) {
+		return simpleTrzszError("Swap transfer failed")
+	}
+
 	if err := transfer.sendAction(true, filter.serverVersion, filter.remoteIsWindows); err != nil {
 		return err
 	}
@@ -257,7 +264,7 @@ func (filter *TrzszFilter) downloadFiles(transfer *trzszTransfer) error {
 		return err
 	}
 
-	return transfer.clientExit(formatSavedFileNames(localNames, path))
+	return transfer.clientExit(formatSavedFiles(localNames, path))
 }
 
 func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) error {
@@ -271,6 +278,10 @@ func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) 
 	files, err := checkPathsReadable(paths, directory)
 	if err != nil {
 		return err
+	}
+
+	if !filter.transfer.CompareAndSwap(nil, transfer) {
+		return simpleTrzszError("Swap transfer failed")
 	}
 
 	if err := transfer.sendAction(true, filter.serverVersion, filter.remoteIsWindows); err != nil {
@@ -297,15 +308,14 @@ func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) 
 	if err != nil {
 		return err
 	}
-	return transfer.clientExit(formatSavedFileNames(remoteNames, ""))
+	return transfer.clientExit(formatSavedFiles(remoteNames, ""))
 }
 
 func (filter *TrzszFilter) handleTrzsz(mode byte) {
 	transfer := newTransfer(filter.serverIn, nil, isWindowsEnvironment() || filter.remoteIsWindows, filter.logger)
 
-	filter.transfer.Store(transfer)
 	defer func() {
-		filter.transfer.Store(nil)
+		filter.transfer.CompareAndSwap(transfer, nil)
 	}()
 
 	defer func() {
@@ -379,13 +389,109 @@ func (filter *TrzszFilter) uploadDragFiles() {
 	filter.resetDragFiles()
 }
 
+func (filter *TrzszFilter) transformPromptInput(promptPipe *io.PipeWriter, buf []byte) {
+	const keyPrev = '\x10'
+	const keyNext = '\x0E'
+	n := len(buf)
+	for i := 0; i < n; i++ {
+		c := buf[i]
+		if c == '\x1b' && n-i > 2 && buf[i+1] == '[' {
+			switch buf[i+2] {
+			case '\x42': // ↓ to Next
+				c = keyNext
+			case '\x41', '\x5A': // ↑ Shift-TAB to Prev
+				c = keyPrev
+			}
+			i += 2
+		} else {
+			switch c {
+			case '\x03': // Ctrl-C to Stop
+				_, _ = promptPipe.Write([]byte{keyPrev, keyPrev, '\r'})
+				return
+			case 'q', 'Q', '\x11': // q Ctrl-C Ctrl-Q to Quit
+				_, _ = promptPipe.Write([]byte{keyNext, keyNext, '\r'})
+				return
+			case '\t', '\x0E', 'j', 'J', '\x0A': // Tab ↓ j Ctrl-J to Next
+				c = keyNext
+			case '\x10', 'k', 'K', '\x0B': // ↑ k Ctrl-K to Prev
+				c = keyPrev
+			case '\r': // Enter
+			default:
+				continue
+			}
+		}
+		_, _ = promptPipe.Write([]byte{c})
+	}
+}
+
+func (filter *TrzszFilter) confirmStopTransfer(transfer *trzszTransfer) {
+	pipeIn, pipeOut := io.Pipe()
+	if !filter.promptPipe.CompareAndSwap(nil, pipeOut) {
+		pipeIn.Close()
+		pipeOut.Close()
+		return
+	}
+
+	transfer.pauseTransferringFiles()
+
+	go func() {
+		defer pipeIn.Close()
+		defer pipeOut.Close()
+		defer filter.promptPipe.Store(nil)
+
+		if progress := filter.progress.Load(); progress != nil {
+			progress.setPause(true)
+			defer func() {
+				progress.setTerminalColumns(filter.options.TerminalColumns)
+				progress.setPause(false)
+			}()
+			time.Sleep(50 * time.Millisecond)             // wait for the progress bar output
+			_, _ = filter.clientOut.Write([]byte("\r\n")) // keep the progress bar displayed
+		}
+
+		prompt := promptui.Select{
+			Label: "Are you sure you want to stop transferring files",
+			Items: []string{
+				"Stop and keep transferred files",
+				"Stop and delete transferred files",
+				"Continue to transfer remaining files",
+			},
+			Stdin:  pipeIn,
+			Stdout: filter.clientOut,
+			Templates: &promptui.SelectTemplates{
+				Help: `{{ "Use ↓ ↑ j k <tab> to navigate" | faint }}`,
+			},
+		}
+
+		idx, _, err := prompt.Run()
+
+		if transfer := filter.transfer.Load(); transfer != nil {
+			if err != nil || idx == 2 {
+				transfer.resumeTransferringFiles()
+			} else if idx == 0 {
+				transfer.stopTransferringFiles(false)
+			} else if idx == 1 {
+				transfer.stopTransferringFiles(true)
+			}
+		}
+	}()
+}
+
 func (filter *TrzszFilter) sendInput(buf []byte) {
 	if filter.logger != nil {
 		filter.logger.writeTraceLog(buf, "stdin")
 	}
+	if promptPipe := filter.promptPipe.Load(); promptPipe != nil {
+		filter.transformPromptInput(promptPipe, buf)
+		return
+	}
 	if transfer := filter.transfer.Load(); transfer != nil {
 		if buf[0] == '\x03' { // `ctrl + c` to stop transferring files
-			transfer.stopTransferringFiles()
+			if filter.serverVersion.compare(&trzszVersion{1, 1, 3}) > 0 {
+				filter.confirmStopTransfer(transfer)
+			} else {
+				transfer.stopTransferringFiles(false)
+			}
 		}
 		return
 	}

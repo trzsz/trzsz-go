@@ -153,6 +153,7 @@ type textProgressBar struct {
 	speedIdx        int
 	timeArray       [kSpeedArraySize]*time.Time
 	stepArray       [kSpeedArraySize]int64
+	pausing         atomic.Bool
 }
 
 func newTextProgressBar(writer io.Writer, columns int32, tmuxPaneColumns int32) *textProgressBar {
@@ -215,7 +216,9 @@ func (p *textProgressBar) onStep(step int64) {
 		return
 	}
 	p.fileStep = step
-	p.showProgress()
+	if !p.pausing.Load() {
+		p.showProgress()
+	}
 }
 
 func (p *textProgressBar) onDone() {
@@ -237,6 +240,13 @@ func (p *textProgressBar) setPreSize(size int64) {
 		return
 	}
 	p.preSize = size
+}
+
+func (p *textProgressBar) setPause(pausing bool) {
+	if p == nil {
+		return
+	}
+	p.pausing.Store(pausing)
 }
 
 func (p *textProgressBar) showProgress() {
