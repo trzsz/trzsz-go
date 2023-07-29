@@ -122,6 +122,12 @@ func TrzszMain() int {
 		return 0
 	}
 
+	defer func() {
+		for i := len(onExitFuncs) - 1; i >= 0; i-- {
+			onExitFuncs[i]()
+		}
+	}()
+
 	// spawn a pty
 	pty, err := spawn(args.Name, args.Args...)
 	if err != nil {

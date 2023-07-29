@@ -109,6 +109,12 @@ func recvFiles(transfer *trzszTransfer, args *trzArgs, tmuxMode tmuxModeType, tm
 func TrzMain() int {
 	args := parseTrzArgs(os.Args)
 
+	defer func() {
+		for i := len(onExitFuncs) - 1; i >= 0; i-- {
+			onExitFuncs[i]()
+		}
+	}()
+
 	var err error
 	args.Path, err = filepath.Abs(args.Path)
 	if err != nil {

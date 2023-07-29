@@ -47,6 +47,8 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
+var onExitFuncs []func()
+
 var timeNowFunc = time.Now
 
 var linuxRuntime bool = (runtime.GOOS == "linux")
@@ -443,7 +445,6 @@ func checkTmux() (tmuxModeType, *os.File, int32, error) {
 	}
 
 	cmd := exec.Command("tmux", "display-message", "-p", "#{client_tty}:#{client_control_mode}:#{pane_width}")
-	cmd.Stdin = os.Stdin
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, nil, -1, fmt.Errorf("Get tmux output failed: %v", err)
@@ -474,12 +475,37 @@ func checkTmux() (tmuxModeType, *os.File, int32, error) {
 			return 0, nil, -1, fmt.Errorf("Parse tmux pane width [%s] failed: %v", paneWidth, err)
 		}
 	}
+
+	statusInterval := getTmuxStatusInterval()
+	setTmuxStatusInterval("0")
+	onExitFuncs = append(onExitFuncs, func() {
+		setTmuxStatusInterval(statusInterval)
+	})
+
 	return tmuxNormalMode, tmuxStdout, int32(tmuxPaneWidth), nil
 }
 
 func tmuxRefreshClient() {
 	cmd := exec.Command("tmux", "refresh-client")
 	cmd.Stdout = os.Stdout
+	_ = cmd.Run()
+}
+
+func getTmuxStatusInterval() string {
+	cmd := exec.Command("tmux", "display-message", "-p", "#{status-interval}")
+	out, err := cmd.Output()
+	output := strings.TrimSpace(string(out))
+	if err != nil || output == "" {
+		return "15" // The default is 15 seconds
+	}
+	return output
+}
+
+func setTmuxStatusInterval(interval string) {
+	if interval == "" {
+		interval = "15" // The default is 15 seconds
+	}
+	cmd := exec.Command("tmux", "setw", "status-interval", interval)
 	_ = cmd.Run()
 }
 

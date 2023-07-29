@@ -108,6 +108,12 @@ func sendFiles(transfer *trzszTransfer, files []*sourceFile, args *tszArgs, tmux
 func TszMain() int {
 	args := parseTszArgs(os.Args)
 
+	defer func() {
+		for i := len(onExitFuncs) - 1; i >= 0; i-- {
+			onExitFuncs[i]()
+		}
+	}()
+
 	files, err := checkPathsReadable(args.File, args.Directory)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
