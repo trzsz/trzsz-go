@@ -73,35 +73,35 @@ func escapeCharsToCodes(escapeChars []interface{}) ([][]byte, error) {
 	for i, v := range escapeChars {
 		a, ok := v.([]interface{})
 		if !ok {
-			return nil, simpleTrzszError("Escape chars invalid: %#v", v)
+			return nil, simpleTrzszError("Escape chars invalid: %v", v)
 		}
 		if len(a) != 2 {
-			return nil, simpleTrzszError("Escape chars invalid: %#v", v)
+			return nil, simpleTrzszError("Escape chars invalid: %v", v)
 		}
 		b, ok := a[0].(string)
 		if !ok {
-			return nil, simpleTrzszError("Escape chars invalid: %#v", v)
+			return nil, simpleTrzszError("Escape chars invalid: %v", v)
 		}
 		bb, err := encoder.Bytes([]byte(b))
 		if err != nil {
 			return nil, err
 		}
 		if len(bb) != 1 {
-			return nil, simpleTrzszError("Escape chars invalid: %#v", v)
+			return nil, simpleTrzszError("Escape chars invalid: %v", v)
 		}
 		c, ok := a[1].(string)
 		if !ok {
-			return nil, simpleTrzszError("Escape chars invalid: %#v", v)
+			return nil, simpleTrzszError("Escape chars invalid: %v", v)
 		}
 		cc, err := encoder.Bytes([]byte(c))
 		if err != nil {
 			return nil, err
 		}
 		if len(cc) != 2 {
-			return nil, simpleTrzszError("Escape chars invalid: %#v", v)
+			return nil, simpleTrzszError("Escape chars invalid: %v", v)
 		}
 		if cc[0] != escapeLeaderByte {
-			return nil, simpleTrzszError("Escape chars invalid: %#v", v)
+			return nil, simpleTrzszError("Escape chars invalid: %v", v)
 		}
 		escapeCodes[i] = make([]byte, 3)
 		escapeCodes[i][0] = bb[0]
@@ -176,7 +176,7 @@ func unescapeData(data []byte, escapeCodes [][]byte, dst []byte) ([]byte, []byte
 				}
 			}
 			if !escaped {
-				return nil, nil, simpleTrzszError("Unknown escape code: %#v", b)
+				return nil, nil, simpleTrzszError("Unknown escape code: %v", b)
 			}
 		} else {
 			buf[idx] = data[i]

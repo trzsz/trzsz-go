@@ -438,7 +438,7 @@ func (t *trzszTransfer) recvData() ([]byte, error) {
 		return nil, err
 	}
 	if len(remaining) != 0 {
-		return nil, simpleTrzszError("Unescape has bytes remaining: %#v", remaining)
+		return nil, simpleTrzszError("Unescape has bytes remaining: %v", remaining)
 	}
 	return buf, nil
 }

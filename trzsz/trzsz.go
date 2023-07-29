@@ -125,7 +125,7 @@ func TrzszMain() int {
 	// spawn a pty
 	pty, err := spawn(args.Name, args.Args...)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "spawn pty failed: %#v\r\n", err)
+		fmt.Fprintf(os.Stderr, "spawn pty failed: %v\r\n", err)
 		return -1
 	}
 	defer func() { pty.Close() }()
@@ -135,7 +135,7 @@ func TrzszMain() int {
 	if term.IsTerminal(fd) {
 		state, err := term.MakeRaw(fd)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "stdin make raw failed: %#v\r\n", err)
+			fmt.Fprintf(os.Stderr, "stdin make raw failed: %v\r\n", err)
 			return -2
 		}
 		defer func() { _ = term.Restore(fd, state) }()
@@ -152,7 +152,7 @@ func TrzszMain() int {
 		// new trzsz filter
 		columns, err := pty.GetColumns()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "pty get columns failed: %#v\r\n", err)
+			fmt.Fprintf(os.Stderr, "pty get columns failed: %v\r\n", err)
 			return -3
 		}
 		filter := NewTrzszFilter(os.Stdin, os.Stdout, pty.Stdin, pty.Stdout, TrzszOptions{

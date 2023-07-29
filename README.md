@@ -93,14 +93,21 @@ Website: [https://trzsz.github.io/go](https://trzsz.github.io/go) 　中文文�
 
   </details>
 
-- Install with [scoop](https://scoop.sh/) on Windows
+- Install with [scoop](https://scoop.sh/) / [winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/) / [choco](https://community.chocolatey.org/) on Windows
 
-  <details><summary><code>scoop install trzsz</code></summary>
+  <details><summary><code>scoop install trzsz</code> / <code>winget install trzsz</code> / <code>choco install trzsz</code></summary>
 
   ```sh
   scoop bucket add extras
-  scoop update
   scoop install trzsz
+  ```
+
+  ```sh
+  winget install trzsz
+  ```
+
+  ```sh
+  choco install trzsz
   ```
 
   </details>
