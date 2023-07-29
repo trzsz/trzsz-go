@@ -329,7 +329,8 @@ func TestProgressWithoutBar(t *testing.T) {
 func TestProgressWithMultiFiles(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564137000, 1646564139000}, 0)
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564136000,
+		1646564137000, 1646564139000, 1646564139000}, 0)
 
 	progress := newTextProgressBar(writer, 100, 0)
 	progress.onNum(2)
@@ -343,18 +344,19 @@ func TestProgressWithMultiFiles(t *testing.T) {
 	progress.onStep(300)
 	progress.onDone()
 
-	assert.Equal(4, *callTimeNowCount)
+	assert.Equal(6, *callTimeNowCount)
 	writer.assertBufferCount(4)
 	writer.assertProgressText(0, 100, []string{"(1/2) 中文😀test.txt [", "] 10% | 100 B | 100 B/s | 00:09 ETA"})
-	assert.Equal("\r", writer.buffer[1])
+	writer.assertProgressText(1, 100, []string{"(1/2) 中文😀test.txt [", "] 100% | 1000 B | 1000 B/s | 00:00 ETA"})
 	writer.assertProgressText(2, 80, []string{"(2/2) 英文😀test.txt [", "] 15% | 300 B | 150 B/s | 00:11 ETA"})
-	assert.Equal("\r", writer.buffer[3])
+	writer.assertProgressText(3, 80, []string{"(2/2) 英文😀test.txt [", "] 100% | 1000 B/s | 00:00 ETA"})
 }
 
 func TestProgressInTmuxPane(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564137000, 1646564138000, 1646564139000}, 0)
+	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564137000, 1646564137000,
+		1646564138000, 1646564139000, 1646564139000}, 0)
 
 	progress := newTextProgressBar(writer, 100, 80)
 	progress.onNum(2)
@@ -369,7 +371,7 @@ func TestProgressInTmuxPane(t *testing.T) {
 	progress.onStep(300)
 	progress.onDone()
 
-	assert.Equal(5, *callTimeNowCount)
+	assert.Equal(7, *callTimeNowCount)
 	writer.assertBufferCount(5)
 	writer.assertProgressText(0, 79, []string{"(1/2) 中文😀test.txt [", "] 10% | 100 B | 100 B/s | 00:09 ETA"})
 	assert.NotContains(writer.buffer[0], "\r")
@@ -378,13 +380,13 @@ func TestProgressInTmuxPane(t *testing.T) {
 	writer.assertProgressText(1, 79, []string{"\x1b[79D", "(1/2) 中文😀test.txt [", "] 20% | 200 B | 100 B/s | 00:08 ETA"})
 	assert.NotContains(writer.buffer[1], "\r")
 
+	writer.assertProgressText(2, 79, []string{"\x1b[79D", "(1/2) 中文😀test.txt [", "] 100% | 500 B/s | 00:00 ETA"})
 	assert.NotContains(writer.buffer[2], "\r")
-	assert.Contains(writer.buffer[2], "\x1b[79D")
 
 	writer.assertProgressText(3, 120, []string{"(2/2) 中文😀test2.txt [", "] 30% | 300 B | 300 B/s | 00:02 ETA"})
 
+	writer.assertProgressText(4, 120, []string{"(2/2) 中文😀test2.txt [", "] 100% | 1000 B | 1000 B/s | 00:00 ETA"})
 	assert.Contains(writer.buffer[4], "\r")
-	assert.NotContains(writer.buffer[4], "\x1b[79D")
 }
 
 func TestProgressEllipsisString(t *testing.T) {

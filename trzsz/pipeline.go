@@ -34,6 +34,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
@@ -770,8 +771,12 @@ func (t *trzszTransfer) pipelineRecvAck(ctx *pipelineContext, size int64, ackCha
 	return progressChan
 }
 
-func (t *trzszTransfer) pipelineShowProgress(ctx *pipelineContext, progress progressCallback, progressChan <-chan int64) {
+func (t *trzszTransfer) pipelineShowProgress(ctx *pipelineContext, progress progressCallback,
+	progressChan <-chan int64) *sync.WaitGroup {
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for step := range progressChan {
 			progress.onStep(step)
 			if ctx.Err() != nil {
@@ -779,6 +784,7 @@ func (t *trzszTransfer) pipelineShowProgress(ctx *pipelineContext, progress prog
 			}
 		}
 	}()
+	return &wg
 }
 
 func (t *trzszTransfer) sendFileDataV2(file *os.File, size int64, progress progressCallback) ([]byte, error) {
@@ -804,7 +810,8 @@ func (t *trzszTransfer) sendFileDataV2(file *os.File, size int64, progress progr
 	progressChan := t.pipelineRecvAck(ctx, size, ackChan, showProgress)
 
 	if showProgress {
-		t.pipelineShowProgress(ctx, progress, progressChan)
+		wg := t.pipelineShowProgress(ctx, progress, progressChan)
+		defer wg.Wait()
 	}
 
 	select {
@@ -1062,7 +1069,8 @@ func (t *trzszTransfer) recvFileDataV2(file *os.File, size int64, progress progr
 	progressChan := t.pipelineSaveData(ctx, file, size, fileDataChan, ackImmediatelyChan, showProgress)
 
 	if showProgress {
-		t.pipelineShowProgress(ctx, progress, progressChan)
+		wg := t.pipelineShowProgress(ctx, progress, progressChan)
+		defer wg.Wait()
 	}
 
 	select {

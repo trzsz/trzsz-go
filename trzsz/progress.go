@@ -225,14 +225,12 @@ func (p *textProgressBar) onDone() {
 	if p == nil {
 		return
 	}
-	if !p.firstWrite {
-		if p.tmuxPaneColumns.Load() > 0 {
-			_ = writeAll(p.writer, []byte(fmt.Sprintf("\x1b[%dD", p.columns.Load())))
-		} else {
-			_ = writeAll(p.writer, []byte("\r"))
-		}
-		p.firstWrite = true
+	if p.fileSize == 0 {
+		return
 	}
+	p.fileStep = p.fileSize
+	p.lastUpdateTime = nil
+	p.showProgress()
 }
 
 func (p *textProgressBar) setPreSize(size int64) {
