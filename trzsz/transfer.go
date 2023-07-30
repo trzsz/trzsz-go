@@ -46,7 +46,8 @@ import (
 const (
 	kProtocolVersion2 = 2
 	kProtocolVersion3 = 3
-	kProtocolVersion  = kProtocolVersion3
+	kProtocolVersion4 = 4
+	kProtocolVersion  = kProtocolVersion4
 
 	kLastChunkTimeCount = 10
 )
@@ -645,24 +646,24 @@ func (t *trzszTransfer) sendFileNum(num int64, progress progressCallback) error 
 	return nil
 }
 
-func (t *trzszTransfer) sendFileName(srcFile *sourceFile, progress progressCallback) (*os.File, int64, string, error) {
+func (t *trzszTransfer) sendFileName(srcFile *sourceFile, progress progressCallback) (fileReader, string, error) {
 	var fileName string
 	if t.transferConfig.Directory {
 		jsonName, err := srcFile.marshalSourceFile()
 		if err != nil {
-			return nil, 0, "", err
+			return nil, "", err
 		}
 		fileName = jsonName
 	} else {
 		fileName = srcFile.getFileName()
 	}
 	if err := t.sendString("NAME", fileName); err != nil {
-		return nil, 0, "", err
+		return nil, "", err
 	}
 
 	remoteName, err := t.recvString("SUCC", false, t.getNewTimeout())
 	if err != nil {
-		return nil, 0, "", err
+		return nil, "", err
 	}
 
 	if progress != nil {
@@ -670,21 +671,15 @@ func (t *trzszTransfer) sendFileName(srcFile *sourceFile, progress progressCallb
 	}
 
 	if srcFile.IsDir {
-		return nil, 0, remoteName, nil
+		return nil, remoteName, nil
 	}
 
 	file, err := os.Open(srcFile.AbsPath)
 	if err != nil {
-		return nil, 0, "", err
+		return nil, "", err
 	}
 
-	stat, err := file.Stat()
-	if err != nil {
-		file.Close()
-		return nil, 0, "", err
-	}
-
-	return file, stat.Size(), remoteName, nil
+	return &simpleFileReader{file, srcFile.Size}, remoteName, nil
 }
 
 func (t *trzszTransfer) sendFileSize(size int64, progress progressCallback) error {
@@ -700,7 +695,7 @@ func (t *trzszTransfer) sendFileSize(size int64, progress progressCallback) erro
 	return nil
 }
 
-func (t *trzszTransfer) sendFileData(file *os.File, size int64, progress progressCallback) ([]byte, error) {
+func (t *trzszTransfer) sendFileData(file fileReader, progress progressCallback) ([]byte, error) {
 	step := int64(0)
 	if progress != nil {
 		progress.onStep(step)
@@ -708,6 +703,7 @@ func (t *trzszTransfer) sendFileData(file *os.File, size int64, progress progres
 	bufSize := int64(1024)
 	buffer := make([]byte, bufSize)
 	hasher := md5.New()
+	size := file.getSize()
 	for step < size {
 		beginTime := time.Now()
 		m := size - step
@@ -715,10 +711,14 @@ func (t *trzszTransfer) sendFileData(file *os.File, size int64, progress progres
 			buffer = buffer[:m]
 		}
 		n, err := file.Read(buffer)
-		if err != nil {
+		length := int64(n)
+		if err == io.EOF {
+			if length+step != size {
+				return nil, simpleTrzszError("EOF but length [%d] + step [%d] <> size [%d]", length, step, size)
+			}
+		} else if err != nil {
 			return nil, err
 		}
-		length := int64(n)
 		data := buffer[:n]
 		if err := t.sendData(data); err != nil {
 			return nil, err
@@ -760,6 +760,7 @@ func (t *trzszTransfer) sendFileMD5(digest []byte, progress progressCallback) er
 }
 
 func (t *trzszTransfer) sendFiles(sourceFiles []*sourceFile, progress progressCallback) ([]string, error) {
+	sourceFiles = t.archiveSourceFiles(sourceFiles)
 	if err := t.sendFileNum(int64(len(sourceFiles)), progress); err != nil {
 		return nil, err
 	}
@@ -767,13 +768,12 @@ func (t *trzszTransfer) sendFiles(sourceFiles []*sourceFile, progress progressCa
 	var remoteNames []string
 	for _, srcFile := range sourceFiles {
 		var err error
-		var size int64
-		var file *os.File
+		var file fileReader
 		var remoteName string
 		if t.transferConfig.Protocol >= kProtocolVersion3 {
-			file, size, remoteName, err = t.sendFileNameV3(srcFile, progress)
+			file, remoteName, err = t.sendFileNameV3(srcFile, progress)
 		} else {
-			file, size, remoteName, err = t.sendFileName(srcFile, progress)
+			file, remoteName, err = t.sendFileName(srcFile, progress)
 		}
 		if err != nil {
 			return nil, err
@@ -789,15 +789,15 @@ func (t *trzszTransfer) sendFiles(sourceFiles []*sourceFile, progress progressCa
 
 		defer file.Close()
 
-		if err := t.sendFileSize(size, progress); err != nil {
+		if err := t.sendFileSize(file.getSize(), progress); err != nil {
 			return nil, err
 		}
 
 		var digest []byte
 		if t.transferConfig.Protocol >= kProtocolVersion2 {
-			digest, err = t.sendFileDataV2(file, size, progress)
+			digest, err = t.sendFileDataV2(file, progress)
 		} else {
-			digest, err = t.sendFileData(file, size, progress)
+			digest, err = t.sendFileData(file, progress)
 		}
 		if err != nil {
 			return nil, err
@@ -829,7 +829,7 @@ func (t *trzszTransfer) addCreatedFiles(path string) {
 	t.createdFiles = append(t.createdFiles, path)
 }
 
-func (t *trzszTransfer) doCreateFile(path string, truncate bool) (*os.File, error) {
+func (t *trzszTransfer) doCreateFile(path string, truncate bool) (fileWriter, error) {
 	flag := os.O_RDWR | os.O_CREATE
 	if truncate {
 		flag |= os.O_TRUNC
@@ -848,7 +848,7 @@ func (t *trzszTransfer) doCreateFile(path string, truncate bool) (*os.File, erro
 		return nil, simpleTrzszError("Create file [%s] failed: %v", path, err)
 	}
 	t.addCreatedFiles(path)
-	return file, nil
+	return &simpleFileWriter{file}, nil
 }
 
 func (t *trzszTransfer) doCreateDirectory(path string) error {
@@ -869,7 +869,7 @@ func (t *trzszTransfer) doCreateDirectory(path string) error {
 	return nil
 }
 
-func (t *trzszTransfer) createFile(path, fileName string, truncate bool) (*os.File, string, error) {
+func (t *trzszTransfer) createFile(path, fileName string, truncate bool) (fileWriter, string, error) {
 	var localName string
 	if t.transferConfig.Overwrite {
 		localName = fileName
@@ -887,13 +887,7 @@ func (t *trzszTransfer) createFile(path, fileName string, truncate bool) (*os.Fi
 	return file, localName, nil
 }
 
-func (t *trzszTransfer) createDirOrFile(path, name string, truncate bool) (*os.File, string, string, error) {
-	srcFile, err := unmarshalSourceFile(name)
-	if err != nil {
-		return nil, "", "", err
-	}
-	fileName := srcFile.getFileName()
-
+func (t *trzszTransfer) createDirOrFile(path string, srcFile *sourceFile, truncate bool) (fileWriter, string, error) {
 	var localName string
 	if t.transferConfig.Overwrite {
 		localName = srcFile.RelPath[0]
@@ -904,7 +898,7 @@ func (t *trzszTransfer) createDirOrFile(path, name string, truncate bool) (*os.F
 			var err error
 			localName, err = getNewName(path, srcFile.RelPath[0])
 			if err != nil {
-				return nil, "", "", err
+				return nil, "", err
 			}
 			t.fileNameMap[srcFile.PathID] = localName
 		}
@@ -914,37 +908,51 @@ func (t *trzszTransfer) createDirOrFile(path, name string, truncate bool) (*os.F
 	if len(srcFile.RelPath) > 1 {
 		p := filepath.Join(append([]string{path, localName}, srcFile.RelPath[1:len(srcFile.RelPath)-1]...)...)
 		if err := t.doCreateDirectory(p); err != nil {
-			return nil, "", "", err
+			return nil, "", err
 		}
-		fullPath = filepath.Join(p, fileName)
+		fullPath = filepath.Join(p, srcFile.getFileName())
 	} else {
 		fullPath = filepath.Join(path, localName)
 	}
 
+	if srcFile.Archive {
+		file, err := t.newArchiveWriter(path, srcFile, fullPath)
+		if err != nil {
+			return nil, "", err
+		}
+		return file, localName, nil
+	}
+
 	if srcFile.IsDir {
 		if err := t.doCreateDirectory(fullPath); err != nil {
-			return nil, "", "", err
+			return nil, "", err
 		}
-		return nil, localName, fileName, nil
+		return nil, localName, nil
 	}
 
 	file, err := t.doCreateFile(fullPath, truncate)
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", err
 	}
-	return file, localName, fileName, nil
+	return file, localName, nil
 }
 
-func (t *trzszTransfer) recvFileName(path string, progress progressCallback) (*os.File, string, error) {
+func (t *trzszTransfer) recvFileName(path string, progress progressCallback) (fileWriter, string, error) {
 	fileName, err := t.recvString("NAME", false, t.getNewTimeout())
 	if err != nil {
 		return nil, "", err
 	}
 
-	var file *os.File
+	var file fileWriter
 	var localName string
 	if t.transferConfig.Directory {
-		file, localName, fileName, err = t.createDirOrFile(path, fileName, true)
+		var srcFile *sourceFile
+		srcFile, err = unmarshalSourceFile(fileName)
+		if err != nil {
+			return nil, "", err
+		}
+		fileName = srcFile.getFileName()
+		file, localName, err = t.createDirOrFile(path, srcFile, true)
 	} else {
 		file, localName, err = t.createFile(path, fileName, true)
 	}
@@ -976,7 +984,7 @@ func (t *trzszTransfer) recvFileSize(progress progressCallback) (int64, error) {
 	return size, nil
 }
 
-func (t *trzszTransfer) recvFileData(file *os.File, size int64, progress progressCallback) ([]byte, error) {
+func (t *trzszTransfer) recvFileData(file fileWriter, size int64, progress progressCallback) ([]byte, error) {
 	defer file.Close()
 	step := int64(0)
 	if progress != nil {
@@ -989,7 +997,7 @@ func (t *trzszTransfer) recvFileData(file *os.File, size int64, progress progres
 		if err != nil {
 			return nil, err
 		}
-		if _, err := file.Write(data); err != nil {
+		if err := writeAll(file, data); err != nil {
 			return nil, err
 		}
 		length := int64(len(data))
@@ -1034,7 +1042,7 @@ func (t *trzszTransfer) recvFiles(path string, progress progressCallback) ([]str
 	var localNames []string
 	for i := int64(0); i < num; i++ {
 		var err error
-		var file *os.File
+		var file fileWriter
 		var localName string
 		if t.transferConfig.Protocol >= kProtocolVersion3 {
 			file, localName, err = t.recvFileNameV3(path, progress)

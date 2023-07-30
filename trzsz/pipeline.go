@@ -31,7 +31,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -449,12 +448,12 @@ func (t *trzszTransfer) isCompressFixed(size int64) (fixed bool, compress bool) 
 	return false, false
 }
 
-func (t *trzszTransfer) sendCompressFlag(file *os.File, size int64) (bool, error) {
-	fixed, compress := t.isCompressFixed(size)
+func (t *trzszTransfer) sendCompressFlag(file fileReader) (bool, error) {
+	fixed, compress := t.isCompressFixed(file.getSize())
 	if fixed {
 		return compress, nil
 	}
-	compress, err := isCompressionProfitable(file, size)
+	compress, err := isCompressionProfitable(file)
 	if err != nil {
 		return false, fmt.Errorf("Compression detect failed: %v", err)
 	}
@@ -502,13 +501,14 @@ func (t *trzszTransfer) pipelineCalculateMD5(ctx *pipelineContext, md5SourceChan
 	return md5DigestChan
 }
 
-func (t *trzszTransfer) pipelineReadData(ctx *pipelineContext, file *os.File, size int64) (<-chan []byte, <-chan []byte) {
+func (t *trzszTransfer) pipelineReadData(ctx *pipelineContext, file fileReader) (<-chan []byte, <-chan []byte) {
 	fileDataChan := make(chan []byte, 100)
 	md5SourceChan := make(chan []byte, 100)
 	go func() {
 		defer close(fileDataChan)
 		defer close(md5SourceChan)
 		step := int64(0)
+		size := file.getSize()
 		bufSize := int64(32 * 1024)
 		for step < size && ctx.Err() == nil {
 			m := size - step
@@ -530,7 +530,12 @@ func (t *trzszTransfer) pipelineReadData(ctx *pipelineContext, file *os.File, si
 				}
 				step += int64(n)
 			}
-			if err != nil {
+			if err == io.EOF {
+				if step != size {
+					ctx.cancel(simpleTrzszError("EOF but step [%d] <> size [%d]", step, size))
+					return
+				}
+			} else if err != nil {
 				ctx.cancel(simpleTrzszError("Read file error: %v", err))
 				return
 			}
@@ -787,8 +792,8 @@ func (t *trzszTransfer) pipelineShowProgress(ctx *pipelineContext, progress prog
 	return &wg
 }
 
-func (t *trzszTransfer) sendFileDataV2(file *os.File, size int64, progress progressCallback) ([]byte, error) {
-	compress, err := t.sendCompressFlag(file, size)
+func (t *trzszTransfer) sendFileDataV2(file fileReader, progress progressCallback) ([]byte, error) {
+	compress, err := t.sendCompressFlag(file)
 	if err != nil {
 		return nil, err
 	}
@@ -798,7 +803,7 @@ func (t *trzszTransfer) sendFileDataV2(file *os.File, size int64, progress progr
 	defer ctx.cancel(nil)
 	defer close(ctx.succ)
 
-	fileDataChan, md5SourceChan := t.pipelineReadData(ctx, file, size)
+	fileDataChan, md5SourceChan := t.pipelineReadData(ctx, file)
 
 	md5DigestChan := t.pipelineCalculateMD5(ctx, md5SourceChan)
 
@@ -807,7 +812,7 @@ func (t *trzszTransfer) sendFileDataV2(file *os.File, size int64, progress progr
 	ackChan := t.pipelineSendData(ctx, sendDataChan)
 
 	showProgress := progress != nil
-	progressChan := t.pipelineRecvAck(ctx, size, ackChan, showProgress)
+	progressChan := t.pipelineRecvAck(ctx, file.getSize(), ackChan, showProgress)
 
 	if showProgress {
 		wg := t.pipelineShowProgress(ctx, progress, progressChan)
@@ -1002,7 +1007,7 @@ func (t *trzszTransfer) pipelineDecodeData(ctx *pipelineContext, recvDataChan <-
 	return fileDataChan, md5SourceChan
 }
 
-func (t *trzszTransfer) pipelineSaveData(ctx *pipelineContext, file *os.File, size int64,
+func (t *trzszTransfer) pipelineSaveData(ctx *pipelineContext, file fileWriter, size int64,
 	fileDataChan <-chan []byte, ackImmediatelyChan chan<- struct{}, showProgress bool) <-chan int64 {
 	var progressChan chan int64
 	if showProgress {
@@ -1015,7 +1020,7 @@ func (t *trzszTransfer) pipelineSaveData(ctx *pipelineContext, file *os.File, si
 		}
 		step := int64(0)
 		for data := range fileDataChan {
-			if _, err := file.Write(data); err != nil {
+			if err := writeAll(file, data); err != nil {
 				ctx.cancel(simpleTrzszError("Write file error: %v", err))
 				return
 			}
@@ -1044,7 +1049,7 @@ func (t *trzszTransfer) pipelineSaveData(ctx *pipelineContext, file *os.File, si
 	return progressChan
 }
 
-func (t *trzszTransfer) recvFileDataV2(file *os.File, size int64, progress progressCallback) ([]byte, error) {
+func (t *trzszTransfer) recvFileDataV2(file fileWriter, size int64, progress progressCallback) ([]byte, error) {
 	defer file.Close()
 
 	compress, err := t.recvCompressFlag(size)

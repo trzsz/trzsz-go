@@ -161,28 +161,26 @@ func (t *trzszTransfer) pipelineRecvHashAck(ctx context.Context, cancel context.
 	return matchChan
 }
 
-func (t *trzszTransfer) sendPrefixHash(file *os.File, tgtFile *targetFile, progress progressCallback) (int64, error) {
-	stat, err := file.Stat()
-	if err != nil {
-		return 0, err
-	}
-
-	if tgtFile.Size <= 0 {
-		return stat.Size(), nil
+func (t *trzszTransfer) sendPrefixHash(file *os.File, srcFile *sourceFile, tgtFile *targetFile,
+	progress progressCallback) (int64, error) {
+	if tgtFile.Size <= 0 || file == nil {
+		return srcFile.Size, nil
 	}
 
 	if progress != nil {
-		progress.onSize(stat.Size())
+		progress.onSize(srcFile.Size)
 	}
-	if err := t.sendInteger("SIZE", stat.Size()); err != nil {
-		return 0, err
+	if t.transferConfig.Protocol < kProtocolVersion4 {
+		if err := t.sendInteger("SIZE", srcFile.Size); err != nil {
+			return 0, err
+		}
 	}
 
 	var stopNow atomic.Bool
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
 
-	size := minInt64(tgtFile.Size, stat.Size())
+	size := minInt64(srcFile.Size, tgtFile.Size)
 	wg := t.pipelineSendHash(ctx, cancel, &stopNow, file, size)
 	matchChan := t.pipelineRecvHashAck(ctx, cancel, size, progress)
 
@@ -199,63 +197,79 @@ func (t *trzszTransfer) sendPrefixHash(file *os.File, tgtFile *targetFile, progr
 		return 0, context.Cause(ctx)
 	}
 
-	if _, err = file.Seek(matchStep, io.SeekStart); err != nil {
+	if _, err := file.Seek(matchStep, io.SeekStart); err != nil {
 		return 0, err
 	}
 	if progress != nil {
 		progress.setPreSize(matchStep)
 	}
-	return stat.Size() - matchStep, nil
+	return srcFile.Size - matchStep, nil
 }
 
-func (t *trzszTransfer) sendFileNameV3(srcFile *sourceFile, progress progressCallback) (*os.File, int64, string, error) {
+func (t *trzszTransfer) sendFileNameV3(srcFile *sourceFile, progress progressCallback) (fileReader, string, error) {
 	source, err := srcFile.marshalSourceFile()
 	if err != nil {
-		return nil, 0, "", err
+		return nil, "", err
 	}
 	if err := t.sendString("NAME", source); err != nil {
-		return nil, 0, "", err
+		return nil, "", err
 	}
 
 	target, err := t.recvString("SUCC", false, t.getNewTimeout())
 	if err != nil {
-		return nil, 0, "", err
+		return nil, "", err
 	}
 	tgtFile, err := unmarshalTargetFile(target)
 	if err != nil {
-		return nil, 0, "", err
+		return nil, "", err
 	}
 
 	if progress != nil {
 		progress.onName(srcFile.getFileName())
 	}
 
+	if len(srcFile.SubFiles) > 0 {
+		file, err := t.newArchiveReader(srcFile)
+		if err != nil {
+			return nil, "", err
+		}
+		return file, tgtFile.Name, nil
+	}
+
 	if srcFile.IsDir {
-		return nil, 0, tgtFile.Name, nil
+		return nil, tgtFile.Name, nil
 	}
 
 	file, err := os.Open(srcFile.AbsPath)
 	if err != nil {
-		return nil, 0, "", err
+		return nil, "", err
 	}
 
-	size, err := t.sendPrefixHash(file, tgtFile, progress)
+	size, err := t.sendPrefixHash(file, srcFile, tgtFile, progress)
 	if err != nil {
 		file.Close()
-		return nil, 0, "", err
+		return nil, "", err
 	}
 
-	return file, size, tgtFile.Name, nil
+	return &simpleFileReader{file, size}, tgtFile.Name, nil
 }
 
-func (t *trzszTransfer) recvPrefixHash(file *os.File, tgtFile *targetFile, progress progressCallback) error {
-	if tgtFile.Size <= 0 {
+func (t *trzszTransfer) recvPrefixHash(writer fileWriter, srcFile *sourceFile, tgtFile *targetFile,
+	progress progressCallback) error {
+	if tgtFile.Size <= 0 || writer == nil || writer.getFile() == nil {
 		return nil
 	}
+	file := writer.getFile()
 
-	size, err := t.recvInteger("SIZE", false, t.getNewTimeout())
-	if err != nil {
-		return err
+	var size int64
+	if t.transferConfig.Protocol < kProtocolVersion4 {
+		var err error
+		size, err = t.recvInteger("SIZE", false, t.getNewTimeout())
+		if err != nil {
+			return err
+		}
+	} else {
+		size = srcFile.Size
 	}
 	if progress != nil {
 		progress.onSize(size)
@@ -308,20 +322,23 @@ func (t *trzszTransfer) recvPrefixHash(file *os.File, tgtFile *targetFile, progr
 	return nil
 }
 
-func (t *trzszTransfer) recvFileNameV3(path string, progress progressCallback) (*os.File, string, error) {
+func (t *trzszTransfer) recvFileNameV3(path string, progress progressCallback) (fileWriter, string, error) {
 	jsonName, err := t.recvString("NAME", false, t.getNewTimeout())
 	if err != nil {
 		return nil, "", err
 	}
-
-	file, localName, fileName, err := t.createDirOrFile(path, jsonName, false)
+	srcFile, err := unmarshalSourceFile(jsonName)
+	if err != nil {
+		return nil, "", err
+	}
+	file, localName, err := t.createDirOrFile(path, srcFile, false)
 	if err != nil {
 		return nil, "", err
 	}
 
 	size := int64(0)
-	if file != nil {
-		stat, err := file.Stat()
+	if file != nil && file.getFile() != nil {
+		stat, err := file.getFile().Stat()
 		if err != nil {
 			file.Close()
 			return nil, "", err
@@ -332,21 +349,27 @@ func (t *trzszTransfer) recvFileNameV3(path string, progress progressCallback) (
 	tgtFile := &targetFile{Name: localName, Size: size}
 	target, err := tgtFile.marshalTargetFile()
 	if err != nil {
-		file.Close()
+		if file != nil {
+			file.Close()
+		}
 		return nil, "", err
 	}
 
 	if err := t.sendString("SUCC", target); err != nil {
-		file.Close()
+		if file != nil {
+			file.Close()
+		}
 		return nil, "", err
 	}
 
 	if progress != nil {
-		progress.onName(fileName)
+		progress.onName(srcFile.getFileName())
 	}
 
-	if err := t.recvPrefixHash(file, tgtFile, progress); err != nil {
-		file.Close()
+	if err := t.recvPrefixHash(file, srcFile, tgtFile, progress); err != nil {
+		if file != nil {
+			file.Close()
+		}
 		return nil, "", err
 	}
 

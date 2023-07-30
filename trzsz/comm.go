@@ -281,10 +281,14 @@ func checkPathWritable(path string) error {
 }
 
 type sourceFile struct {
-	PathID  int      `json:"path_id"`
-	AbsPath string   `json:"-"`
-	RelPath []string `json:"path_name"`
-	IsDir   bool     `json:"is_dir"`
+	PathID   int           `json:"path_id"`
+	AbsPath  string        `json:"-"`
+	RelPath  []string      `json:"path_name"`
+	IsDir    bool          `json:"is_dir"`
+	Archive  bool          `json:"archive"`
+	Size     int64         `json:"size"`
+	Header   string        `json:"-"`
+	SubFiles []*sourceFile `json:"-"`
 }
 
 func (f *sourceFile) getFileName() string {
@@ -295,6 +299,7 @@ func (f *sourceFile) getFileName() string {
 }
 
 func (f *sourceFile) marshalSourceFile() (string, error) {
+	f.Archive = len(f.SubFiles) > 0
 	jstr, err := json.Marshal(f)
 	if err != nil {
 		return "", err
@@ -346,7 +351,7 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*sourc
 		if syscallAccessRok(path) != nil {
 			return simpleTrzszError("No permission to read: %s", path)
 		}
-		*list = append(*list, &sourceFile{pathID, path, relPath, false})
+		*list = append(*list, &sourceFile{PathID: pathID, AbsPath: path, RelPath: relPath, Size: info.Size()})
 		return nil
 	}
 	realPath, err := filepath.EvalSymlinks(path)
@@ -357,7 +362,7 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*sourc
 		return simpleTrzszError("Duplicate link: %s", path)
 	}
 	visitedDir[realPath] = true
-	*list = append(*list, &sourceFile{pathID, path, relPath, true})
+	*list = append(*list, &sourceFile{PathID: pathID, AbsPath: path, RelPath: relPath, IsDir: true})
 	fileObj, err := os.Open(path)
 	if err != nil {
 		return simpleTrzszError("Open [%s] error: %v", path, err)
@@ -370,7 +375,7 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*sourc
 		p := filepath.Join(path, file.Name())
 		info, err := os.Stat(p)
 		if err != nil {
-			return err
+			return simpleTrzszError("Stat [%s] error: %v", p, err)
 		}
 		r := make([]string, len(relPath))
 		copy(r, relPath)
@@ -831,7 +836,13 @@ func isCompressedFileContent(file *os.File, pos int64) (bool, error) {
 	return len(encoder.EncodeAll(buffer, dst)) > compressedBlockSize*98/100, nil
 }
 
-func isCompressionProfitable(file *os.File, size int64) (bool, error) {
+func isCompressionProfitable(reader fileReader) (bool, error) {
+	file := reader.getFile()
+	if file == nil {
+		return true, nil
+	}
+	size := reader.getSize()
+
 	pos, err := file.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return false, err

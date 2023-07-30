@@ -468,7 +468,7 @@ func TestPipelineReadData(t *testing.T) {
 	// read success
 	ctx := newPipelineContext()
 	transfer := newTransfer(nil, nil, false, nil)
-	fileDataChan, md5SourceChan := transfer.pipelineReadData(ctx, f1, int64(N*2+100))
+	fileDataChan, md5SourceChan := transfer.pipelineReadData(ctx, &simpleFileReader{f1, int64(N*2 + 100)})
 
 	assertChannelFrontEqual(t, bytes.Repeat([]byte{'A'}, N), fileDataChan)
 	assertChannelFrontEqual(t, bytes.Repeat([]byte{'B'}, N), fileDataChan)
@@ -487,7 +487,7 @@ func TestPipelineReadData(t *testing.T) {
 	f2, err := os.Open(file.Name())
 	assert.Nil(err)
 	defer f2.Close()
-	fileDataChan, md5SourceChan = transfer.pipelineReadData(ctx, f2, 200)
+	fileDataChan, md5SourceChan = transfer.pipelineReadData(ctx, &simpleFileReader{f2, 200})
 	assertChannelFrontEqual(t, bytes.Repeat([]byte{'A'}, 200), fileDataChan)
 	assertChannelFrontEqual(t, bytes.Repeat([]byte{'A'}, 200), md5SourceChan)
 
@@ -495,7 +495,7 @@ func TestPipelineReadData(t *testing.T) {
 	f3, err := os.Open(file.Name())
 	assert.Nil(err)
 	defer f3.Close()
-	fileDataChan, md5SourceChan = transfer.pipelineReadData(ctx, f2, int64(N*2+100))
+	fileDataChan, md5SourceChan = transfer.pipelineReadData(ctx, &simpleFileReader{f2, int64(N*2 + 100)})
 	assertChannelClosed(t, fileDataChan)
 	assertChannelClosed(t, md5SourceChan)
 }
