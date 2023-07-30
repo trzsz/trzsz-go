@@ -98,7 +98,6 @@ Website: [https://trzsz.github.io/go](https://trzsz.github.io/go) 　中文文�
   <details><summary><code>scoop install trzsz</code> / <code>winget install trzsz</code> / <code>choco install trzsz</code></summary>
 
   ```sh
-  scoop bucket add extras
   scoop install trzsz
   ```
 
