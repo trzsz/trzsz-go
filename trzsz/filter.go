@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -176,6 +177,27 @@ func (filter *TrzszFilter) getTrzszConfig(name string) *string {
 
 var parentWindowID = getParentWindowID()
 
+func zenityErrorWithTips(err error) error {
+	if !isRunningOnLinux() {
+		return err
+	}
+	if _, e := exec.LookPath("zenity"); e == nil {
+		return err
+	}
+	tips := "'zenity' needs to be installed on the Linux Desktop."
+	if os.Getenv("WSL_DISTRO_NAME") == "" {
+		return simpleTrzszError(tips)
+	}
+	name := ""
+	if len(os.Args) > 0 {
+		name = filepath.Base(os.Args[0])
+	}
+	if !strings.HasSuffix(name, ".exe") {
+		name += ".exe"
+	}
+	return simpleTrzszError("%s Or use the Windows version '%s' in WSL.", tips, name)
+}
+
 func (filter *TrzszFilter) chooseDownloadPath() (string, error) {
 	savePath := filter.getTrzszConfig("DefaultDownloadPath")
 	if savePath != nil {
@@ -192,7 +214,7 @@ func (filter *TrzszFilter) chooseDownloadPath() (string, error) {
 	}
 	path, err := zenity.SelectFile(options...)
 	if err != nil {
-		return "", err
+		return "", zenityErrorWithTips(err)
 	}
 	if len(path) == 0 {
 		return "", zenity.ErrCanceled
@@ -221,7 +243,7 @@ func (filter *TrzszFilter) chooseUploadPaths(directory bool) ([]string, error) {
 	}
 	files, err := zenity.SelectFileMultiple(options...)
 	if err != nil {
-		return nil, err
+		return nil, zenityErrorWithTips(err)
 	}
 	if len(files) == 0 {
 		return nil, zenity.ErrCanceled
