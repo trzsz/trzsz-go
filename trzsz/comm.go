@@ -915,3 +915,14 @@ func joinFileNames(header string, fileNames []string) string {
 	}
 	return builder.String()
 }
+
+func resolveHomeDir(path string) string {
+	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, "~\\") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		return filepath.Join(home, path[2:])
+	}
+	return path
+}

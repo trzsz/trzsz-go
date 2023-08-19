@@ -54,23 +54,25 @@ type TrzszOptions struct {
 
 // TrzszFilter is a filter that supports trzsz ( trz / tsz ).
 type TrzszFilter struct {
-	clientIn        io.Reader
-	clientOut       io.WriteCloser
-	serverIn        io.WriteCloser
-	serverOut       io.Reader
-	options         TrzszOptions
-	transfer        atomic.Pointer[trzszTransfer]
-	progress        atomic.Pointer[textProgressBar]
-	promptPipe      atomic.Pointer[io.PipeWriter]
-	serverVersion   *trzszVersion
-	remoteIsWindows bool
-	dragging        atomic.Bool
-	dragHasDir      atomic.Bool
-	dragMutex       sync.Mutex
-	dragFiles       []string
-	interrupting    atomic.Bool
-	skipTrzCommand  atomic.Bool
-	logger          *traceLogger
+	clientIn            io.Reader
+	clientOut           io.WriteCloser
+	serverIn            io.WriteCloser
+	serverOut           io.Reader
+	options             TrzszOptions
+	transfer            atomic.Pointer[trzszTransfer]
+	progress            atomic.Pointer[textProgressBar]
+	promptPipe          atomic.Pointer[io.PipeWriter]
+	serverVersion       *trzszVersion
+	remoteIsWindows     bool
+	dragging            atomic.Bool
+	dragHasDir          atomic.Bool
+	dragMutex           sync.Mutex
+	dragFiles           []string
+	interrupting        atomic.Bool
+	skipTrzCommand      atomic.Bool
+	logger              *traceLogger
+	defaultUploadPath   string
+	defaultDownloadPath string
 }
 
 // NewTrzszFilter create a TrzszFilter to support trzsz ( trz / tsz ).
@@ -147,32 +149,64 @@ func (filter *TrzszFilter) UploadFiles(filePaths []string) error {
 	return nil
 }
 
-func (filter *TrzszFilter) getTrzszConfig(name string) *string {
+// SetDefaultUploadPath set the default open path while choosing upload files.
+func (filter *TrzszFilter) SetDefaultUploadPath(uploadPath string) {
+	filter.defaultUploadPath = uploadPath
+}
+
+// SetDefaultDownloadPath set the path to automatically save while downloading files.
+func (filter *TrzszFilter) SetDefaultDownloadPath(downloadPath string) {
+	filter.defaultDownloadPath = downloadPath
+}
+
+func (filter *TrzszFilter) getTrzszConfig(name string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil
+		return ""
 	}
 	file, err := os.Open(filepath.Join(home, ".trzsz.conf"))
 	if err != nil {
-		return nil
+		return ""
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
+	lowerName := strings.ToLower(name)
 	for scanner.Scan() {
 		line := scanner.Text()
 		idx := strings.Index(line, "=")
 		if idx < 0 {
 			continue
 		}
-		if strings.TrimSpace(line[0:idx]) == name {
-			value := strings.TrimSpace(line[idx+1:])
-			if len(value) == 0 {
-				return nil
-			}
-			return &value
+		if strings.ToLower(strings.TrimSpace(line[:idx])) == lowerName {
+			return strings.TrimSpace(line[idx+1:])
 		}
 	}
-	return nil
+	return ""
+}
+
+func (filter *TrzszFilter) getDefaultUploadPath() string {
+	path := filter.defaultUploadPath
+	if path == "" {
+		path = filter.getTrzszConfig("DefaultUploadPath")
+	}
+	if path == "" {
+		return ""
+	}
+	if !strings.HasSuffix(path, string(os.PathSeparator)) {
+		path += string(os.PathSeparator)
+	}
+	return resolveHomeDir(path)
+}
+
+func (filter *TrzszFilter) getDefaultDownloadPath() string {
+	path := filter.defaultDownloadPath
+	if path == "" {
+		path = filter.getTrzszConfig("DefaultDownloadPath")
+	}
+	if path == "" {
+		return ""
+	}
+	return resolveHomeDir(path)
 }
 
 var parentWindowID = getParentWindowID()
@@ -199,10 +233,10 @@ func zenityErrorWithTips(err error) error {
 }
 
 func (filter *TrzszFilter) chooseDownloadPath() (string, error) {
-	savePath := filter.getTrzszConfig("DefaultDownloadPath")
-	if savePath != nil {
+	savePath := filter.getDefaultDownloadPath()
+	if savePath != "" {
 		time.Sleep(50 * time.Millisecond) // wait for all output to show
-		return *savePath, nil
+		return savePath, nil
 	}
 	options := []zenity.Option{
 		zenity.Title("Choose a folder to save file(s)"),
@@ -231,9 +265,9 @@ func (filter *TrzszFilter) chooseUploadPaths(directory bool) ([]string, error) {
 		zenity.Title("Choose some files to send"),
 		zenity.ShowHidden(),
 	}
-	defaultPath := filter.getTrzszConfig("DefaultUploadPath")
-	if defaultPath != nil {
-		options = append(options, zenity.Filename(*defaultPath))
+	defaultPath := filter.getDefaultUploadPath()
+	if defaultPath != "" {
+		options = append(options, zenity.Filename(defaultPath))
 	}
 	if directory {
 		options = append(options, zenity.Directory())
