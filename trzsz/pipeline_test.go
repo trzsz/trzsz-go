@@ -365,7 +365,7 @@ func TestBase64Writer(t *testing.T) {
 func TestEscapeReader(t *testing.T) {
 	assert := assert.New(t)
 	transfer := newTransferWithEscape(t, nil, true)
-	reader := newEscapeReader(transfer, newMockReader([][]byte{
+	reader := newEscapeReader(transfer.transferConfig.EscapeTable, newMockReader([][]byte{
 		[]byte("ABC"),
 		[]byte("\xeeA\xeeB\xeeC\xeeDE"),
 		[]byte("ABCDEFGXYX\xee"),
@@ -381,8 +381,8 @@ func TestEscapeReader(t *testing.T) {
 	}
 	assertReadEqual("ABC", 100)
 	assertReadEqual("\x02", 1)
-	assertReadEqual("\x10", 1)
-	assertReadEqual("\x1b\x1d", 2)
+	assertReadEqual("\x0d", 1)
+	assertReadEqual("\x10\x11", 2)
 	assertReadEqual("E", 100)
 	assertReadEqual("A", 1)
 	assertReadEqual("BC", 2)
@@ -395,7 +395,7 @@ func TestEscapeWriter(t *testing.T) {
 	assert := assert.New(t)
 	transfer := newTransferWithEscape(t, nil, true)
 	var out mockWriter
-	writer := newEscapeWriter(transfer, &out)
+	writer := newEscapeWriter(transfer.transferConfig.EscapeTable, &out)
 	assertWriteSucc := func(data string) {
 		t.Helper()
 		n, err := writer.Write([]byte(data))
@@ -403,11 +403,17 @@ func TestEscapeWriter(t *testing.T) {
 		assert.Equal(n, len(data))
 	}
 	assertWriteSucc("AB\xeeC\x7e")
-	assertWriteSucc("\x02\x10\x1b\x1d")
+	assertWriteSucc("\x02\x0d\x10\x11")
+	assertWriteSucc("\x13\x18\x1b\x1d")
+	assertWriteSucc("\x8d\x90\x91\x93")
 	assertWriteSucc("\x9dXZ")
 	writer.Close()
 	assert.True(out.closed)
-	assert.Equal("AB\xee\xeeC\xee1\xeeA\xeeB\xeeC\xeeD\xeeEXZ", out.buf.String())
+	assert.Equal("AB\xee\xeeC\xee1"+
+		"\xeeA\xeeB\xeeC\xeeD"+
+		"\xeeE\xeeF\xeeG\xeeH"+
+		"\xeeI\xeeJ\xeeK\xeeL"+
+		"\xeeMXZ", out.buf.String())
 }
 
 func TestZstdReaderWriter(t *testing.T) {
@@ -638,16 +644,16 @@ func TestPipelineUnescapeData(t *testing.T) {
 
 	// escape at the end
 	recvDataChan <- []byte("ABC\xee\x41\xee\x42")
-	assertChannelFrontEqual(t, []byte("ABC\x02\x10"), fileDataChan)
-	assertChannelFrontEqual(t, []byte("ABC\x02\x10"), md5SourceChan)
+	assertChannelFrontEqual(t, []byte("ABC\x02\x0d"), fileDataChan)
+	assertChannelFrontEqual(t, []byte("ABC\x02\x0d"), md5SourceChan)
 
 	// escaping across buffers
 	recvDataChan <- []byte("ABC\xee\x41\xee")
 	recvDataChan <- []byte("\x42DEF")
 	assertChannelFrontEqual(t, []byte("ABC\x02"), fileDataChan)
 	assertChannelFrontEqual(t, []byte("ABC\x02"), md5SourceChan)
-	assertChannelFrontEqual(t, []byte("\x10DEF"), fileDataChan)
-	assertChannelFrontEqual(t, []byte("\x10DEF"), md5SourceChan)
+	assertChannelFrontEqual(t, []byte("\x0dDEF"), fileDataChan)
+	assertChannelFrontEqual(t, []byte("\x0dDEF"), md5SourceChan)
 
 	// complex escaping
 	recvDataChan <- []byte("ABC\xee\xee\xee\xee\xee")
@@ -658,23 +664,27 @@ func TestPipelineUnescapeData(t *testing.T) {
 	recvDataChan <- []byte("\xee\xee\xee\xee\xee")
 	recvDataChan <- []byte("G\xee\xee\xee\xee\xee")
 	recvDataChan <- []byte("\x31\xee\xee\xee\xee")
+	recvDataChan <- []byte("\xeeA\xeeB\xeeC\xeeD")
+	recvDataChan <- []byte("\xeeE\xeeF\xeeG\xeeH")
+	recvDataChan <- []byte("\xeeI\xeeJ\xeeK\xeeL")
+	recvDataChan <- []byte("\xeeM")
 	close(recvDataChan)
-	assertChannelFrontEqual(t, []byte("ABC\xee\xee"), fileDataChan)
-	assertChannelFrontEqual(t, []byte("ABC\xee\xee"), md5SourceChan)
-	assertChannelFrontEqual(t, []byte("\xee\xee\xee"), fileDataChan)
-	assertChannelFrontEqual(t, []byte("\xee\xee\xee"), md5SourceChan)
-	assertChannelFrontEqual(t, []byte("\xee\xee"), fileDataChan)
-	assertChannelFrontEqual(t, []byte("\xee\xee"), md5SourceChan)
-	assertChannelFrontEqual(t, []byte("\xee\xeeDEF\xee"), fileDataChan)
-	assertChannelFrontEqual(t, []byte("\xee\xeeDEF\xee"), md5SourceChan)
-	assertChannelFrontEqual(t, []byte("\xee\xee"), fileDataChan)
-	assertChannelFrontEqual(t, []byte("\xee\xee"), md5SourceChan)
-	assertChannelFrontEqual(t, []byte("\xee\xee\xee"), fileDataChan)
-	assertChannelFrontEqual(t, []byte("\xee\xee\xee"), md5SourceChan)
-	assertChannelFrontEqual(t, []byte("G\xee\xee"), fileDataChan)
-	assertChannelFrontEqual(t, []byte("G\xee\xee"), md5SourceChan)
-	assertChannelFrontEqual(t, []byte("\x7e\xee\xee"), fileDataChan)
-	assertChannelFrontEqual(t, []byte("\x7e\xee\xee"), md5SourceChan)
+	assertUnescapeEqual := func(dataChan <-chan []byte) {
+		assertChannelFrontEqual(t, []byte("ABC\xee\xee"), dataChan)
+		assertChannelFrontEqual(t, []byte("\xee\xee\xee"), dataChan)
+		assertChannelFrontEqual(t, []byte("\xee\xee"), dataChan)
+		assertChannelFrontEqual(t, []byte("\xee\xeeDEF\xee"), dataChan)
+		assertChannelFrontEqual(t, []byte("\xee\xee"), dataChan)
+		assertChannelFrontEqual(t, []byte("\xee\xee\xee"), dataChan)
+		assertChannelFrontEqual(t, []byte("G\xee\xee"), dataChan)
+		assertChannelFrontEqual(t, []byte("\x7e\xee\xee"), dataChan)
+		assertChannelFrontEqual(t, []byte("\x02\x0d\x10\x11"), dataChan)
+		assertChannelFrontEqual(t, []byte("\x13\x18\x1b\x1d"), dataChan)
+		assertChannelFrontEqual(t, []byte("\x8d\x90\x91\x93"), dataChan)
+		assertChannelFrontEqual(t, []byte("\x9d"), dataChan)
+	}
+	assertUnescapeEqual(fileDataChan)
+	assertUnescapeEqual(md5SourceChan)
 
 	// cancel
 	recvDataChan = make(chan []byte, 100)

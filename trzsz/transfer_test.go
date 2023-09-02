@@ -149,16 +149,19 @@ func TestTransferConfig(t *testing.T) {
 	writer.assertBufferCount(1)
 
 	encoder := charmap.ISO8859_1.NewEncoder()
-	escapeCodes := make([][]byte, len(escapeChars))
-	for i, v := range escapeChars {
+	table := &escapeTable{
+		totalCount:    len(escapeChars),
+		escapeCodes:   make([]*byte, 256),
+		unescapeCodes: make([]*byte, 256),
+	}
+	for _, v := range escapeChars {
 		b, err := encoder.Bytes([]byte(v[0]))
 		assert.Nil(err)
 		c, err := encoder.Bytes([]byte(v[1]))
 		assert.Nil(err)
-		escapeCodes[i] = make([]byte, 3)
-		escapeCodes[i][0] = b[0]
-		escapeCodes[i][1] = c[0]
-		escapeCodes[i][2] = c[1]
+		assert.Equal(escapeLeaderByte, c[0])
+		table.escapeCodes[b[0]] = &c[1]
+		table.unescapeCodes[c[1]] = &b[0]
 	}
 	config := transferConfig{
 		Quiet:           true,
@@ -169,7 +172,7 @@ func TestTransferConfig(t *testing.T) {
 		Newline:         "\n",
 		Protocol:        2,
 		MaxBufSize:      1024,
-		EscapeCodes:     escapeCodes,
+		EscapeTable:     table,
 		TmuxPaneColumns: 88,
 		TmuxOutputJunk:  true,
 	}
@@ -184,9 +187,9 @@ func TestTransferConfig(t *testing.T) {
 		assert.Equal(config, transfer.transferConfig)
 	}
 
-	cfgStr := "#CFG:eJxFz0sSgjAQBNC7zDqLQLnA7PydAikqhBGiSGKYiJ/SswsWhF3369nMGwrdSvcEQc4jg8KfOv1CEBGPVwxK7VCR" +
-		"WXbslLSYq1q6DkSawtFzjghsClPNWArfgNG/j5nHATcBIx5wu2ARcLdgGXAfcL3gAbKMQSPbCgRUZnBzR9c7TTg/YJ0ho0wDImZw8" +
-		"xppXkhf0XgaXx/K1T/yoVlP+dm3l3A0upUt5r0uqQaRJJ8f2dNlYw==\n"
+	cfgStr := "#CFG:eJxE0UtSwzAMBuC7/GsvnMAieMf7fYKQyTiJaA1tHByZ8hg4OxOmlXbSJ4/9j/WNLow+fcJxymTQ5ec5fBFcYctjgyEk" +
+		"6jnqnObeT9T2a59muLrGU7aWCGZf7NvG1PgVLP77pbal4KniIHgmWFjBc8VC8ELxSPBSsRK8UuwErxX19RvBSvFW8EQj3SlqpHtFjfSgq" +
+		"Hc+omkMNn5cwWEVYRDfKe1SYDp89JQixz5u4EqDtxyIDxMOW4qZlxUZ8DZ/tDHzlLl9yeOrHFp88iO1uzDwGq6qfv4CAAD//wzRkW0=\n"
 	assertConfigEqual(cfgStr)
 	assertConfigEqual(writer.buffer[0])
 }

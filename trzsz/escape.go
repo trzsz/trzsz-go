@@ -35,9 +35,13 @@ import (
 
 type unicode string
 
-type escapeArray [][]byte
+type escapeTable struct {
+	totalCount    int
+	escapeCodes   []*byte
+	unescapeCodes []*byte
+}
 
-const escapeLeaderByte = '\xee'
+const escapeLeaderByte = byte('\xee')
 
 func (s unicode) MarshalJSON() ([]byte, error) {
 	b := new(bytes.Buffer)
@@ -59,18 +63,24 @@ func getEscapeChars(escapeAll bool) [][]unicode {
 		{"\u007e", "\u00ee\u0031"},
 	}
 	if escapeAll {
-		const chars = unicode("\x02\x10\x1b\x1d\u009d")
-		for i, c := range chars {
-			escapeChars = append(escapeChars, []unicode{unicode(c), "\u00ee" + unicode(byte(i+0x41))})
+		const chars = unicode("\x02\x0d\x10\x11\x13\x18\x1b\x1d\u008d\u0090\u0091\u0093\u009d")
+		e := byte('A')
+		for _, c := range chars {
+			escapeChars = append(escapeChars, []unicode{unicode(c), unicode(escapeLeaderByte) + unicode(e)})
+			e += 1
 		}
 	}
 	return escapeChars
 }
 
-func escapeCharsToCodes(escapeChars []interface{}) ([][]byte, error) {
-	escapeCodes := make([][]byte, len(escapeChars))
+func escapeCharsToTable(escapeChars []interface{}) (*escapeTable, error) {
+	table := &escapeTable{
+		totalCount:    len(escapeChars),
+		escapeCodes:   make([]*byte, 256),
+		unescapeCodes: make([]*byte, 256),
+	}
 	encoder := charmap.ISO8859_1.NewEncoder()
-	for i, v := range escapeChars {
+	for _, v := range escapeChars {
 		a, ok := v.([]interface{})
 		if !ok {
 			return nil, simpleTrzszError("Escape chars invalid: %v", v)
@@ -103,54 +113,49 @@ func escapeCharsToCodes(escapeChars []interface{}) ([][]byte, error) {
 		if cc[0] != escapeLeaderByte {
 			return nil, simpleTrzszError("Escape chars invalid: %v", v)
 		}
-		escapeCodes[i] = make([]byte, 3)
-		escapeCodes[i][0] = bb[0]
-		escapeCodes[i][1] = cc[0]
-		escapeCodes[i][2] = cc[1]
+		table.escapeCodes[bb[0]] = &cc[1]
+		table.unescapeCodes[cc[1]] = &bb[0]
 	}
-	return escapeCodes, nil
+	return table, nil
 }
 
-func (c *escapeArray) UnmarshalJSON(data []byte) error {
+func (c *escapeTable) UnmarshalJSON(data []byte) error {
 	var codes []interface{}
 	if err := json.Unmarshal(data, &codes); err != nil {
 		return err
 	}
-	var err error
-	*c, err = escapeCharsToCodes(codes)
-	return err
+	table, err := escapeCharsToTable(codes)
+	if err != nil {
+		return err
+	}
+	*c = *table
+	return nil
 }
 
-func escapeData(data []byte, escapeCodes [][]byte) []byte {
-	if len(escapeCodes) == 0 {
+func escapeData(data []byte, table *escapeTable) []byte {
+	if table == nil || table.totalCount == 0 {
 		return data
 	}
 
 	buf := make([]byte, len(data)*2)
 	idx := 0
-	for _, d := range data {
-		escapeIdx := -1
-		for j, e := range escapeCodes {
-			if d == e[0] {
-				escapeIdx = j
-				break
-			}
-		}
-		if escapeIdx < 0 {
-			buf[idx] = d
+	for _, bdata := range data {
+		ecode := table.escapeCodes[bdata]
+		if ecode == nil {
+			buf[idx] = bdata
 			idx++
 		} else {
-			buf[idx] = escapeCodes[escapeIdx][1]
+			buf[idx] = escapeLeaderByte
 			idx++
-			buf[idx] = escapeCodes[escapeIdx][2]
+			buf[idx] = *ecode
 			idx++
 		}
 	}
 	return buf[:idx]
 }
 
-func unescapeData(data []byte, escapeCodes [][]byte, dst []byte) ([]byte, []byte, error) {
-	if len(escapeCodes) == 0 {
+func unescapeData(data []byte, table *escapeTable, dst []byte) ([]byte, []byte, error) {
+	if table == nil || table.totalCount == 0 {
 		return data, nil, nil
 	}
 
@@ -166,18 +171,11 @@ func unescapeData(data []byte, escapeCodes [][]byte, dst []byte) ([]byte, []byte
 				return buf[:idx], data[i:], nil
 			}
 			i++
-			b := data[i]
-			escaped := false
-			for _, e := range escapeCodes {
-				if b == e[2] {
-					buf[idx] = e[0]
-					escaped = true
-					break
-				}
+			ecode := table.unescapeCodes[data[i]]
+			if ecode == nil {
+				return nil, nil, simpleTrzszError("Unknown escape code: %v", data[i])
 			}
-			if !escaped {
-				return nil, nil, simpleTrzszError("Unknown escape code: %v", b)
-			}
+			buf[idx] = *ecode
 		} else {
 			buf[idx] = data[i]
 		}

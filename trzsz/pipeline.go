@@ -222,19 +222,19 @@ func newBase64Writer(writer io.WriteCloser) writeCloseFlusher {
 }
 
 type escapeReader struct {
-	transfer *trzszTransfer
-	reader   io.Reader
-	buffer   []byte
+	table  *escapeTable
+	reader io.Reader
+	buffer []byte
 }
 
 func (e *escapeReader) Read(p []byte) (n int, err error) {
-	if len(e.transfer.transferConfig.EscapeCodes) == 0 {
+	if e.table == nil || e.table.totalCount == 0 {
 		return e.reader.Read(p)
 	}
 	for {
 		var idx int
 		if len(e.buffer) > 0 {
-			buf, remaining, err := unescapeData(e.buffer, e.transfer.transferConfig.EscapeCodes, p)
+			buf, remaining, err := unescapeData(e.buffer, e.table, p)
 			if err != nil {
 				return 0, err
 			}
@@ -260,17 +260,17 @@ func (e *escapeReader) Read(p []byte) (n int, err error) {
 func (e *escapeReader) Close() {
 }
 
-func newEscapeReader(transfer *trzszTransfer, reader io.Reader) readCloser {
-	return &escapeReader{transfer, reader, nil}
+func newEscapeReader(table *escapeTable, reader io.Reader) readCloser {
+	return &escapeReader{table, reader, nil}
 }
 
 type escapeWriter struct {
-	transfer *trzszTransfer
-	writer   io.WriteCloser
+	table  *escapeTable
+	writer io.WriteCloser
 }
 
 func (e *escapeWriter) Write(p []byte) (int, error) {
-	buf := escapeData(p, e.transfer.transferConfig.EscapeCodes)
+	buf := escapeData(p, e.table)
 	if err := writeAll(e.writer, buf); err != nil {
 		return 0, err
 	}
@@ -285,8 +285,8 @@ func (e *escapeWriter) Flush() error {
 	return nil
 }
 
-func newEscapeWriter(transfer *trzszTransfer, writer io.WriteCloser) writeCloseFlusher {
-	return &escapeWriter{transfer, writer}
+func newEscapeWriter(table *escapeTable, writer io.WriteCloser) writeCloseFlusher {
+	return &escapeWriter{table, writer}
 }
 
 type zstdReader struct {
@@ -553,9 +553,9 @@ func (t *trzszTransfer) pipelineEncodeData(ctx *pipelineContext, fileDataChan <-
 		var writer writeCloseFlusher
 		if t.transferConfig.Binary {
 			if compress {
-				writer, err = newZstdWriter(newEscapeWriter(t, newSendDataWriter(t, ctx, sendDataChan)))
+				writer, err = newZstdWriter(newEscapeWriter(t.transferConfig.EscapeTable, newSendDataWriter(t, ctx, sendDataChan)))
 			} else {
-				writer = newEscapeWriter(t, newSendDataWriter(t, ctx, sendDataChan))
+				writer = newEscapeWriter(t.transferConfig.EscapeTable, newSendDataWriter(t, ctx, sendDataChan))
 			}
 		} else {
 			if compress {
@@ -964,9 +964,9 @@ func (t *trzszTransfer) pipelineDecodeData(ctx *pipelineContext, recvDataChan <-
 		var reader readCloser
 		if t.transferConfig.Binary {
 			if compress {
-				reader, err = newZstdReader(newEscapeReader(t, newRecvDataReader(ctx, recvDataChan)))
+				reader, err = newZstdReader(newEscapeReader(t.transferConfig.EscapeTable, newRecvDataReader(ctx, recvDataChan)))
 			} else {
-				reader = newEscapeReader(t, newRecvDataReader(ctx, recvDataChan))
+				reader = newEscapeReader(t.transferConfig.EscapeTable, newRecvDataReader(ctx, recvDataChan))
 			}
 		} else {
 			if compress {

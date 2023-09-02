@@ -71,7 +71,7 @@ type transferConfig struct {
 	Newline         string       `json:"newline"`
 	Protocol        int          `json:"protocol"`
 	MaxBufSize      int64        `json:"bufsize"`
-	EscapeCodes     escapeArray  `json:"escape_chars"`
+	EscapeTable     *escapeTable `json:"escape_chars"`
 	TmuxPaneColumns int32        `json:"tmux_pane_width"`
 	TmuxOutputJunk  bool         `json:"tmux_output_junk"`
 	CompressType    compressType `json:"compress"`
@@ -404,7 +404,7 @@ func (t *trzszTransfer) sendData(data []byte) error {
 	if !t.transferConfig.Binary {
 		return t.sendBinary("DATA", data)
 	}
-	buf := escapeData(data, t.transferConfig.EscapeCodes)
+	buf := escapeData(data, t.transferConfig.EscapeTable)
 	if err := t.writeAll([]byte(fmt.Sprintf("#DATA:%d\n", len(buf)))); err != nil {
 		return err
 	}
@@ -434,7 +434,7 @@ func (t *trzszTransfer) recvData() ([]byte, error) {
 		}
 		return nil, err
 	}
-	buf, remaining, err := unescapeData(data, t.transferConfig.EscapeCodes, nil)
+	buf, remaining, err := unescapeData(data, t.transferConfig.EscapeTable, nil)
 	if err != nil {
 		return nil, err
 	}
