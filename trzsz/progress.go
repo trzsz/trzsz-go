@@ -154,13 +154,14 @@ type textProgressBar struct {
 	timeArray       [kSpeedArraySize]*time.Time
 	stepArray       [kSpeedArraySize]int64
 	pausing         atomic.Bool
+	tmuxPrefix      string
 }
 
-func newTextProgressBar(writer io.Writer, columns int32, tmuxPaneColumns int32) *textProgressBar {
+func newTextProgressBar(writer io.Writer, columns int32, tmuxPaneColumns int32, tmuxPrefix string) *textProgressBar {
 	if tmuxPaneColumns > 1 {
 		columns = tmuxPaneColumns - 1 //  -1 to avoid messing up the tmux pane
 	}
-	progress := &textProgressBar{writer: writer, firstWrite: true}
+	progress := &textProgressBar{writer: writer, firstWrite: true, tmuxPrefix: tmuxPrefix}
 	progress.columns.Store(columns)
 	progress.tmuxPaneColumns.Store(tmuxPaneColumns)
 	return progress
@@ -247,6 +248,14 @@ func (p *textProgressBar) setPause(pausing bool) {
 	p.pausing.Store(pausing)
 }
 
+func (p *textProgressBar) writeProgress(progress string) {
+	data := []byte(progress)
+	if p.tmuxPrefix != "" {
+		data = encodeTmuxOutput(p.tmuxPrefix, data)
+	}
+	_ = writeAll(p.writer, data)
+}
+
 func (p *textProgressBar) showProgress() {
 	now := timeNowFunc()
 	if p.lastUpdateTime != nil && now.Sub(*p.lastUpdateTime) < 200*time.Millisecond {
@@ -270,14 +279,14 @@ func (p *textProgressBar) showProgress() {
 
 	if p.firstWrite {
 		p.firstWrite = false
-		_ = writeAll(p.writer, []byte(progressText))
+		p.writeProgress(progressText)
 		return
 	}
 
 	if p.tmuxPaneColumns.Load() > 0 {
-		_ = writeAll(p.writer, []byte(fmt.Sprintf("\x1b[%dD%s", p.columns.Load(), progressText)))
+		p.writeProgress(fmt.Sprintf("\x1b[%dD%s", p.columns.Load(), progressText))
 	} else {
-		_ = writeAll(p.writer, []byte(fmt.Sprintf("\r%s", progressText)))
+		p.writeProgress(fmt.Sprintf("\r%s", progressText))
 	}
 }
 

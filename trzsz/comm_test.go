@@ -153,119 +153,201 @@ func TestTrzszVersion(t *testing.T) {
 func TestTrzszDetector(t *testing.T) {
 	assert := assert.New(t)
 	detector := newTrzszDetector(false, false)
-	assertDetectTrzsz := func(output string, mode *byte, ver *trzszVersion, win bool) {
+	assertDetectTrzsz := func(output string, tunnel bool, trigger *trzszTrigger) {
 		t.Helper()
-		buf, m, v, w := detector.detectTrzsz([]byte(output))
-		if mode == nil {
+		buf, t := detector.detectTrzsz([]byte(output), tunnel)
+		assert.Equal(trigger, t)
+		if trigger == nil {
 			assert.Equal([]byte(output), buf)
 		} else {
 			assert.Equal(bytes.ReplaceAll([]byte(output), []byte("TRZSZ"), []byte("TRZSZGO")), buf)
 		}
-		assert.Equal(mode, m)
-		assert.Equal(ver, v)
-		assert.Equal(win, w)
 	}
 
-	assertDetectTrzsz("", nil, nil, false)
-	assertDetectTrzsz("ABC", nil, nil, false)
-	assertDetectTrzsz(strings.Repeat("A::", 10), nil, nil, false)
-	assertDetectTrzsz("::TRZSZ:TRANSFER:R:", nil, nil, false)
+	assertDetectTrzsz("", false, nil)
+	assertDetectTrzsz("ABC", false, nil)
+	assertDetectTrzsz(strings.Repeat("A::", 10), false, nil)
+	assertDetectTrzsz("::TRZSZ:TRANSFER:R:", false, nil)
 
 	// normal trzsz trigger
-	R := byte('R')
-	D := byte('D')
-	S := byte('S')
-	assertDetectTrzsz("::TRZSZ:TRANSFER:"+"R:1.0.0:0", &R, &trzszVersion{1, 0, 0}, false)
-	assertDetectTrzsz("ABC::TRZSZ:TRANSFER:"+"D:1.0.0:123", &D, &trzszVersion{1, 0, 0}, false)
-	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1", &S, &trzszVersion{1, 0, 0}, true)
-	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:1234", &S, &trzszVersion{1, 0, 0}, true)
-	assertDetectTrzsz("XYX\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:7890", &S, &trzszVersion{1, 0, 0}, true)
-	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:1234ABC\n", &S, &trzszVersion{1, 0, 0}, true)
-	assertDetectTrzsz("XYX\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:7890EFG\r\n", &S, &trzszVersion{1, 0, 0}, true)
+	newTrigger100 := func(mode byte, uid string, win bool, port int) *trzszTrigger {
+		return &trzszTrigger{mode, &trzszVersion{1, 0, 0}, uid, win, port, ""}
+	}
+	assertDetectTrzsz("::TRZSZ:TRANSFER:"+"R:1.0.0:0", false,
+		newTrigger100('R', "0", false, 0))
+	assertDetectTrzsz("ABC::TRZSZ:TRANSFER:"+"D:1.0.0:123", false,
+		newTrigger100('D', "123", false, 0))
+	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1", false,
+		newTrigger100('S', "1", true, 0))
+	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:1234", false,
+		newTrigger100('S', "1", true, 1234))
+	assertDetectTrzsz("XYX\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:7890", false,
+		newTrigger100('S', "1", true, 7890))
+	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:1234", false,
+		newTrigger100('S', "1", true, 1337))
+	assertDetectTrzsz("XYX\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:7890", false,
+		newTrigger100('S', "1", true, 1337))
+	assertDetectTrzsz("\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:1234ABC\n", false,
+		newTrigger100('S', "1", true, 1337))
+	assertDetectTrzsz("XYX\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:7890EFG\r\n", false,
+		newTrigger100('S', "1", true, 1337))
 
 	// repeated trigger
 	uniqueID := time.Now().UnixMilli() % 10e10
-	assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", uniqueID*100+10), &R, &trzszVersion{1, 1, 0}, true)
+	newTrigger110 := func(mode byte, uid int64, win bool, port int) *trzszTrigger {
+		return &trzszTrigger{mode, &trzszVersion{1, 1, 0}, fmt.Sprintf("%013d", uid), win, port, ""}
+	}
+	assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", uniqueID*100+10), false,
+		newTrigger110('R', uniqueID*100+10, true, 0))
 	for i := 0; i <= 100; i++ {
-		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), &R, &trzszVersion{1, 1, 0}, true)
-		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), nil, nil, false)
+		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), false,
+			newTrigger110('R', int64(i*100+10), true, 0))
+		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), false, nil)
 		if i > 0 {
-			assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", (i-1)*100+10), nil, nil, false)
+			assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", (i-1)*100+10), false, nil)
 		}
 	}
 	for i := 0; i < 49; i++ {
-		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), &R, &trzszVersion{1, 1, 0}, true)
-		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), nil, nil, false)
+		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), false,
+			newTrigger110('R', int64(i*100+10), true, 0))
+		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), false, nil)
 		if i > 0 {
-			assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", (i-1)*100+10), nil, nil, false)
+			assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", (i-1)*100+10), false, nil)
 		}
 	}
 
-	// ignore tmux control mode
-	assertDetectTrzsz("%output %1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", nil, nil, false)
-	assertDetectTrzsz("%output %23 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", nil, nil, false)
-	assertDetectTrzsz("%extended-output %0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", nil, nil, false)
-	assertDetectTrzsz("%extended-output %10 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", nil, nil, false)
+	// tmux control mode
+	newTriggerTMUX := func(prefix string, port int) *trzszTrigger {
+		return &trzszTrigger{'R', &trzszVersion{1, 0, 0}, "0", false, port, prefix}
+	}
+	assertDetectTrzsz("%output %1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
+	assertDetectTrzsz("%output %23 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
+	assertDetectTrzsz("%extended-output %0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
+	assertDetectTrzsz("%extended-output %10 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
 
-	assertDetectTrzsz("%output %x \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
-	assertDetectTrzsz("%output 1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
-	assertDetectTrzsz("%output % \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
-	assertDetectTrzsz("output %1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
+	assertDetectTrzsz("%output %1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", false, nil)
+	assertDetectTrzsz("%extended-output %0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", false, nil)
+	assertDetectTrzsz("%output %1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", true,
+		newTriggerTMUX("%output %1 ", 1337))
+	assertDetectTrzsz("%extended-output %0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", true,
+		newTriggerTMUX("%extended-output %0 0 : ", 1337))
 
-	assertDetectTrzsz("%extended-output %a 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
-	assertDetectTrzsz("%extended-output %0 b : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
-	assertDetectTrzsz("extended-output %0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
-	assertDetectTrzsz("%extended-output 0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
-	assertDetectTrzsz("%extended-output % 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
-	assertDetectTrzsz("%extended-output %0 0 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", &R, &trzszVersion{1, 0, 0}, false)
+	tmuxTrigger := newTriggerTMUX("", 0)
+	assertDetectTrzsz("%output %x \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("%output 1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("%output % \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("output %1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+
+	assertDetectTrzsz("%extended-output %a 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("%extended-output %0 b : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("extended-output %0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("%extended-output 0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("%extended-output % 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("%extended-output %0 0 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
 }
 
 func TestRelayDetector(t *testing.T) {
 	assert := assert.New(t)
 	detector := newTrzszDetector(true, true)
-	R := byte('R')
 	prefix := "\x1b7\x07::TRZSZ:TRANSFER:R:1.0.0"
-	assertRewriteEqual := func(output, expected string, mode *byte, win bool) {
+	assertRewriteEqual := func(output, expected string, trigger *trzszTrigger) {
 		t.Helper()
 		detector.uniqueIDMap = make(map[string]int) // ignore unique check
-		buf, m, v, w := detector.detectTrzsz([]byte(prefix + output))
+		buf, t := detector.detectTrzsz([]byte(prefix+output), false)
 		assert.Equal([]byte(prefix+expected), buf)
-		assert.Equal(mode, m)
-		assert.Equal(win, w)
-		if mode != nil {
-			assert.Equal(&trzszVersion{1, 0, 0}, v)
-		}
+		assert.Equal(t, trigger)
+	}
+	newTrigger := func(uid string, win bool, port int) *trzszTrigger {
+		return &trzszTrigger{'R', &trzszVersion{1, 0, 0}, uid, win, port, ""}
 	}
 
-	assertRewriteEqual(":0", ":0#R", &R, false)
-	assertRewriteEqual(":1", ":1#R", &R, true)
-	assertRewriteEqual(":0\n", ":0#R\n", &R, false)
-	assertRewriteEqual(":1\r\n", ":1#R\r\n", &R, true)
+	assertRewriteEqual(":0", ":0#R", newTrigger("0", false, 0))
+	assertRewriteEqual(":1", ":1#R", newTrigger("1", true, 0))
+	assertRewriteEqual(":0\n", ":0#R\n", newTrigger("0", false, 0))
+	assertRewriteEqual(":1\r\n", ":1#R\r\n", newTrigger("1", true, 0))
 
-	assertRewriteEqual(":1234567890110", ":1234567890110#R", &R, true)
-	assertRewriteEqual(":9876543210210", ":9876543210210#R", &R, true)
-	assertRewriteEqual(":1234567890110\n", ":1234567890110#R\n", &R, true)
-	assertRewriteEqual(":9876543210210\r\n", ":9876543210210#R\r\n", &R, true)
-	assertRewriteEqual(":1234567890110#R\n", ":1234567890110#R#R\n", &R, true)
-	assertRewriteEqual(":9876543210210#R\r\n", ":9876543210210#R#R\r\n", &R, true)
+	assertRewriteEqual(":0:1234", ":0:1234#R", newTrigger("0", false, 1234))
+	assertRewriteEqual(":1:1234", ":1:1234#R", newTrigger("1", true, 1234))
+	assertRewriteEqual(":0:1337\n", ":0:1337#R\n", newTrigger("0", false, 1337))
+	assertRewriteEqual(":1:1337\r\n", ":1:1337#R\r\n", newTrigger("1", true, 1337))
 
-	assertRewriteEqual(":123456789\n0100", ":123456789#R\n0100", &R, false)
-	assertRewriteEqual(":123456789\r\n0200", ":123456789#R\r\n0200", &R, false)
-	assertRewriteEqual(":123456789\n0100\n", ":123456789#R\n0100\n", &R, false)
-	assertRewriteEqual(":123456789\r\n0200\r\n", ":123456789#R\r\n0200\r\n", &R, false)
+	assertRewriteEqual(":1234567890110", ":1234567890110#R",
+		newTrigger("1234567890110", true, 0))
+	assertRewriteEqual(":9876543210210", ":9876543210210#R",
+		newTrigger("9876543210210", true, 0))
+	assertRewriteEqual(":1234567890110\n", ":1234567890110#R\n",
+		newTrigger("1234567890110", true, 0))
+	assertRewriteEqual(":9876543210210\r\n", ":9876543210210#R\r\n",
+		newTrigger("9876543210210", true, 0))
+	assertRewriteEqual(":1234567890110#R\n", ":1234567890110#R#R\n",
+		newTrigger("1234567890110", true, 0))
+	assertRewriteEqual(":9876543210210#R\r\n", ":9876543210210#R#R\r\n",
+		newTrigger("9876543210210", true, 0))
 
-	assertRewriteEqual(":1234567890100", ":1234567890120#R", &R, false)
-	assertRewriteEqual(":9876543210200", ":9876543210220#R", &R, false)
-	assertRewriteEqual(":1234567890100\n", ":1234567890120#R\n", &R, false)
-	assertRewriteEqual(":9876543210200\r\n", ":9876543210220#R\r\n", &R, false)
-	assertRewriteEqual(":1234567890100#R\n", ":1234567890120#R#R\n", &R, false)
-	assertRewriteEqual(":9876543210200#R\r\n", ":9876543210220#R#R\r\n", &R, false)
+	assertRewriteEqual(":1234567890110:12345", ":1234567890110:12345#R",
+		newTrigger("1234567890110", true, 12345))
+	assertRewriteEqual(":9876543210210:12345", ":9876543210210:12345#R",
+		newTrigger("9876543210210", true, 12345))
+	assertRewriteEqual(":1234567890110:12345\n", ":1234567890110:12345#R\n",
+		newTrigger("1234567890110", true, 12345))
+	assertRewriteEqual(":9876543210210:12345\r\n", ":9876543210210:12345#R\r\n",
+		newTrigger("9876543210210", true, 12345))
+	assertRewriteEqual(":1234567890110:12345#R\n", ":1234567890110:12345#R#R\n",
+		newTrigger("1234567890110", true, 12345))
+	assertRewriteEqual(":9876543210210:12345#R\r\n", ":9876543210210:12345#R#R\r\n",
+		newTrigger("9876543210210", true, 12345))
+
+	assertRewriteEqual(":123456789\n0100", ":123456789#R\n0100",
+		newTrigger("123456789", false, 0))
+	assertRewriteEqual(":123456789\r\n0200", ":123456789#R\r\n0200",
+		newTrigger("123456789", false, 0))
+	assertRewriteEqual(":123456789\n0100\n", ":123456789#R\n0100\n",
+		newTrigger("123456789", false, 0))
+	assertRewriteEqual(":123456789\r\n0200\r\n", ":123456789#R\r\n0200\r\n",
+		newTrigger("123456789", false, 0))
+
+	assertRewriteEqual(":123456789:1223\n0100", ":123456789:1223#R\n0100",
+		newTrigger("123456789", false, 1223))
+	assertRewriteEqual(":123456789:1223\r\n0200", ":123456789:1223#R\r\n0200",
+		newTrigger("123456789", false, 1223))
+	assertRewriteEqual(":123456789:1223\n0100\n", ":123456789:1223#R\n0100\n",
+		newTrigger("123456789", false, 1223))
+	assertRewriteEqual(":123456789:1223\r\n0200\r\n", ":123456789:1223#R\r\n0200\r\n",
+		newTrigger("123456789", false, 1223))
+
+	assertRewriteEqual(":1234567890100", ":1234567890120#R",
+		newTrigger("1234567890120", false, 0))
+	assertRewriteEqual(":9876543210200", ":9876543210220#R",
+		newTrigger("9876543210220", false, 0))
+	assertRewriteEqual(":1234567890100\n", ":1234567890120#R\n",
+		newTrigger("1234567890120", false, 0))
+	assertRewriteEqual(":9876543210200\r\n", ":9876543210220#R\r\n",
+		newTrigger("9876543210220", false, 0))
+	assertRewriteEqual(":1234567890100#R\n", ":1234567890120#R#R\n",
+		newTrigger("1234567890120", false, 0))
+	assertRewriteEqual(":9876543210200#R\r\n", ":9876543210220#R#R\r\n",
+		newTrigger("9876543210220", false, 0))
+
+	assertRewriteEqual(":1234567890100:333", ":1234567890120:333#R",
+		newTrigger("1234567890120", false, 333))
+	assertRewriteEqual(":9876543210200:333", ":9876543210220:333#R",
+		newTrigger("9876543210220", false, 333))
+	assertRewriteEqual(":1234567890100:333\n", ":1234567890120:333#R\n",
+		newTrigger("1234567890120", false, 333))
+	assertRewriteEqual(":9876543210200:333\r\n", ":9876543210220:333#R\r\n",
+		newTrigger("9876543210220", false, 333))
+	assertRewriteEqual(":1234567890100:333#R\n", ":1234567890120:333#R#R\n",
+		newTrigger("1234567890120", false, 333))
+	assertRewriteEqual(":9876543210200:333#R\r\n", ":9876543210220:333#R#R\r\n",
+		newTrigger("9876543210220", false, 333))
 
 	assertRewriteEqual(":1234567890100\n"+prefix+":9876543210200\r\n",
-		":1234567890120\n"+prefix+":9876543210220#R\r\n", &R, false)
+		":1234567890120\n"+prefix+":9876543210220#R\r\n", newTrigger("9876543210220", false, 0))
+	assertRewriteEqual(":1234567890100\n"+prefix+":9876543210200:8\r\n",
+		":1234567890120\n"+prefix+":9876543210220:8#R\r\n", newTrigger("9876543210220", false, 8))
 
 	assertRewriteEqual(":1234567890100\n"+prefix+":9876543210200\r\n::TRZSZ:TRANSFER:R:",
-		":1234567890120\n"+prefix+":9876543210220\r\n::TRZSZ:TRANSFER:R:", nil, false)
+		":1234567890120\n"+prefix+":9876543210220\r\n::TRZSZ:TRANSFER:R:", nil)
 }
 
 func TestFormatSavedFileNames(t *testing.T) {

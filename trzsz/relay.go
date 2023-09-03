@@ -356,12 +356,11 @@ func (r *trzszRelay) wrapOutput() {
 				continue
 			}
 
-			var mode *byte
-			var serverIsWindows bool
-			buf, mode, _, serverIsWindows = detector.detectTrzsz(buf)
-			if mode != nil {
+			var trigger *trzszTrigger
+			buf, trigger = detector.detectTrzsz(buf, false) // TODO r.tunnelConnector != nil
+			if trigger != nil {
 				r.relayStatus.Store(kRelayHandshaking) // store status before send to client
-				r.serverIsWindows = serverIsWindows
+				r.serverIsWindows = trigger.winServer
 				go r.handshake()
 			}
 

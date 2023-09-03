@@ -59,7 +59,7 @@ func TestProgressWithEmptyFile(t *testing.T) {
 	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135000}, 0)
 
-	progress := newTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0, "")
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(0)
@@ -75,7 +75,7 @@ func TestProgressZeroStep(t *testing.T) {
 	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135100}, 0)
 
-	progress := newTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0, "")
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(100)
@@ -91,7 +91,7 @@ func TestProgressLastStep(t *testing.T) {
 	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135200}, 0)
 
-	progress := newTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0, "")
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(100)
@@ -107,7 +107,7 @@ func TestProgressWithSpeedAndEta(t *testing.T) {
 	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135100}, 0)
 
-	progress := newTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0, "")
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(100)
@@ -128,7 +128,7 @@ func TestProgressNewestSpeed(t *testing.T) {
 	}
 	callTimeNowCount := mockTimeNow(mockTimes, 0)
 
-	progress := newTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0, "")
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(100000)
@@ -187,7 +187,7 @@ func TestProgressReduceOutput(t *testing.T) {
 	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564135001, 1646564135099}, 0)
 
-	progress := newTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0, "")
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(100)
@@ -204,7 +204,7 @@ func TestProgressFastSpeed(t *testing.T) {
 	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000}, 0)
 
-	progress := newTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0, "")
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(1125899906842624)
@@ -220,7 +220,7 @@ func TestProgressSlowSpeed(t *testing.T) {
 	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000}, 0)
 
-	progress := newTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0, "")
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(1024 * 1024)
@@ -236,7 +236,7 @@ func TestProgressLongFileName(t *testing.T) {
 	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000}, 0)
 
-	progress := newTextProgressBar(writer, 110, 0)
+	progress := newTextProgressBar(writer, 110, 0, "")
 	progress.onNum(1)
 	progress.onName("中文😀非常长非常长非常长非常长非常长非常长非常长非常长.txt")
 	progress.onSize(1024 * 1024)
@@ -257,7 +257,7 @@ func TestProgressWithoutTotalSize(t *testing.T) {
 	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000}, 0)
 
-	progress := newTextProgressBar(writer, 95, 0)
+	progress := newTextProgressBar(writer, 95, 0, "")
 	progress.onNum(1)
 	progress.onName("中文😀非常长非常长非常长非常长非常长非常长非常长非常长.txt")
 	progress.onSize(1000 * 1024 * 1024 * 1024)
@@ -276,7 +276,7 @@ func TestProgressWithoutSpeedOrEta(t *testing.T) {
 	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000}, 0)
 
-	progress := newTextProgressBar(writer, 70, 0)
+	progress := newTextProgressBar(writer, 70, 0, "")
 	progress.onNum(1)
 	progress.onName("中文😀longlonglonglonglonglongname.txt")
 	progress.onSize(1000)
@@ -295,7 +295,7 @@ func TestProgressWithoutFileName(t *testing.T) {
 	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564138000}, 0)
 
-	progress := newTextProgressBar(writer, 48, 0)
+	progress := newTextProgressBar(writer, 48, 0, "")
 	progress.onNum(1)
 	progress.onName("中文😀llong文件名.txt")
 	progress.onSize(1000)
@@ -315,7 +315,7 @@ func TestProgressWithoutBar(t *testing.T) {
 	writer := newTestWriter(t)
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000}, 0)
 
-	progress := newTextProgressBar(writer, 10, 0)
+	progress := newTextProgressBar(writer, 10, 0, "")
 	progress.onNum(1)
 	progress.onName("中文😀test.txt")
 	progress.onSize(1000)
@@ -332,7 +332,7 @@ func TestProgressWithMultiFiles(t *testing.T) {
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564136000,
 		1646564137000, 1646564139000, 1646564139000}, 0)
 
-	progress := newTextProgressBar(writer, 100, 0)
+	progress := newTextProgressBar(writer, 100, 0, "")
 	progress.onNum(2)
 	progress.onName("中文😀test.txt")
 	progress.onSize(1000)
@@ -358,7 +358,7 @@ func TestProgressInTmuxPane(t *testing.T) {
 	callTimeNowCount := mockTimeNow([]int64{1646564135000, 1646564136000, 1646564137000, 1646564137000,
 		1646564138000, 1646564139000, 1646564139000}, 0)
 
-	progress := newTextProgressBar(writer, 100, 80)
+	progress := newTextProgressBar(writer, 100, 80, "")
 	progress.onNum(2)
 	progress.onName("中文😀test.txt")
 	progress.onSize(1000)

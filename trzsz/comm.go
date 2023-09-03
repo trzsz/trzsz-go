@@ -31,6 +31,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -530,20 +531,22 @@ func getTerminalColumns() int {
 	return cols
 }
 
-func wrapStdinInput(transfer *trzszTransfer) {
-	const bufSize = 32 * 1024
-	buffer := make([]byte, bufSize)
-	for {
-		n, err := os.Stdin.Read(buffer)
-		if n > 0 {
-			buf := buffer[0:n]
-			transfer.addReceivedData(buf)
-			buffer = make([]byte, bufSize)
+func wrapTransferInput(transfer *trzszTransfer, reader io.Reader, tunnel bool) {
+	go func() {
+		const bufSize = 32 * 1024
+		buffer := make([]byte, bufSize)
+		for {
+			n, err := reader.Read(buffer)
+			if n > 0 {
+				buf := buffer[0:n]
+				transfer.addReceivedData(buf, tunnel)
+				buffer = make([]byte, bufSize)
+			}
+			if err != nil {
+				break
+			}
 		}
-		if err == io.EOF {
-			transfer.stopTransferringFiles(false)
-		}
-	}
+	}()
 }
 
 func handleServerSignal(transfer *trzszTransfer) {
@@ -634,6 +637,15 @@ func (v *trzszVersion) compare(ver *trzszVersion) int {
 	return 0
 }
 
+type trzszTrigger struct {
+	mode       byte
+	version    *trzszVersion
+	uniqueID   string
+	winServer  bool
+	tunnelPort int
+	tmuxPrefix string
+}
+
 type trzszDetector struct {
 	relay       bool
 	tmux        bool
@@ -644,9 +656,9 @@ func newTrzszDetector(relay, tmux bool) *trzszDetector {
 	return &trzszDetector{relay, tmux, make(map[string]int)}
 }
 
-var trzszRegexp = regexp.MustCompile(`::TRZSZ:TRANSFER:([SRD]):(\d+\.\d+\.\d+)(:\d+)?`)
+var trzszRegexp = regexp.MustCompile(`::TRZSZ:TRANSFER:([SRD]):(\d+\.\d+\.\d+)(:\d+)?(:\d+)?`)
 var uniqueIDRegexp = regexp.MustCompile(`::TRZSZ:TRANSFER:[SRD]:\d+\.\d+\.\d+:(\d{13}\d*)`)
-var tmuxControlModeRegexp = regexp.MustCompile(`((%output %\d+)|(%extended-output %\d+ \d+ :)) .*::TRZSZ:TRANSFER:`)
+var tmuxControlModeRegexp = regexp.MustCompile(`((%output %\d+ )|(%extended-output %\d+ \d+ : )).*::TRZSZ:TRANSFER:`)
 
 func (detector *trzszDetector) rewriteTrzszTrigger(buf []byte) []byte {
 	for _, match := range uniqueIDRegexp.FindAllSubmatch(buf, -1) {
@@ -681,51 +693,10 @@ func (detector *trzszDetector) addRelaySuffix(output []byte, idx int) []byte {
 	return buf.Bytes()
 }
 
-func (detector *trzszDetector) detectTrzsz(output []byte) ([]byte, *byte, *trzszVersion, bool) {
-	if len(output) < 24 {
-		return output, nil, nil, false
-	}
-	idx := bytes.LastIndex(output, []byte("::TRZSZ:TRANSFER:"))
-	if idx < 0 {
-		return output, nil, nil, false
-	}
-
-	if detector.relay && detector.tmux {
-		output = detector.rewriteTrzszTrigger(output)
-		idx = bytes.LastIndex(output, []byte("::TRZSZ:TRANSFER:"))
-	}
-
-	subOutput := output[idx:]
-	match := trzszRegexp.FindSubmatch(subOutput)
-	if len(match) < 3 {
-		return output, nil, nil, false
-	}
-	if tmuxControlModeRegexp.Match(output) {
-		return output, nil, nil, false
-	}
-
-	if len(subOutput) > 40 {
-		for _, s := range []string{"#CFG:", "Saved", "Cancelled", "Stopped", "Interrupted"} {
-			if bytes.Contains(subOutput[40:], []byte(s)) {
-				return output, nil, nil, false
-			}
-		}
-	}
-
-	mode := match[1][0]
-
-	serverVersion, err := parseTrzszVersion(string(match[2]))
-	if err != nil {
-		return output, nil, nil, false
-	}
-
-	uniqueID := ""
-	if len(match) > 3 {
-		uniqueID = string(match[3])
-	}
-	if len(uniqueID) >= 8 && (isWindowsEnvironment() || !(len(uniqueID) == 14 && strings.HasSuffix(uniqueID, "00"))) {
+func (detector *trzszDetector) isRepeatedID(uniqueID string) bool {
+	if len(uniqueID) > 6 && (isWindowsEnvironment() || !(len(uniqueID) == 13 && strings.HasSuffix(uniqueID, "00"))) {
 		if _, ok := detector.uniqueIDMap[uniqueID]; ok {
-			return output, nil, nil, false
+			return true
 		}
 		if len(detector.uniqueIDMap) > 100 {
 			m := make(map[string]int)
@@ -738,10 +709,71 @@ func (detector *trzszDetector) detectTrzsz(output []byte) ([]byte, *byte, *trzsz
 		}
 		detector.uniqueIDMap[uniqueID] = len(detector.uniqueIDMap)
 	}
+	return false
+}
 
-	remoteIsWindows := false
-	if uniqueID == ":1" || (len(uniqueID) == 14 && strings.HasSuffix(uniqueID, "10")) {
-		remoteIsWindows = true
+func (detector *trzszDetector) detectTrzsz(output []byte, tunnel bool) ([]byte, *trzszTrigger) {
+	if len(output) < 24 {
+		return output, nil
+	}
+	idx := bytes.LastIndex(output, []byte("::TRZSZ:TRANSFER:"))
+	if idx < 0 {
+		return output, nil
+	}
+
+	if detector.relay && detector.tmux {
+		output = detector.rewriteTrzszTrigger(output)
+		idx = bytes.LastIndex(output, []byte("::TRZSZ:TRANSFER:"))
+	}
+
+	subOutput := output[idx:]
+	match := trzszRegexp.FindSubmatch(subOutput)
+	if len(match) < 3 {
+		return output, nil
+	}
+
+	tmuxPrefix := ""
+	tmuxMatch := tmuxControlModeRegexp.FindSubmatch(output)
+	if len(tmuxMatch) > 1 {
+		if !tunnel || len(match) < 5 || match[4] == nil {
+			return output, nil
+		}
+		tmuxPrefix = string(tmuxMatch[1])
+	}
+
+	if len(subOutput) > 40 {
+		for _, s := range []string{"#CFG:", "Saved", "Cancelled", "Stopped", "Interrupted"} {
+			if bytes.Contains(subOutput[40:], []byte(s)) {
+				return output, nil
+			}
+		}
+	}
+
+	mode := match[1][0]
+
+	version, err := parseTrzszVersion(string(match[2]))
+	if err != nil {
+		return output, nil
+	}
+
+	uniqueID := ""
+	if len(match) > 3 && match[3] != nil {
+		uniqueID = string(match[3][1:])
+	}
+	if detector.isRepeatedID(uniqueID) {
+		return output, nil
+	}
+
+	winServer := false
+	if uniqueID == "1" || (len(uniqueID) == 13 && strings.HasSuffix(uniqueID, "10")) {
+		winServer = true
+	}
+
+	port := 0
+	if len(match) > 4 && match[4] != nil {
+		if v, err := strconv.Atoi(string(match[4][1:])); err == nil {
+			port = v
+		}
 	}
 
 	if detector.relay {
@@ -750,7 +782,14 @@ func (detector *trzszDetector) detectTrzsz(output []byte) ([]byte, *byte, *trzsz
 		output = bytes.ReplaceAll(output, []byte("TRZSZ"), []byte("TRZSZGO"))
 	}
 
-	return output, &mode, serverVersion, remoteIsWindows
+	return output, &trzszTrigger{
+		mode:       mode,
+		version:    version,
+		uniqueID:   uniqueID,
+		winServer:  winServer,
+		tunnelPort: port,
+		tmuxPrefix: tmuxPrefix,
+	}
 }
 
 type traceLogger struct {
@@ -925,4 +964,45 @@ func resolveHomeDir(path string) string {
 		return filepath.Join(home, path[2:])
 	}
 	return path
+}
+
+func listenForTunnel() (net.Listener, int) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, 0
+	}
+	return listener, listener.Addr().(*net.TCPAddr).Port
+}
+
+func encodeTmuxOutput(prefix string, output []byte) []byte {
+	buffer := bytes.NewBuffer(make([]byte, 0, len(prefix)+len(output)<<2+2))
+	buffer.Write([]byte(prefix))
+	for _, b := range output {
+		if b >= '0' && b <= '9' || b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' {
+			buffer.WriteByte(b)
+			continue
+		}
+		buffer.Write([]byte(fmt.Sprintf("\\%03o", b)))
+	}
+	buffer.Write([]byte("\r\n"))
+	return buffer.Bytes()
+}
+
+type promptWriter struct {
+	prefix string
+	writer io.Writer
+}
+
+func (w *promptWriter) Write(p []byte) (int, error) {
+	if w.prefix == "" {
+		return w.writer.Write(p)
+	}
+	if err := writeAll(w.writer, encodeTmuxOutput(w.prefix, p)); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (w *promptWriter) Close() error {
+	return nil
 }

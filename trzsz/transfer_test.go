@@ -43,8 +43,9 @@ func TestTransferAction(t *testing.T) {
 	serverTransfer := newTransfer(writer, nil, false, nil)
 
 	// compatible with older versions
-	serverTransfer.addReceivedData([]byte(
-		"#ACT:eJyrVspJzEtXslJQKqhU0lFQSs7PS8ssygUKlBSVpgIFylKLijPz80AqDPUM9AxAiopLCwryi0riUzKLEAoLivJL8pPzc4AiBrUAlAQbEA==\n"))
+	serverTransfer.addReceivedData(
+		[]byte("#ACT:eJyrVspJzEtXslJQKqhU0lFQSs7PS8ssygUKlBSVpgIFylKLijPz80AqDPUM9AxAiopLCwryi0riUzKLEAoLivJL8pPzc4AiBrUAlAQbEA==\n"),
+		false)
 	action, err := serverTransfer.recvAction()
 	assert.Nil(err)
 	assert.Equal(&transferAction{
@@ -68,7 +69,7 @@ func TestTransferAction(t *testing.T) {
 	assert.Equal("\n", clientTransfer.transferConfig.Newline)
 
 	SetAffectedByWindows(false)
-	serverTransfer.addReceivedData([]byte(writer.buffer[0]))
+	serverTransfer.addReceivedData([]byte(writer.buffer[0]), false)
 	action, err = serverTransfer.recvAction()
 	assert.Nil(err)
 	assert.Equal("\n", action.Newline)
@@ -86,7 +87,7 @@ func TestTransferAction(t *testing.T) {
 	assert.Equal("\n", clientTransfer.transferConfig.Newline)
 
 	SetAffectedByWindows(false)
-	serverTransfer.addReceivedData([]byte(writer.buffer[1]))
+	serverTransfer.addReceivedData([]byte(writer.buffer[1]), false)
 	action, err = serverTransfer.recvAction()
 	assert.Nil(err)
 	assert.Equal("!\n", action.Newline)
@@ -104,7 +105,7 @@ func TestTransferAction(t *testing.T) {
 	assert.Equal("!\n", clientTransfer.transferConfig.Newline)
 
 	SetAffectedByWindows(true)
-	serverTransfer.addReceivedData([]byte(writer.buffer[2]))
+	serverTransfer.addReceivedData([]byte(writer.buffer[2]), false)
 	action, err = serverTransfer.recvAction()
 	assert.Nil(err)
 	assert.Equal("!\n", action.Newline)
@@ -122,7 +123,7 @@ func TestTransferAction(t *testing.T) {
 	assert.Equal("!\n", clientTransfer.transferConfig.Newline)
 
 	SetAffectedByWindows(true)
-	serverTransfer.addReceivedData([]byte(writer.buffer[3]))
+	serverTransfer.addReceivedData([]byte(writer.buffer[3]), false)
 	action, err = serverTransfer.recvAction()
 	assert.Nil(err)
 	assert.Equal("!\n", action.Newline)
@@ -180,7 +181,7 @@ func TestTransferConfig(t *testing.T) {
 
 	assertConfigEqual := func(cfgStr string) {
 		t.Helper()
-		transfer.addReceivedData([]byte(cfgStr))
+		transfer.addReceivedData([]byte(cfgStr), false)
 		transferConfig, err := transfer.recvConfig()
 		assert.Nil(err)
 		assert.Equal(config, *transferConfig)

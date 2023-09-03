@@ -158,11 +158,13 @@ func TrzMain() int {
 		uniqueID += 20
 	}
 
+	listener, port := listenForTunnel()
+
 	mode := "R"
 	if args.Directory {
 		mode = "D"
 	}
-	os.Stdout.WriteString(fmt.Sprintf("\x1b7\x07::TRZSZ:TRANSFER:%s:%s:%013d\r\n", mode, kTrzszVersion, uniqueID))
+	os.Stdout.WriteString(fmt.Sprintf("\x1b7\x07::TRZSZ:TRANSFER:%s:%s:%013d:%d\r\n", mode, kTrzszVersion, uniqueID, port))
 	os.Stdout.Sync()
 
 	var state *term.State
@@ -183,12 +185,18 @@ func TrzMain() int {
 		}
 	}()
 
-	go wrapStdinInput(transfer)
+	if listener != nil {
+		defer listener.Close()
+		transfer.acceptOnTunnel(listener, fmt.Sprintf("%013d", uniqueID), port)
+	}
+	wrapTransferInput(transfer, os.Stdin, false)
 	handleServerSignal(transfer)
 
 	if err := recvFiles(transfer, args, tmuxMode, tmuxPaneWidth); err != nil {
 		transfer.serverError(err)
 	}
+
+	transfer.cleanup()
 
 	return 0
 }

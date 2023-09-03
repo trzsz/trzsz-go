@@ -28,9 +28,12 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -62,8 +65,7 @@ type TrzszFilter struct {
 	transfer            atomic.Pointer[trzszTransfer]
 	progress            atomic.Pointer[textProgressBar]
 	promptPipe          atomic.Pointer[io.PipeWriter]
-	serverVersion       *trzszVersion
-	remoteIsWindows     bool
+	trigger             *trzszTrigger
 	dragging            atomic.Bool
 	dragHasDir          atomic.Bool
 	dragMutex           sync.Mutex
@@ -73,6 +75,7 @@ type TrzszFilter struct {
 	logger              *traceLogger
 	defaultUploadPath   string
 	defaultDownloadPath string
+	tunnelConnector     func(int) net.Conn
 }
 
 // NewTrzszFilter create a TrzszFilter to support trzsz ( trz / tsz ).
@@ -157,6 +160,11 @@ func (filter *TrzszFilter) SetDefaultUploadPath(uploadPath string) {
 // SetDefaultDownloadPath set the path to automatically save while downloading files.
 func (filter *TrzszFilter) SetDefaultDownloadPath(downloadPath string) {
 	filter.defaultDownloadPath = downloadPath
+}
+
+// SetTunnelConnector set the connector for tunnel transferring.
+func (filter *TrzszFilter) SetTunnelConnector(connector func(int) net.Conn) {
+	filter.tunnelConnector = connector
 }
 
 func (filter *TrzszFilter) getTrzszConfig(name string) string {
@@ -288,7 +296,7 @@ func (filter *TrzszFilter) chooseUploadPaths(directory bool) ([]string, error) {
 func (filter *TrzszFilter) downloadFiles(transfer *trzszTransfer) error {
 	path, err := filter.chooseDownloadPath()
 	if err == zenity.ErrCanceled {
-		return transfer.sendAction(false, filter.serverVersion, filter.remoteIsWindows)
+		return transfer.sendAction(false, filter.trigger.version, filter.trigger.winServer)
 	}
 	if err != nil {
 		return err
@@ -301,7 +309,7 @@ func (filter *TrzszFilter) downloadFiles(transfer *trzszTransfer) error {
 		return simpleTrzszError("Swap transfer failed")
 	}
 
-	if err := transfer.sendAction(true, filter.serverVersion, filter.remoteIsWindows); err != nil {
+	if err := transfer.sendAction(true, filter.trigger.version, filter.trigger.winServer); err != nil {
 		return err
 	}
 	config, err := transfer.recvConfig()
@@ -311,7 +319,8 @@ func (filter *TrzszFilter) downloadFiles(transfer *trzszTransfer) error {
 
 	filter.progress.Store(nil)
 	if !config.Quiet {
-		filter.progress.Store(newTextProgressBar(filter.clientOut, filter.options.TerminalColumns, config.TmuxPaneColumns))
+		filter.progress.Store(newTextProgressBar(filter.clientOut, filter.options.TerminalColumns,
+			config.TmuxPaneColumns, filter.trigger.tmuxPrefix))
 		defer filter.progress.Store(nil)
 	}
 
@@ -326,7 +335,7 @@ func (filter *TrzszFilter) downloadFiles(transfer *trzszTransfer) error {
 func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) error {
 	paths, err := filter.chooseUploadPaths(directory)
 	if err == zenity.ErrCanceled {
-		return transfer.sendAction(false, filter.serverVersion, filter.remoteIsWindows)
+		return transfer.sendAction(false, filter.trigger.version, filter.trigger.winServer)
 	}
 	if err != nil {
 		return err
@@ -340,7 +349,7 @@ func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) 
 		return simpleTrzszError("Swap transfer failed")
 	}
 
-	if err := transfer.sendAction(true, filter.serverVersion, filter.remoteIsWindows); err != nil {
+	if err := transfer.sendAction(true, filter.trigger.version, filter.trigger.winServer); err != nil {
 		return err
 	}
 	config, err := transfer.recvConfig()
@@ -356,7 +365,8 @@ func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) 
 
 	filter.progress.Store(nil)
 	if !config.Quiet {
-		filter.progress.Store(newTextProgressBar(filter.clientOut, filter.options.TerminalColumns, config.TmuxPaneColumns))
+		filter.progress.Store(newTextProgressBar(filter.clientOut, filter.options.TerminalColumns,
+			config.TmuxPaneColumns, filter.trigger.tmuxPrefix))
 		defer filter.progress.Store(nil)
 	}
 
@@ -367,10 +377,15 @@ func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) 
 	return transfer.clientExit(formatSavedFiles(remoteNames, ""))
 }
 
-func (filter *TrzszFilter) handleTrzsz(mode byte) {
-	transfer := newTransfer(filter.serverIn, nil, isWindowsEnvironment() || filter.remoteIsWindows, filter.logger)
+func (filter *TrzszFilter) handleTrzsz() {
+	transfer := newTransfer(filter.serverIn, nil, isWindowsEnvironment() || filter.trigger.winServer, filter.logger)
+
+	if filter.tunnelConnector != nil {
+		transfer.connectToTunnel(filter.tunnelConnector, filter.trigger.uniqueID, filter.trigger.tunnelPort)
+	}
 
 	defer func() {
+		transfer.cleanup()
 		filter.transfer.CompareAndSwap(transfer, nil)
 	}()
 
@@ -381,7 +396,7 @@ func (filter *TrzszFilter) handleTrzsz(mode byte) {
 	}()
 
 	var err error
-	switch mode {
+	switch filter.trigger.mode {
 	case 'S':
 		err = filter.downloadFiles(transfer)
 	case 'R':
@@ -445,38 +460,60 @@ func (filter *TrzszFilter) uploadDragFiles() {
 	filter.resetDragFiles()
 }
 
+var tmuxInputRegexp = regexp.MustCompile(`send -(l?)t %\d+ (.*?)[;\r]`)
+
 func (filter *TrzszFilter) transformPromptInput(promptPipe *io.PipeWriter, buf []byte) {
-	const keyPrev = '\x10'
-	const keyNext = '\x0E'
-	n := len(buf)
-	for i := 0; i < n; i++ {
-		c := buf[i]
-		if c == '\x1b' && n-i > 2 && buf[i+1] == '[' {
-			switch buf[i+2] {
-			case '\x42': // ↓ to Next
-				c = keyNext
-			case '\x41', '\x5A': // ↑ Shift-TAB to Prev
-				c = keyPrev
-			}
-			i += 2
-		} else {
-			switch c {
-			case '\x03': // Ctrl-C to Stop
-				_, _ = promptPipe.Write([]byte{keyPrev, keyPrev, '\r'})
-				return
-			case 'q', 'Q', '\x11': // q Ctrl-C Ctrl-Q to Quit
-				_, _ = promptPipe.Write([]byte{keyNext, keyNext, '\r'})
-				return
-			case '\t', '\x0E', 'j', 'J', '\x0A': // Tab ↓ j Ctrl-J to Next
-				c = keyNext
-			case '\x10', 'k', 'K', '\x0B': // ↑ k Ctrl-K to Prev
-				c = keyPrev
-			case '\r': // Enter
-			default:
-				continue
+	if len(buf) > 6 {
+		var input []byte
+		for _, match := range tmuxInputRegexp.FindAllSubmatch(buf, -1) {
+			if len(match) == 3 {
+				if len(match[1]) == 1 {
+					input = append(input, match[2]...)
+					continue
+				}
+				for _, hex := range strings.Fields(string(match[2])) {
+					if strings.HasPrefix(hex, "0x") {
+						if char, err := strconv.ParseInt(hex[2:], 16, 32); err == nil {
+							input = append(input, byte(char))
+						}
+					}
+				}
 			}
 		}
-		_, _ = promptPipe.Write([]byte{c})
+		buf = input
+	}
+
+	const keyPrev = '\x10'
+	const keyNext = '\x0E'
+	const keyEnter = '\r'
+	moveNext := func() { _, _ = promptPipe.Write([]byte{keyNext}) }
+	movePrev := func() { _, _ = promptPipe.Write([]byte{keyPrev}) }
+	stop := func() { _, _ = promptPipe.Write([]byte{keyPrev, keyPrev, keyEnter}) }
+	quit := func() { _, _ = promptPipe.Write([]byte{keyNext, keyNext, keyEnter}) }
+	confirm := func() { _, _ = promptPipe.Write([]byte{keyEnter}) }
+
+	if len(buf) == 3 && buf[0] == '\x1b' && buf[1] == '[' {
+		switch buf[2] {
+		case '\x42': // ↓ to Next
+			moveNext()
+		case '\x41', '\x5A': // ↑ Shift-TAB to Prev
+			movePrev()
+		}
+	}
+
+	if len(buf) == 1 {
+		switch buf[0] {
+		case '\x03': // Ctrl-C to Stop
+			stop()
+		case 'q', 'Q', '\x11': // q Ctrl-C Ctrl-Q to Quit
+			quit()
+		case '\t', '\x0E', 'j', 'J', '\x0A': // Tab ↓ j Ctrl-J to Next
+			moveNext()
+		case '\x10', 'k', 'K', '\x0B': // ↑ k Ctrl-K to Prev
+			movePrev()
+		case '\r': // Enter
+			confirm()
+		}
 	}
 }
 
@@ -495,14 +532,15 @@ func (filter *TrzszFilter) confirmStopTransfer(transfer *trzszTransfer) {
 		defer pipeOut.Close()
 		defer filter.promptPipe.Store(nil)
 
+		writer := &promptWriter{filter.trigger.tmuxPrefix, filter.clientOut}
 		if progress := filter.progress.Load(); progress != nil {
 			progress.setPause(true)
 			defer func() {
 				progress.setTerminalColumns(filter.options.TerminalColumns)
 				progress.setPause(false)
 			}()
-			time.Sleep(50 * time.Millisecond)             // wait for the progress bar output
-			_, _ = filter.clientOut.Write([]byte("\r\n")) // keep the progress bar displayed
+			time.Sleep(50 * time.Millisecond)   // wait for the progress bar output
+			_, _ = writer.Write([]byte("\r\n")) // keep the progress bar displayed
 		}
 
 		prompt := promptui.Select{
@@ -513,7 +551,7 @@ func (filter *TrzszFilter) confirmStopTransfer(transfer *trzszTransfer) {
 				"Continue to transfer remaining files",
 			},
 			Stdin:  pipeIn,
-			Stdout: filter.clientOut,
+			Stdout: writer,
 			Templates: &promptui.SelectTemplates{
 				Help: `{{ "Use ↓ ↑ j k <tab> to navigate" | faint }}`,
 			},
@@ -533,6 +571,8 @@ func (filter *TrzszFilter) confirmStopTransfer(transfer *trzszTransfer) {
 	}()
 }
 
+var ctrlCRegexp = regexp.MustCompile(`^send -t %\d+ 0x3\r$`)
+
 func (filter *TrzszFilter) sendInput(buf []byte) {
 	if filter.logger != nil {
 		filter.logger.writeTraceLog(buf, "stdin")
@@ -542,8 +582,9 @@ func (filter *TrzszFilter) sendInput(buf []byte) {
 		return
 	}
 	if transfer := filter.transfer.Load(); transfer != nil {
-		if buf[0] == '\x03' { // `ctrl + c` to stop transferring files
-			if filter.serverVersion.compare(&trzszVersion{1, 1, 3}) > 0 {
+		if len(buf) == 1 && buf[0] == '\x03' || len(buf) > 14 && ctrlCRegexp.Match(buf) {
+			// `ctrl + c` to stop transferring files
+			if filter.trigger.version.compare(&trzszVersion{1, 1, 3}) > 0 {
 				filter.confirmStopTransfer(transfer)
 			} else {
 				transfer.stopTransferringFiles(false)
@@ -589,23 +630,20 @@ func (filter *TrzszFilter) wrapOutput() {
 		n, err := filter.serverOut.Read(buffer)
 		if n > 0 {
 			buf := buffer[0:n]
-			if filter.logger != nil {
-				buf = filter.logger.writeTraceLog(buf, "svrout")
-			}
 			if transfer := filter.transfer.Load(); transfer != nil {
-				transfer.addReceivedData(buf)
+				transfer.addReceivedData(buf, false)
 				buffer = make([]byte, bufSize)
 				continue
 			}
-			var win bool
-			var mode *byte
-			var ver *trzszVersion
-			buf, mode, ver, win = detector.detectTrzsz(buf)
-			if mode != nil {
+			if filter.logger != nil {
+				buf = filter.logger.writeTraceLog(buf, "svrout")
+			}
+			var trigger *trzszTrigger
+			buf, trigger = detector.detectTrzsz(buf, filter.tunnelConnector != nil)
+			if trigger != nil {
 				_ = writeAll(filter.clientOut, buf)
-				filter.serverVersion = ver
-				filter.remoteIsWindows = win
-				go filter.handleTrzsz(*mode)
+				filter.trigger = trigger
+				go filter.handleTrzsz()
 				continue
 			}
 			if filter.interrupting.Load() {

@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -60,6 +61,7 @@ type transferAction struct {
 	Protocol         int    `json:"protocol"`
 	SupportBinary    bool   `json:"binary"`
 	SupportDirectory bool   `json:"support_dir"`
+	TunnelConnected  bool   `json:"tunnel"`
 }
 
 type transferConfig struct {
@@ -101,6 +103,9 @@ type trzszTransfer struct {
 	transferConfig   transferConfig
 	logger           *traceLogger
 	createdFiles     []string
+	tunnelConnected  bool
+	tunnelConn       atomic.Pointer[net.Conn]
+	tunnelInitWG     sync.WaitGroup
 }
 
 func maxDuration(a, b time.Duration) time.Duration {
@@ -144,7 +149,112 @@ func newTransfer(writer io.Writer, stdinState *term.State, flushInTime bool, log
 	return t
 }
 
-func (t *trzszTransfer) addReceivedData(buf []byte) {
+func getHelloConstant(uniqueID string, port int) (string, string) {
+	uid := uniqueID
+	if len(uid) > 2 {
+		uid = uid[:len(uid)-2]
+	}
+	clientHello := fmt.Sprintf("::TRZSZ::CLIENT::HELLO::%s:%d", uid, port)
+	serverHello := fmt.Sprintf("::TRZSZ::SERVER::HELLO::%s:%d", uid, port)
+	return clientHello, serverHello
+}
+
+func (t *trzszTransfer) acceptOnTunnel(listener net.Listener, uniqueID string, port int) {
+	go func() {
+		defer listener.Close()
+		clientHello, serverHello := getHelloConstant(uniqueID, port)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			if t.tunnelConn.Load() != nil {
+				conn.Close()
+				return
+			}
+			go func(conn net.Conn) {
+				buf := make([]byte, 100)
+				n, err := conn.Read(buf)
+				if err != nil || string(buf[:n]) != clientHello {
+					conn.Close()
+					return
+				}
+				if _, err := conn.Write([]byte(serverHello)); err != nil {
+					conn.Close()
+					return
+				}
+				if t.tunnelConn.CompareAndSwap(nil, &conn) {
+					wrapTransferInput(t, conn, true)
+					listener.Close()
+				}
+			}(conn)
+		}
+	}()
+}
+
+func (t *trzszTransfer) connectToTunnel(connector func(int) net.Conn, uniqueID string, port int) {
+	t.tunnelInitWG.Add(1)
+	go func() {
+		defer t.tunnelInitWG.Done()
+
+		timeout := false
+		connChan := make(chan net.Conn, 1)
+		go func() {
+			defer close(connChan)
+			conn := connector(port)
+			if conn == nil {
+				connChan <- nil
+				return
+			}
+			if timeout {
+				conn.Close()
+				connChan <- nil
+				return
+			}
+			clientHello, serverHello := getHelloConstant(uniqueID, port)
+			if _, err := conn.Write([]byte(clientHello)); err != nil || timeout {
+				conn.Close()
+				connChan <- nil
+				return
+			}
+			buf := make([]byte, 100)
+			n, err := conn.Read(buf)
+			if err != nil || string(buf[:n]) != serverHello || timeout {
+				conn.Close()
+				connChan <- nil
+				return
+			}
+			connChan <- conn
+		}()
+
+		select {
+		case conn := <-connChan:
+			if conn != nil {
+				t.tunnelConn.Store(&conn)
+				wrapTransferInput(t, conn, true)
+			}
+		case <-time.After(time.Second):
+			timeout = true
+		}
+	}()
+}
+
+func (t *trzszTransfer) cleanup() {
+	if conn := t.tunnelConn.Load(); conn != nil {
+		(*conn).Close()
+	}
+}
+
+func (t *trzszTransfer) addReceivedData(buf []byte, tunnel bool) {
+	if t.tunnelConnected && !tunnel {
+		if t.logger != nil {
+			t.logger.writeTraceLog(buf, "ignout")
+		}
+		return
+	}
+	if t.logger != nil {
+		t.logger.writeTraceLog(buf, "svrout")
+	}
 	if !t.stopped.Load() {
 		t.buffer.addBuffer(buf)
 	}
@@ -159,18 +269,20 @@ func (t *trzszTransfer) stopTransferringFiles(stopAndDelete bool) {
 	t.stopped.Store(true)
 	t.buffer.stopBuffer()
 
-	maxChunkTime := time.Duration(0)
-	for _, chunkTime := range t.lastChunkTimeArr {
-		if chunkTime > maxChunkTime {
-			maxChunkTime = chunkTime
+	if !t.tunnelConnected {
+		maxChunkTime := time.Duration(0)
+		for _, chunkTime := range t.lastChunkTimeArr {
+			if chunkTime > maxChunkTime {
+				maxChunkTime = chunkTime
+			}
 		}
+		waitTime := maxChunkTime * 2
+		beginTime := t.pauseBeginTime.Load()
+		if beginTime > 0 {
+			waitTime -= time.Since(time.UnixMilli(beginTime))
+		}
+		t.cleanTimeout = maxDuration(waitTime, 500*time.Millisecond)
 	}
-	waitTime := maxChunkTime * 2
-	beginTime := t.pauseBeginTime.Load()
-	if beginTime > 0 {
-		waitTime -= time.Since(time.UnixMilli(beginTime))
-	}
-	t.cleanTimeout = maxDuration(waitTime, 500*time.Millisecond)
 }
 
 func (t *trzszTransfer) pauseTransferringFiles() {
@@ -260,7 +372,7 @@ func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 		return nil, err
 	}
 
-	if isWindowsEnvironment() || t.windowsProtocol {
+	if !t.tunnelConnected && (isWindowsEnvironment() || t.windowsProtocol) {
 		line, err := t.buffer.readLineOnWindows(timeout)
 		if err != nil {
 			if e := t.checkStop(); e != nil {
@@ -280,7 +392,13 @@ func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 		return line, nil
 	}
 
-	line, err := t.buffer.readLine(t.transferConfig.TmuxOutputJunk || mayHasJunk, timeout)
+	if t.tunnelConnected {
+		mayHasJunk = false
+	} else if t.transferConfig.TmuxOutputJunk {
+		mayHasJunk = true
+	}
+
+	line, err := t.buffer.readLine(mayHasJunk, timeout)
 	if err != nil {
 		if e := t.checkStop(); e != nil {
 			return nil, e
@@ -288,7 +406,7 @@ func (t *trzszTransfer) recvLine(expectType string, mayHasJunk bool, timeout <-c
 		return nil, err
 	}
 
-	if t.transferConfig.TmuxOutputJunk || mayHasJunk {
+	if mayHasJunk {
 		idx := bytes.LastIndex(line, []byte("#"+expectType+":"))
 		if idx >= 0 {
 			line = line[idx:]
@@ -459,7 +577,15 @@ func (t *trzszTransfer) sendAction(confirm bool, serverVersion *trzszVersion, re
 		SupportBinary:    true,
 		SupportDirectory: true,
 	}
-	if isWindowsEnvironment() || remoteIsWindows {
+
+	t.tunnelInitWG.Wait()
+	if conn := t.tunnelConn.Load(); conn != nil {
+		t.writer = *conn
+		t.tunnelConnected = true
+		action.TunnelConnected = true
+	}
+
+	if !t.tunnelConnected && (isWindowsEnvironment() || remoteIsWindows) {
 		action.Newline = "!\n"
 		action.SupportBinary = false
 	}
@@ -471,7 +597,13 @@ func (t *trzszTransfer) sendAction(confirm bool, serverVersion *trzszVersion, re
 		t.windowsProtocol = true
 		t.transferConfig.Newline = "!\n"
 	}
-	return t.sendString("ACT", string(actStr))
+	if err := t.sendString("ACT", string(actStr)); err != nil {
+		return err
+	}
+	if t.tunnelConnected {
+		t.transferConfig.Newline = "\n"
+	}
+	return nil
 }
 
 func (t *trzszTransfer) recvAction() (*transferAction, error) {
@@ -486,6 +618,14 @@ func (t *trzszTransfer) recvAction() (*transferAction, error) {
 	if err := json.Unmarshal([]byte(actStr), action); err != nil {
 		return nil, err
 	}
+	if action.TunnelConnected {
+		t.tunnelConnected = true
+		if conn := t.tunnelConn.Load(); conn != nil {
+			t.writer = *conn
+		} else {
+			return nil, simpleTrzszError("The tunnel connection is nil")
+		}
+	}
 	t.transferConfig.Newline = action.Newline
 	return action, nil
 }
@@ -497,7 +637,9 @@ func (t *trzszTransfer) sendConfig(args *baseArgs, action *transferAction, escap
 	if args.Quiet {
 		cfgMap["quiet"] = true
 	}
-	if args.Binary {
+	if action.TunnelConnected {
+		cfgMap["binary"] = true
+	} else if args.Binary {
 		cfgMap["binary"] = true
 		cfgMap["escape_chars"] = escapeChars
 	}
