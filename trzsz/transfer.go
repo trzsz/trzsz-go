@@ -607,7 +607,7 @@ func (t *trzszTransfer) sendAction(confirm bool, serverVersion *trzszVersion, re
 }
 
 func (t *trzszTransfer) recvAction() (*transferAction, error) {
-	actStr, err := t.recvString("ACT", false, nil)
+	actStr, err := t.recvString("ACT", true, nil)
 	if err != nil {
 		return nil, err
 	}

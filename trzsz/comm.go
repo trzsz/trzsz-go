@@ -453,13 +453,13 @@ func checkTmux() (tmuxModeType, *os.File, int32, error) {
 	cmd := exec.Command("tmux", "display-message", "-p", "#{client_tty}:#{client_control_mode}:#{pane_width}")
 	out, err := cmd.Output()
 	if err != nil {
-		return 0, nil, -1, fmt.Errorf("Get tmux output failed: %v", err)
+		return noTmuxMode, nil, -1, fmt.Errorf("Get tmux output failed: %v", err)
 	}
 
 	output := strings.TrimSpace(string(out))
 	tokens := strings.Split(output, ":")
 	if len(tokens) != 3 {
-		return 0, nil, -1, fmt.Errorf("Unexpect tmux output: %s", output)
+		return noTmuxMode, nil, -1, fmt.Errorf("Unexpect tmux output: %s", output)
 	}
 	tmuxTty, controlMode, paneWidth := tokens[0], tokens[1], tokens[2]
 
