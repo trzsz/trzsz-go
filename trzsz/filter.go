@@ -39,8 +39,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/manifoldco/promptui"
 	"github.com/ncruces/zenity"
+	"github.com/trzsz/promptui"
 )
 
 // TrzszOptions specify the options to create a TrzszFilter.
