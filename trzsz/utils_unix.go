@@ -29,3 +29,7 @@ package trzsz
 func getParentWindowID() int {
 	return 0
 }
+
+func isWarpTerminal() bool {
+	return false
+}

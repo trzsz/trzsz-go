@@ -34,3 +34,7 @@ func getParentWindowID() uintptr {
 	hwnd, _, _ := user32.NewProc("GetForegroundWindow").Call()
 	return hwnd
 }
+
+func isWarpTerminal() bool {
+	return false
+}

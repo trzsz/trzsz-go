@@ -32,6 +32,13 @@ import (
 )
 
 func detectDragFiles(buf []byte) ([]string, bool, bool) {
+	if len(buf) > 5 && bytes.Contains(buf, []byte("\x1b[20")) {
+		buf = bytes.ReplaceAll(buf, []byte("\x1b[200~"), []byte(""))
+		buf = bytes.ReplaceAll(buf, []byte("\x1b[201~"), []byte(""))
+		if len(buf) == 0 {
+			return nil, false, true
+		}
+	}
 	if isRunningOnLinux() {
 		return detectDragFilesOnLinux(buf)
 	} else if isRunningOnMacOS() {
@@ -44,7 +51,7 @@ func detectDragFiles(buf []byte) ([]string, bool, bool) {
 
 func detectFilePath(path string, dragFiles *[]string, hasDir *bool) bool {
 	fileInfo, err := os.Stat(path)
-	if os.IsNotExist(err) {
+	if err != nil {
 		return false
 	}
 	if fileInfo.IsDir() {
@@ -61,14 +68,6 @@ func detectFilePath(path string, dragFiles *[]string, hasDir *bool) bool {
 
 func detectDragFilesOnLinux(buf []byte) ([]string, bool, bool) {
 	length := len(buf)
-	if length > 5 && buf[0] == '\x1b' {
-		buf = bytes.ReplaceAll(buf, []byte("\x1b[200~"), []byte(""))
-		buf = bytes.ReplaceAll(buf, []byte("\x1b[201~"), []byte(""))
-		length = len(buf)
-		if length == 0 {
-			return nil, false, true
-		}
-	}
 	if length < 3 || !(buf[0] == '\'' && buf[1] == '/' || buf[0] == '/') || buf[length-1] != ' ' {
 		return nil, false, false
 	}
@@ -115,13 +114,9 @@ func nextLinuxPath(buf []byte) (string, int) {
 
 func detectDragFilesOnMacOS(buf []byte) ([]string, bool, bool) {
 	length := len(buf)
-	if length > 5 && buf[0] == '\x1b' {
-		buf = bytes.ReplaceAll(buf, []byte("\x1b[200~"), []byte(""))
-		buf = bytes.ReplaceAll(buf, []byte("\x1b[201~"), []byte(""))
+	if isWarpTerminal() && length > 1 && (buf[length-1] != ' ' || buf[length-2] == '\\') {
+		buf = append(buf, ' ')
 		length = len(buf)
-		if length == 0 {
-			return nil, false, true
-		}
 	}
 	if length < 3 || buf[0] != '/' || buf[length-1] != ' ' || buf[length-2] == '\\' {
 		return nil, false, false

@@ -27,6 +27,9 @@ package trzsz
 import (
 	"bytes"
 	"os"
+	"os/exec"
+	"strconv"
+	"sync"
 
 	"golang.org/x/sys/unix"
 )
@@ -54,4 +57,36 @@ func getParentWindowID() any {
 		}
 	}
 	return 0
+}
+
+var (
+	warpOnce     sync.Once
+	warpTerminal bool
+)
+
+func isWarpTerminal() bool {
+	warpOnce.Do(func() {
+		pid := os.Getppid()
+		for i := 0; i < 1000; i++ {
+			kinfo, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+			if err != nil {
+				return
+			}
+			ppid := kinfo.Eproc.Ppid
+			switch ppid {
+			case 0:
+				return
+			case 1:
+				cmd := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=")
+				out, err := cmd.Output()
+				if err == nil && bytes.Contains(out, []byte("/Warp.app/")) {
+					warpTerminal = true
+				}
+				return
+			default:
+				pid = int(ppid)
+			}
+		}
+	})
+	return warpTerminal
 }
