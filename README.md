@@ -237,9 +237,4 @@ Feel free to email the author <lonnywong@qq.com>, or create an [issue](https://g
 
 ## Sponsor
 
-Want to buy the author a drink 🍺 ?
-
-![sponsor wechat qrcode](https://trzsz.github.io/images/sponsor_wechat.jpg)
-![sponsor alipay qrcode](https://trzsz.github.io/images/sponsor_alipay.jpg)
-
-Thanks [@BrightXiaoHan](https://github.com/BrightXiaoHan) [@pmzgit](https://github.com/pmzgit).
+[❤️ Sponsor trzsz ❤️](https://github.com/trzsz), buy the author a drink 🍺 ? Thank you for your support!
