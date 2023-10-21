@@ -463,23 +463,24 @@ func checkTmux() (tmuxModeType, *os.File, int32, error) {
 	}
 	tmuxTty, controlMode, paneWidth := tokens[0], tokens[1], tokens[2]
 
-	if controlMode == "1" || tmuxTty[0] != '/' {
-		return tmuxControlMode, os.Stdout, -1, nil
-	}
-	if _, err := os.Stat(tmuxTty); os.IsNotExist(err) {
-		return tmuxControlMode, os.Stdout, -1, nil
-	}
-
-	tmuxStdout, err := os.OpenFile(tmuxTty, os.O_WRONLY, 0)
-	if err != nil {
-		return 0, nil, -1, fmt.Errorf("Open tmux tty [%s] failed: %v", tmuxTty, err)
-	}
 	tmuxPaneWidth := -1
 	if len(paneWidth) > 0 {
 		tmuxPaneWidth, err = strconv.Atoi(paneWidth)
 		if err != nil {
 			return 0, nil, -1, fmt.Errorf("Parse tmux pane width [%s] failed: %v", paneWidth, err)
 		}
+	}
+
+	if controlMode == "1" || tmuxTty[0] != '/' {
+		return tmuxControlMode, os.Stdout, int32(tmuxPaneWidth), nil
+	}
+	if _, err := os.Stat(tmuxTty); os.IsNotExist(err) {
+		return tmuxControlMode, os.Stdout, int32(tmuxPaneWidth), nil
+	}
+
+	tmuxStdout, err := os.OpenFile(tmuxTty, os.O_WRONLY, 0)
+	if err != nil {
+		return 0, nil, -1, fmt.Errorf("Open tmux tty [%s] failed: %v", tmuxTty, err)
 	}
 
 	statusInterval := getTmuxStatusInterval()

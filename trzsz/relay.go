@@ -439,9 +439,9 @@ func (r *TrzszRelay) handshake() {
 
 	if r.tmuxMode == tmuxNormalMode {
 		config.TmuxOutputJunk = true
-		if config.TmuxPaneColumns <= 0 {
-			config.TmuxPaneColumns = r.tmuxPaneWidth
-		}
+	}
+	if config.TmuxPaneColumns <= 0 && r.tmuxPaneWidth > 0 {
+		config.TmuxPaneColumns = r.tmuxPaneWidth
 	}
 	if e := r.sendConfig(config); e != nil {
 		err = simpleTrzszError("Relay send config error: %v", e)

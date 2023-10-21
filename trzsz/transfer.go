@@ -653,6 +653,8 @@ func (t *trzszTransfer) sendConfig(args *baseArgs, action *transferAction, escap
 	}
 	if tmuxMode == tmuxNormalMode {
 		cfgMap["tmux_output_junk"] = true
+	}
+	if tmuxPaneWidth > 0 {
 		cfgMap["tmux_pane_width"] = tmuxPaneWidth
 	}
 	if action.Protocol > 0 {
