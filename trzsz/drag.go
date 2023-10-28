@@ -114,9 +114,13 @@ func nextLinuxPath(buf []byte) (string, int) {
 
 func detectDragFilesOnMacOS(buf []byte) ([]string, bool, bool) {
 	length := len(buf)
-	if isWarpTerminal() && length > 1 && (buf[length-1] != ' ' || buf[length-2] == '\\') {
-		buf = append(buf, ' ')
+	if isWarpTerminal() {
+		buf = bytes.TrimSpace(buf)
 		length = len(buf)
+		if length > 1 && (buf[length-1] != ' ' || buf[length-2] == '\\') {
+			buf = append(buf, ' ')
+			length = len(buf)
+		}
 	}
 	if length < 3 || buf[0] != '/' || buf[length-1] != ' ' || buf[length-2] == '\\' {
 		return nil, false, false

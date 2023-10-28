@@ -73,9 +73,9 @@ type TrzszFilter struct {
 	interrupting        atomic.Bool
 	skipTrzCommand      atomic.Bool
 	logger              *traceLogger
-	defaultUploadPath   string
-	defaultDownloadPath string
-	tunnelConnector     func(int) net.Conn
+	defaultUploadPath   atomic.Pointer[string]
+	defaultDownloadPath atomic.Pointer[string]
+	tunnelConnector     atomic.Pointer[func(int) net.Conn]
 }
 
 // NewTrzszFilter create a TrzszFilter to support trzsz ( trz / tsz ).
@@ -154,17 +154,21 @@ func (filter *TrzszFilter) UploadFiles(filePaths []string) error {
 
 // SetDefaultUploadPath set the default open path while choosing upload files.
 func (filter *TrzszFilter) SetDefaultUploadPath(uploadPath string) {
-	filter.defaultUploadPath = uploadPath
+	filter.defaultUploadPath.Store(&uploadPath)
 }
 
 // SetDefaultDownloadPath set the path to automatically save while downloading files.
 func (filter *TrzszFilter) SetDefaultDownloadPath(downloadPath string) {
-	filter.defaultDownloadPath = downloadPath
+	filter.defaultDownloadPath.Store(&downloadPath)
 }
 
 // SetTunnelConnector set the connector for tunnel transferring.
 func (filter *TrzszFilter) SetTunnelConnector(connector func(int) net.Conn) {
-	filter.tunnelConnector = connector
+	if connector == nil {
+		filter.tunnelConnector.Store(nil)
+		return
+	}
+	filter.tunnelConnector.Store(&connector)
 }
 
 func (filter *TrzszFilter) getTrzszConfig(name string) string {
@@ -193,7 +197,10 @@ func (filter *TrzszFilter) getTrzszConfig(name string) string {
 }
 
 func (filter *TrzszFilter) getDefaultUploadPath() string {
-	path := filter.defaultUploadPath
+	path := ""
+	if p := filter.defaultUploadPath.Load(); p != nil {
+		path = *p
+	}
 	if path == "" {
 		path = filter.getTrzszConfig("DefaultUploadPath")
 	}
@@ -207,7 +214,10 @@ func (filter *TrzszFilter) getDefaultUploadPath() string {
 }
 
 func (filter *TrzszFilter) getDefaultDownloadPath() string {
-	path := filter.defaultDownloadPath
+	path := ""
+	if p := filter.defaultDownloadPath.Load(); p != nil {
+		path = *p
+	}
 	if path == "" {
 		path = filter.getTrzszConfig("DefaultDownloadPath")
 	}
@@ -380,8 +390,8 @@ func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) 
 func (filter *TrzszFilter) handleTrzsz() {
 	transfer := newTransfer(filter.serverIn, nil, isWindowsEnvironment() || filter.trigger.winServer, filter.logger)
 
-	if filter.tunnelConnector != nil {
-		transfer.connectToTunnel(filter.tunnelConnector, filter.trigger.uniqueID, filter.trigger.tunnelPort)
+	if connector := filter.tunnelConnector.Load(); connector != nil {
+		transfer.connectToTunnel(*connector, filter.trigger.uniqueID, filter.trigger.tunnelPort)
 	}
 
 	defer func() {
@@ -456,7 +466,7 @@ func (filter *TrzszFilter) uploadDragFiles() {
 	} else {
 		_ = writeAll(filter.serverIn, []byte("trz\r"))
 	}
-	time.Sleep(time.Second)
+	time.Sleep(3 * time.Second)
 	filter.resetDragFiles()
 }
 
@@ -639,7 +649,7 @@ func (filter *TrzszFilter) wrapOutput() {
 				buf = filter.logger.writeTraceLog(buf, "svrout")
 			}
 			var trigger *trzszTrigger
-			buf, trigger = detector.detectTrzsz(buf, filter.tunnelConnector != nil)
+			buf, trigger = detector.detectTrzsz(buf, filter.tunnelConnector.Load() != nil)
 			if trigger != nil {
 				_ = writeAll(filter.clientOut, buf)
 				filter.trigger = trigger

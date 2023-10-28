@@ -59,7 +59,7 @@ type TrzszRelay struct {
 	relayStatus     atomic.Int32
 	logger          *traceLogger
 	trigger         *trzszTrigger
-	tunnelConnector func(int) net.Conn
+	tunnelConnector atomic.Pointer[func(int) net.Conn]
 	tunnelRelayPort int
 	tunnelListener  atomic.Pointer[net.Listener]
 	tunnelRelay     atomic.Pointer[tunnelRelay]
@@ -77,11 +77,15 @@ type tunnelRelay struct {
 
 // SetTunnelConnector set the connector for tunnel transferring.
 func (r *TrzszRelay) SetTunnelConnector(connector func(int) net.Conn) {
-	r.tunnelConnector = connector
+	if connector == nil {
+		r.tunnelConnector.Store(nil)
+		return
+	}
+	r.tunnelConnector.Store(&connector)
 }
 
 func (r *TrzszRelay) listenForTunnel(buf []byte) []byte {
-	if r.tunnelConnector == nil || r.trigger.tunnelPort == 0 {
+	if r.tunnelConnector.Load() == nil || r.trigger.tunnelPort == 0 {
 		return buf
 	}
 
@@ -128,6 +132,11 @@ func (r *TrzszRelay) acceptOnTunnel() {
 }
 
 func (r *TrzszRelay) handleTunnelConn(clientConn net.Conn) {
+	connector := r.tunnelConnector.Load()
+	if connector == nil {
+		clientConn.Close()
+		return
+	}
 	clientHello1, serverHello4 := getHelloConstant(r.trigger.uniqueID, r.tunnelRelayPort)
 	clientHello2, serverHello3 := getHelloConstant(r.trigger.uniqueID, r.trigger.tunnelPort)
 	buf := make([]byte, 100)
@@ -136,7 +145,7 @@ func (r *TrzszRelay) handleTunnelConn(clientConn net.Conn) {
 		clientConn.Close()
 		return
 	}
-	serverConn := r.tunnelConnector(r.trigger.tunnelPort)
+	serverConn := (*connector)(r.trigger.tunnelPort)
 	if serverConn == nil {
 		clientConn.Close()
 		return
@@ -545,7 +554,7 @@ func (r *TrzszRelay) wrapOutput() {
 			}
 
 			var trigger *trzszTrigger
-			buf, trigger = detector.detectTrzsz(buf, r.tunnelConnector != nil)
+			buf, trigger = detector.detectTrzsz(buf, r.tunnelConnector.Load() != nil)
 			if trigger != nil {
 				r.relayStatus.Store(kRelayHandshaking) // store status before send to client
 				r.trigger = trigger
