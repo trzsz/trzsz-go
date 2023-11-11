@@ -583,7 +583,7 @@ func (filter *TrzszFilter) confirmStopTransfer(transfer *trzszTransfer) {
 
 var ctrlCRegexp = regexp.MustCompile(`^send -t %\d+ 0x3\r$`)
 
-func (filter *TrzszFilter) sendInput(buf []byte) {
+func (filter *TrzszFilter) sendInput(buf []byte, detectDragFile *atomic.Bool) {
 	if filter.logger != nil {
 		filter.logger.writeTraceLog(buf, "stdin")
 	}
@@ -602,7 +602,7 @@ func (filter *TrzszFilter) sendInput(buf []byte) {
 		}
 		return
 	}
-	if filter.options.DetectDragFile {
+	if detectDragFile.Load() {
 		dragFiles, hasDir, ignore := detectDragFiles(buf)
 		if dragFiles != nil {
 			filter.addDragFiles(dragFiles, hasDir, true)
@@ -616,14 +616,23 @@ func (filter *TrzszFilter) sendInput(buf []byte) {
 
 func (filter *TrzszFilter) wrapInput() {
 	buffer := make([]byte, 32*1024)
+	var detectDragFile atomic.Bool
+	if filter.options.DetectDragFile {
+		go func() {
+			if isWarpTerminal() {
+				time.Sleep(time.Second)
+			}
+			detectDragFile.Store(true)
+		}()
+	}
 	for {
 		n, err := filter.clientIn.Read(buffer)
 		if n > 0 {
-			filter.sendInput(buffer[0:n])
+			filter.sendInput(buffer[0:n], &detectDragFile)
 		}
 		if err == io.EOF {
 			if isRunningOnWindows() {
-				filter.sendInput([]byte{0x1A}) // ctrl + z
+				filter.sendInput([]byte{0x1A}, &detectDragFile) // ctrl + z
 				continue
 			}
 			filter.serverIn.Close()
