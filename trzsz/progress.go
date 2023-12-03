@@ -136,6 +136,43 @@ func convertTimeToString(seconds float64) string {
 
 const kSpeedArraySize = 30
 
+type recentSpeed struct {
+	speedCnt  int
+	speedIdx  int
+	timeArray [kSpeedArraySize]*time.Time
+	stepArray [kSpeedArraySize]int64
+}
+
+func (s *recentSpeed) initFirstStep(now *time.Time) {
+	s.timeArray[0] = now
+	s.stepArray[0] = 0
+	s.speedCnt = 1
+	s.speedIdx = 1
+}
+
+func (s *recentSpeed) getSpeed(step int64, now *time.Time) float64 {
+	var speed float64
+	if s.speedCnt <= kSpeedArraySize {
+		s.speedCnt++
+		speed = float64(step-s.stepArray[0]) / (float64(now.Sub(*s.timeArray[0])) / float64(time.Second))
+	} else {
+		speed = float64(step-s.stepArray[s.speedIdx]) / (float64(now.Sub(*s.timeArray[s.speedIdx])) / float64(time.Second))
+	}
+
+	s.timeArray[s.speedIdx] = now
+	s.stepArray[s.speedIdx] = step
+
+	s.speedIdx++
+	if s.speedIdx >= kSpeedArraySize {
+		s.speedIdx = 0
+	}
+
+	if math.IsNaN(speed) {
+		return -1
+	}
+	return speed
+}
+
 type textProgressBar struct {
 	writer          io.Writer
 	columns         atomic.Int32
@@ -149,10 +186,7 @@ type textProgressBar struct {
 	startTime       *time.Time
 	lastUpdateTime  *time.Time
 	firstWrite      bool
-	speedCnt        int
-	speedIdx        int
-	timeArray       [kSpeedArraySize]*time.Time
-	stepArray       [kSpeedArraySize]int64
+	recentSpeed     recentSpeed
 	pausing         atomic.Bool
 	tmuxPrefix      string
 }
@@ -193,10 +227,7 @@ func (p *textProgressBar) onName(name string) {
 	p.fileIdx++
 	now := timeNowFunc()
 	p.startTime = &now
-	p.timeArray[0] = p.startTime
-	p.stepArray[0] = 0
-	p.speedCnt = 1
-	p.speedIdx = 1
+	p.recentSpeed.initFirstStep(&now)
 	p.preSize = 0
 	p.fileStep = -1
 }
@@ -268,7 +299,7 @@ func (p *textProgressBar) showProgress() {
 		percentage = fmt.Sprintf("%.0f%%", math.Round(float64(p.fileStep)*100.0/float64(p.fileSize)))
 	}
 	total := convertSizeToString(float64(p.fileStep))
-	speed := p.getSpeed(&now)
+	speed := p.recentSpeed.getSpeed(p.fileStep, &now)
 	speedStr := "--- B/s"
 	etaStr := "--- ETA"
 	if speed > 0 {
@@ -288,29 +319,6 @@ func (p *textProgressBar) showProgress() {
 	} else {
 		p.writeProgress(fmt.Sprintf("\r%s", progressText))
 	}
-}
-
-func (p *textProgressBar) getSpeed(now *time.Time) float64 {
-	var speed float64
-	if p.speedCnt <= kSpeedArraySize {
-		p.speedCnt++
-		speed = float64(p.fileStep-p.stepArray[0]) / (float64(now.Sub(*p.timeArray[0])) / float64(time.Second))
-	} else {
-		speed = float64(p.fileStep-p.stepArray[p.speedIdx]) / (float64(now.Sub(*p.timeArray[p.speedIdx])) / float64(time.Second))
-	}
-
-	p.timeArray[p.speedIdx] = now
-	p.stepArray[p.speedIdx] = p.fileStep
-
-	p.speedIdx++
-	if p.speedIdx >= kSpeedArraySize {
-		p.speedIdx %= kSpeedArraySize
-	}
-
-	if math.IsNaN(speed) {
-		return -1
-	}
-	return speed
 }
 
 func (p *textProgressBar) getProgressText(percentage, total, speed, eta string) string {

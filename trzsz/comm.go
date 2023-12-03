@@ -50,6 +50,12 @@ import (
 
 var onExitFuncs []func()
 
+func cleanupOnExit() {
+	for i := len(onExitFuncs) - 1; i >= 0; i-- {
+		onExitFuncs[i]()
+	}
+}
+
 var timeNowFunc = time.Now
 
 var linuxRuntime bool = (runtime.GOOS == "linux")

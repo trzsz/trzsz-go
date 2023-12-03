@@ -48,6 +48,10 @@ type trzszPty struct {
 	closed atomic.Bool
 }
 
+func setupVirtualTerminal() error {
+	return nil
+}
+
 func spawn(name string, arg ...string) (*trzszPty, error) {
 	// spawn a pty
 	cmd := exec.Command(name, arg...)
@@ -123,14 +127,6 @@ func syscallAccessWok(path string) error {
 
 func syscallAccessRok(path string) error {
 	return syscall.Access(path, unix.R_OK)
-}
-
-func enableVirtualTerminal() (uint32, uint32, error) {
-	return 0, 0, nil
-}
-
-func resetVirtualTerminal(inMode, outMode uint32) error {
-	return nil
 }
 
 func setupConsoleOutput() {

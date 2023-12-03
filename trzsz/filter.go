@@ -53,6 +53,8 @@ type TrzszOptions struct {
 	// DetectTraceLog is for debugging.
 	// If DetectTraceLog is true, will detect the server output to determine whether to enable trace logging.
 	DetectTraceLog bool
+	// EnableZmodem enable zmodem lrzsz ( rz / sz ) feature.
+	EnableZmodem bool
 }
 
 // TrzszFilter is a filter that supports trzsz ( trz / tsz ).
@@ -63,6 +65,7 @@ type TrzszFilter struct {
 	serverOut           io.Reader
 	options             TrzszOptions
 	transfer            atomic.Pointer[trzszTransfer]
+	zmodem              atomic.Pointer[zmodemTransfer]
 	progress            atomic.Pointer[textProgressBar]
 	promptPipe          atomic.Pointer[io.PipeWriter]
 	trigger             *trzszTrigger
@@ -227,6 +230,8 @@ func (filter *TrzszFilter) getDefaultDownloadPath() string {
 	return resolveHomeDir(path)
 }
 
+var errUserCanceled = fmt.Errorf("Cancelled")
+
 var parentWindowID = getParentWindowID()
 
 func zenityErrorWithTips(err error) error {
@@ -265,11 +270,11 @@ func (filter *TrzszFilter) chooseDownloadPath() (string, error) {
 		options = append(options, zenity.Attach(parentWindowID))
 	}
 	path, err := zenity.SelectFile(options...)
+	if err == zenity.ErrCanceled || len(path) == 0 {
+		return "", errUserCanceled
+	}
 	if err != nil {
 		return "", zenityErrorWithTips(err)
-	}
-	if len(path) == 0 {
-		return "", zenity.ErrCanceled
 	}
 	return path, nil
 }
@@ -294,18 +299,18 @@ func (filter *TrzszFilter) chooseUploadPaths(directory bool) ([]string, error) {
 		options = append(options, zenity.Attach(parentWindowID))
 	}
 	files, err := zenity.SelectFileMultiple(options...)
+	if err == zenity.ErrCanceled || len(files) == 0 {
+		return nil, errUserCanceled
+	}
 	if err != nil {
 		return nil, zenityErrorWithTips(err)
-	}
-	if len(files) == 0 {
-		return nil, zenity.ErrCanceled
 	}
 	return files, nil
 }
 
 func (filter *TrzszFilter) downloadFiles(transfer *trzszTransfer) error {
 	path, err := filter.chooseDownloadPath()
-	if err == zenity.ErrCanceled {
+	if err == errUserCanceled {
 		return transfer.sendAction(false, filter.trigger.version, filter.trigger.winServer)
 	}
 	if err != nil {
@@ -344,7 +349,7 @@ func (filter *TrzszFilter) downloadFiles(transfer *trzszTransfer) error {
 
 func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) error {
 	paths, err := filter.chooseUploadPaths(directory)
-	if err == zenity.ErrCanceled {
+	if err == errUserCanceled {
 		return transfer.sendAction(false, filter.trigger.version, filter.trigger.winServer)
 	}
 	if err != nil {
@@ -602,6 +607,16 @@ func (filter *TrzszFilter) sendInput(buf []byte, detectDragFile *atomic.Bool) {
 		}
 		return
 	}
+	if filter.options.EnableZmodem {
+		if zmodem := filter.zmodem.Load(); zmodem != nil {
+			if len(buf) == 1 && buf[0] == '\x03' {
+				zmodem.stopTransferringFiles() // `ctrl + c` to stop transferring files
+			}
+			if zmodem.isTransferringFiles() {
+				return
+			}
+		}
+	}
 	if detectDragFile.Load() {
 		dragFiles, hasDir, ignore := detectDragFiles(buf)
 		if dragFiles != nil {
@@ -657,6 +672,16 @@ func (filter *TrzszFilter) wrapOutput() {
 			if filter.logger != nil {
 				buf = filter.logger.writeTraceLog(buf, "svrout")
 			}
+			if filter.options.EnableZmodem {
+				if zmodem := filter.zmodem.Load(); zmodem != nil {
+					if zmodem.handleServerOutput(buf) {
+						continue
+					} else {
+						filter.zmodem.Store(nil)
+					}
+				}
+			}
+
 			var trigger *trzszTrigger
 			buf, trigger = detector.detectTrzsz(buf, filter.tunnelConnector.Load() != nil)
 			if trigger != nil {
@@ -676,6 +701,20 @@ func (filter *TrzszFilter) wrapOutput() {
 					continue
 				}
 			}
+
+			if filter.options.EnableZmodem {
+				if zmodem := detectZmodem(buf); zmodem != nil {
+					_ = writeAll(filter.clientOut, buf)
+					filter.zmodem.Store(zmodem)
+					go zmodem.handleZmodemEvent(filter.logger, filter.serverIn, filter.clientOut,
+						func() ([]string, error) {
+							return filter.chooseUploadPaths(false)
+						},
+						filter.chooseDownloadPath)
+					continue
+				}
+			}
+
 			_ = writeAll(filter.clientOut, buf)
 		}
 		if err == io.EOF {

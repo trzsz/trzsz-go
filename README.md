@@ -192,6 +192,16 @@ DefaultDownloadPath = /Users/username/Downloads/
 
 - If the `DefaultDownloadPath` is not empty, downloading files will be saved to the path automatically instead of asking each time.
 
+## Zmodem support
+
+- Use `-z` or `--zmodem` to enable the `rz / sz` feature. e.g., `trzsz -z ssh remote_server`.
+
+- `lrzsz` needs to be installed on the client ( local computer ). e.g., `brew install lrzsz`, `apt install lrzsz`, etc.
+
+- `trzsz --zmodem ssh xxx` is not supported on Windows. You can use [trzsz-ssh ( tssh )](https://trzsz.github.io/ssh) instead, `tssh --zmodem xxx`.
+
+- About the progress, the transferred and speed are not precise. They appear larger than reality. It just indicating that the transfer is in progress.
+
 ## Trouble shooting
 
 - If using [MSYS2](https://www.msys2.org/) or [Git Bash](https://www.atlassian.com/git/tutorials/git-bash) on windows, and getting an error `The handle is invalid`.

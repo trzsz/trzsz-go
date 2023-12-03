@@ -39,6 +39,7 @@ type trzszArgs struct {
 	Relay    bool
 	TraceLog bool
 	DragFile bool
+	Zmodem   bool
 	Name     string
 	Args     []string
 }
@@ -48,7 +49,7 @@ func printVersion() {
 }
 
 func printHelp() {
-	fmt.Print("usage: trzsz [-h] [-v] [-r] [-t] [-d] command line\n\n" +
+	fmt.Print("usage: trzsz [-h] [-v] [-r] [-t] [-d] [-z] command line\n\n" +
 		"Wrapping command line to support trzsz ( trz / tsz ).\n\n" +
 		"positional arguments:\n" +
 		"  command line       the original command line\n\n" +
@@ -57,7 +58,8 @@ func printHelp() {
 		"  -v, --version      show version number and exit\n" +
 		"  -r, --relay        run as a trzsz relay server\n" +
 		"  -t, --tracelog     eanble trace log for debugging\n" +
-		"  -d, --dragfile     enable drag file(s) to upload\n")
+		"  -d, --dragfile     enable drag file(s) to upload\n" +
+		"  -z, --zmodem       enable zmodem lrzsz ( rz / sz )\n")
 }
 
 func parseTrzszArgs() *trzszArgs {
@@ -76,6 +78,8 @@ func parseTrzszArgs() *trzszArgs {
 			args.TraceLog = true
 		} else if os.Args[i] == "-d" || os.Args[i] == "--dragfile" {
 			args.DragFile = true
+		} else if os.Args[i] == "-z" || os.Args[i] == "--zmodem" {
+			args.Zmodem = true
 		} else {
 			break
 		}
@@ -122,11 +126,14 @@ func TrzszMain() int {
 		return 0
 	}
 
-	defer func() {
-		for i := len(onExitFuncs) - 1; i >= 0; i-- {
-			onExitFuncs[i]()
-		}
-	}()
+	// cleanup on exit
+	defer cleanupOnExit()
+
+	// setup virtual terminal on Windows
+	if err := setupVirtualTerminal(); err != nil {
+		fmt.Fprintf(os.Stderr, "setup virtual terminal failed: %v\r\n", err)
+		return -1
+	}
 
 	// spawn a pty
 	pty, err := spawn(args.Name, args.Args...)
@@ -165,6 +172,7 @@ func TrzszMain() int {
 			TerminalColumns: columns,
 			DetectDragFile:  args.DragFile,
 			DetectTraceLog:  args.TraceLog,
+			EnableZmodem:    args.Zmodem,
 		})
 		pty.OnResize(filter.SetTerminalColumns)
 		// handle signal

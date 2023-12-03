@@ -28,7 +28,6 @@ import (
 	"context"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -42,10 +41,6 @@ type trzszPty struct {
 	Stdin     io.ReadWriteCloser
 	Stdout    io.ReadWriteCloser
 	cpty      *conpty.ConPty
-	inCP      uint32
-	outCP     uint32
-	inMode    uint32
-	outMode   uint32
 	width     int
 	height    int
 	closed    atomic.Bool
@@ -87,50 +82,55 @@ func getConsoleSize() (int, int, error) {
 	return int(info.Window.Right-info.Window.Left) + 1, int(info.Window.Bottom-info.Window.Top) + 1, nil
 }
 
-func enableVirtualTerminal() (uint32, uint32, error) {
+func enableVirtualTerminal() error {
 	var inMode, outMode uint32
 	inHandle, err := syscall.GetStdHandle(syscall.STD_INPUT_HANDLE)
 	if err != nil {
-		return 0, 0, err
+		return err
 	}
 	if err := windows.GetConsoleMode(windows.Handle(inHandle), &inMode); err != nil {
-		return 0, 0, err
+		return err
 	}
+	onExitFuncs = append(onExitFuncs, func() {
+		windows.SetConsoleMode(windows.Handle(inHandle), inMode)
+	})
 	if err := windows.SetConsoleMode(windows.Handle(inHandle), inMode|windows.ENABLE_VIRTUAL_TERMINAL_INPUT); err != nil {
-		return 0, 0, err
+		return err
 	}
 
 	outHandle, err := syscall.GetStdHandle(syscall.STD_OUTPUT_HANDLE)
 	if err != nil {
-		return 0, 0, err
+		return err
 	}
 	if err := windows.GetConsoleMode(windows.Handle(outHandle), &outMode); err != nil {
-		return 0, 0, err
+		return err
 	}
+	onExitFuncs = append(onExitFuncs, func() {
+		windows.SetConsoleMode(windows.Handle(outHandle), outMode)
+	})
 	if err := windows.SetConsoleMode(windows.Handle(outHandle),
 		outMode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING|windows.DISABLE_NEWLINE_AUTO_RETURN); err != nil {
-		return 0, 0, err
+		return err
 	}
 
-	return inMode, outMode, nil
+	return nil
 }
 
-func resetVirtualTerminal(inMode, outMode uint32) error {
-	inHandle, err := syscall.GetStdHandle(syscall.STD_INPUT_HANDLE)
-	if err != nil {
-		return err
-	}
-	if err := windows.SetConsoleMode(windows.Handle(inHandle), inMode); err != nil {
+func setupVirtualTerminal() error {
+	// enable virtual terminal
+	if err := enableVirtualTerminal(); err != nil {
 		return err
 	}
 
-	outHandle, err := syscall.GetStdHandle(syscall.STD_OUTPUT_HANDLE)
-	if err != nil {
-		return err
-	}
-	if err := windows.SetConsoleMode(windows.Handle(outHandle), outMode); err != nil {
-		return err
-	}
+	// set code page to UTF8
+	inCP := getConsoleCP()
+	outCP := getConsoleOutputCP()
+	setConsoleCP(CP_UTF8)
+	setConsoleOutputCP(CP_UTF8)
+	onExitFuncs = append(onExitFuncs, func() {
+		setConsoleCP(inCP)
+		setConsoleOutputCP(outCP)
+	})
 
 	return nil
 }
@@ -142,31 +142,16 @@ func spawn(name string, args ...string) (*trzszPty, error) {
 		return nil, err
 	}
 
-	// enable virtual terminal
-	inMode, outMode, err := enableVirtualTerminal()
-	if err != nil {
-		return nil, err
-	}
-
-	// set code page to UTF8
-	inCP := getConsoleCP()
-	outCP := getConsoleOutputCP()
-	setConsoleCP(CP_UTF8)
-	setConsoleOutputCP(CP_UTF8)
-
 	// spawn a pty
 	var cmdLine strings.Builder
-	cmdLine.WriteString(strings.ReplaceAll(name, "\"", "\"\"\""))
+	cmdLine.WriteString(windows.EscapeArg(name))
 	for _, arg := range args {
-		cmdLine.WriteString(" \"")
-		cmdLine.WriteString(strings.ReplaceAll(arg, "\"", "\"\"\""))
-		cmdLine.WriteString("\"")
+		cmdLine.WriteString(" ")
+		cmdLine.WriteString(windows.EscapeArg(arg))
 	}
+
 	cpty, err := conpty.Start(cmdLine.String(), conpty.ConPtyDimensions(width, height))
 	if err != nil {
-		setConsoleCP(inCP)
-		setConsoleOutputCP(outCP)
-		resetVirtualTerminal(inMode, outMode)
 		return nil, err
 	}
 
@@ -174,10 +159,6 @@ func spawn(name string, args ...string) (*trzszPty, error) {
 		Stdin:     cpty,
 		Stdout:    cpty,
 		cpty:      cpty,
-		inCP:      inCP,
-		outCP:     outCP,
-		inMode:    inMode,
-		outMode:   outMode,
 		width:     width,
 		height:    height,
 		startTime: time.Now(),
@@ -217,15 +198,6 @@ func (t *trzszPty) Close() {
 	}
 	t.closed.Store(true)
 	t.cpty.Close()
-	setConsoleCP(t.inCP)
-	setConsoleOutputCP(t.outCP)
-	resetVirtualTerminal(t.inMode, t.outMode)
-	if time.Now().Sub(t.startTime) > 10*time.Second {
-		time.Sleep(100 * time.Millisecond)
-		cmd := exec.Command("cmd", "/c", "cls")
-		cmd.Stdout = os.Stdout
-		cmd.Run()
-	}
 }
 
 func (t *trzszPty) Wait() {

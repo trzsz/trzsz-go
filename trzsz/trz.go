@@ -109,11 +109,8 @@ func recvFiles(transfer *trzszTransfer, args *trzArgs, tmuxMode tmuxModeType, tm
 func TrzMain() int {
 	args := parseTrzArgs(os.Args)
 
-	defer func() {
-		for i := len(onExitFuncs) - 1; i >= 0; i-- {
-			onExitFuncs[i]()
-		}
-	}()
+	// cleanup on exit
+	defer cleanupOnExit()
 
 	var err error
 	args.Path, err = filepath.Abs(args.Path)
@@ -143,9 +140,7 @@ func TrzMain() int {
 
 	uniqueID := (time.Now().UnixMilli() % 10e10) * 100
 	if isRunningOnWindows() {
-		if inMode, outMode, err := enableVirtualTerminal(); err == nil {
-			defer resetVirtualTerminal(inMode, outMode) // nolint:all
-		}
+		_ = setupVirtualTerminal()
 		setupConsoleOutput()
 		uniqueID += 10
 	} else if tmuxMode == tmuxNormalMode {

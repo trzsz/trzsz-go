@@ -262,11 +262,10 @@ func (t *trzszTransfer) addReceivedData(buf []byte, tunnel bool) {
 }
 
 func (t *trzszTransfer) stopTransferringFiles(stopAndDelete bool) {
-	if t.stopped.Load() {
+	if !t.stopped.CompareAndSwap(false, true) {
 		return
 	}
 	t.stopAndDelete.Store(stopAndDelete)
-	t.stopped.Store(true)
 	t.buffer.stopBuffer()
 
 	if !t.tunnelConnected {
