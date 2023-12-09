@@ -65,6 +65,6 @@ func TestDetectZmodem(t *testing.T) {
 
 	assertDetectZmodem("**\x18B0100000023be50"+string(zmodemCanNotOpenFile), nil)
 	assertDetectZmodem("**\x18B0100000063f694\x0d\x8a\x11"+string(zmodemCanNotOpenFile), nil)
-	assertDetectZmodem("**\x18B0100000023be50"+string(zmodemCancelSequence), nil)
-	assertDetectZmodem("**\x18B0100000063f694\x0d\x8a\x11"+string(zmodemCancelSequence), nil)
+	assertDetectZmodem("**\x18B0100000023be50"+string(zmodemCancelFullSequence), nil)
+	assertDetectZmodem("**\x18B0100000063f694\x0d\x8a\x11"+string(zmodemCancelFullSequence), nil)
 }

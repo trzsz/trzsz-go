@@ -217,6 +217,7 @@ func (p *textProgressBar) onNum(num int64) {
 		return
 	}
 	p.fileCount = int(num)
+	hideCursor(p.writer)
 }
 
 func (p *textProgressBar) onName(name string) {
@@ -257,6 +258,9 @@ func (p *textProgressBar) onDone() {
 	if p == nil {
 		return
 	}
+	if p.fileIdx == p.fileCount {
+		showCursor(p.writer)
+	}
 	if p.fileSize == 0 {
 		return
 	}
@@ -275,6 +279,9 @@ func (p *textProgressBar) setPreSize(size int64) {
 func (p *textProgressBar) setPause(pausing bool) {
 	if p == nil {
 		return
+	}
+	if !pausing {
+		hideCursor(p.writer)
 	}
 	p.pausing.Store(pausing)
 }

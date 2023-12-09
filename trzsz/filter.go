@@ -401,6 +401,7 @@ func (filter *TrzszFilter) handleTrzsz() {
 
 	defer func() {
 		transfer.cleanup()
+		showCursor(filter.clientOut)
 		filter.transfer.CompareAndSwap(transfer, nil)
 	}()
 
@@ -677,7 +678,8 @@ func (filter *TrzszFilter) wrapOutput() {
 					if zmodem.handleServerOutput(buf) {
 						continue
 					} else {
-						filter.zmodem.Store(nil)
+						showCursor(filter.clientOut)
+						filter.zmodem.CompareAndSwap(zmodem, nil)
 					}
 				}
 			}
@@ -705,13 +707,15 @@ func (filter *TrzszFilter) wrapOutput() {
 			if filter.options.EnableZmodem {
 				if zmodem := detectZmodem(buf); zmodem != nil {
 					_ = writeAll(filter.clientOut, buf)
-					filter.zmodem.Store(zmodem)
-					go zmodem.handleZmodemEvent(filter.logger, filter.serverIn, filter.clientOut,
-						func() ([]string, error) {
-							return filter.chooseUploadPaths(false)
-						},
-						filter.chooseDownloadPath)
-					continue
+					if filter.zmodem.CompareAndSwap(nil, zmodem) {
+						hideCursor(filter.clientOut)
+						go zmodem.handleZmodemEvent(filter.logger, filter.serverIn, filter.clientOut,
+							func() ([]string, error) {
+								return filter.chooseUploadPaths(false)
+							},
+							filter.chooseDownloadPath)
+						continue
+					}
 				}
 			}
 

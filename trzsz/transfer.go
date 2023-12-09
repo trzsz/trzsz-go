@@ -704,6 +704,7 @@ func (t *trzszTransfer) serverExit(msg string) {
 	}
 	os.Stdout.WriteString(msg)
 	os.Stdout.WriteString("\r\n")
+	showCursor(os.Stdout)
 	if t.transferConfig.TmuxOutputJunk {
 		tmuxRefreshClient()
 	}

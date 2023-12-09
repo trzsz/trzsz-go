@@ -35,37 +35,41 @@ import (
 	"time"
 )
 
+// zmodem escape leader char
+const kZDLE byte = 030
+
 type zmodemTransfer struct {
-	upload         bool
-	logger         *traceLogger
-	serverIn       io.Writer
-	clientOut      io.Writer
-	cmd            atomic.Pointer[exec.Cmd]
-	stdin          io.WriteCloser
-	stdout         io.ReadCloser
-	clientFinished atomic.Bool
-	serverFinished atomic.Bool
-	errorOccurred  atomic.Bool
-	stopped        atomic.Bool
-	cleaned        atomic.Bool
-	cleanupTimer   *time.Timer
-	clientTimer    *time.Timer
-	serverTimer    *time.Timer
-	lastUpdateTime *time.Time
-	totalSize      int64
-	recentSpeed    recentSpeed
+	upload          bool
+	logger          *traceLogger
+	serverIn        io.Writer
+	clientOut       io.Writer
+	cmd             atomic.Pointer[exec.Cmd]
+	stdin           io.WriteCloser
+	stdout          io.ReadCloser
+	clientFinished  atomic.Bool
+	serverFinished  atomic.Bool
+	errorOccurred   atomic.Bool
+	stopped         atomic.Bool
+	cleaned         atomic.Bool
+	cleanupTimer    *time.Timer
+	clientTimer     *time.Timer
+	serverTimer     *time.Timer
+	lastUpdateTime  *time.Time
+	transferredSize int64
+	recentSpeed     recentSpeed
 }
 
 var zmodemOverAndOut = []byte("OO\x08\x08")
 var zmodemCanNotOpenFile = []byte("cannot open ")
-var zmodemCancelSequence = []byte("\x18\x18\x18\x18\x18\x18\x18\x18\x18\x18\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08")
+var zmodemCancelSubSequence = []byte("\x18\x18\x18\x18\x18")
+var zmodemCancelFullSequence = []byte("\x18\x18\x18\x18\x18\x18\x18\x18\x18\x18\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08")
 
 var zmodemInitRegexp = regexp.MustCompile(`\*\*\x18B0(0|1)[0-9a-f]{12}`)
 var zmodemFinishRegexp = regexp.MustCompile(`\*\*\x18B08[0-9a-f]{12}`)
 
 func detectZmodem(buf []byte) *zmodemTransfer {
 	match := zmodemInitRegexp.FindSubmatch(buf)
-	if len(match) < 2 || bytes.Contains(buf, zmodemCancelSequence) || bytes.Contains(buf, zmodemCanNotOpenFile) {
+	if len(match) < 2 || bytes.Contains(buf, zmodemCancelSubSequence) || bytes.Contains(buf, zmodemCanNotOpenFile) {
 		return nil
 	}
 	if match[1][0] == '1' {
@@ -79,19 +83,24 @@ func (z *zmodemTransfer) writeMessage(msg string) {
 	_ = writeAll(z.clientOut, []byte(fmt.Sprintf("\r\x1b[2K%s\r\n", msg)))
 }
 
-func (z *zmodemTransfer) updateProgress(delta int) {
-	if delta < 0 {
+func (z *zmodemTransfer) updateProgress(buf []byte) {
+	if buf == nil {
 		_ = writeAll(z.clientOut, []byte("\r\n"))
 		return
 	}
-	z.totalSize += int64(delta)
+	// rough estimate of the size currently transferred
+	for _, c := range buf {
+		if c != kZDLE {
+			z.transferredSize++
+		}
+	}
 	now := timeNowFunc()
 	if z.lastUpdateTime != nil && now.Sub(*z.lastUpdateTime) < 200*time.Millisecond {
 		return
 	}
 	z.lastUpdateTime = &now
 	_ = writeAll(z.clientOut, []byte(fmt.Sprintf("\r\x1b[2KTransferred %s, Speed %s.",
-		convertSizeToString(float64(z.totalSize)), z.getSpeed(&now))))
+		convertSizeToString(float64(z.transferredSize)), z.getSpeed(&now))))
 }
 
 func (z *zmodemTransfer) getSpeed(now *time.Time) string {
@@ -100,7 +109,7 @@ func (z *zmodemTransfer) getSpeed(now *time.Time) string {
 		return "N/A"
 	}
 
-	speed := z.recentSpeed.getSpeed(z.totalSize, now)
+	speed := z.recentSpeed.getSpeed(z.transferredSize, now)
 	if speed < 0 {
 		return "N/A"
 	}
@@ -160,10 +169,10 @@ func (z *zmodemTransfer) handleZmodemError(msg string) {
 		z.logger.writeTraceLog([]byte(msg), "debug")
 	}
 
-	_ = writeAll(z.serverIn, zmodemCancelSequence)
+	_ = writeAll(z.serverIn, zmodemCancelFullSequence)
 
 	if cmd := z.cmd.Load(); cmd != nil {
-		_ = writeAll(z.stdin, zmodemCancelSequence)
+		_ = writeAll(z.stdin, zmodemCancelFullSequence)
 		z.ensureClientExit(cmd)
 	}
 
@@ -189,13 +198,13 @@ func (z *zmodemTransfer) handleServerOutput(buf []byte) bool {
 		}
 		err := writeAll(z.stdin, buf)
 		if err == nil && !z.upload {
-			z.updateProgress(len(buf))
+			z.updateProgress(buf)
 		}
 		return true
 	}
 
 	// server canceled before the client startup
-	if bytes.Contains(buf, zmodemCancelSequence) || bytes.Contains(buf, zmodemCanNotOpenFile) {
+	if bytes.Contains(buf, zmodemCancelSubSequence) || bytes.Contains(buf, zmodemCanNotOpenFile) {
 		z.cleaned.Store(true)
 		z.stopped.Store(true)
 		return false
@@ -242,7 +251,7 @@ func (z *zmodemTransfer) handleZmodemStream(cmd *exec.Cmd) {
 				break
 			}
 			if z.upload {
-				z.updateProgress(n)
+				z.updateProgress(buf)
 			}
 		}
 		if err == io.EOF {
@@ -290,7 +299,7 @@ func (z *zmodemTransfer) checkClientExited(cmd *exec.Cmd) {
 		z.serverTimer.Stop()
 	}
 
-	z.updateProgress(-1) // -1 means finished
+	z.updateProgress(nil) // nil means finished
 
 	if z.logger != nil {
 		z.logger.writeTraceLog([]byte("zmodem end"), "debug")
@@ -305,7 +314,7 @@ func (z *zmodemTransfer) checkClientExited(cmd *exec.Cmd) {
 	z.resetCleanupTimer()
 
 	// make sure the server exit
-	_ = writeAll(z.serverIn, zmodemCancelSequence)
+	_ = writeAll(z.serverIn, zmodemCancelFullSequence)
 }
 
 func (z *zmodemTransfer) launchZmodemCmd(dir, name string, args ...string) (*exec.Cmd, error) {

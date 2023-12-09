@@ -614,6 +614,14 @@ func writeAll(dst io.Writer, data []byte) error {
 	return nil
 }
 
+func hideCursor(writer io.Writer) {
+	_ = writeAll(writer, []byte("\x1b[?25l"))
+}
+
+func showCursor(writer io.Writer) {
+	_ = writeAll(writer, []byte("\x1b[?25h"))
+}
+
 type trzszVersion [3]uint32
 
 func parseTrzszVersion(ver string) (*trzszVersion, error) {
