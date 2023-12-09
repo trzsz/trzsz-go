@@ -217,7 +217,7 @@ func (p *textProgressBar) onNum(num int64) {
 		return
 	}
 	p.fileCount = int(num)
-	hideCursor(p.writer)
+	p.hideCursor()
 }
 
 func (p *textProgressBar) onName(name string) {
@@ -258,9 +258,6 @@ func (p *textProgressBar) onDone() {
 	if p == nil {
 		return
 	}
-	if p.fileIdx == p.fileCount {
-		showCursor(p.writer)
-	}
 	if p.fileSize == 0 {
 		return
 	}
@@ -281,9 +278,17 @@ func (p *textProgressBar) setPause(pausing bool) {
 		return
 	}
 	if !pausing {
-		hideCursor(p.writer)
+		p.hideCursor()
 	}
 	p.pausing.Store(pausing)
+}
+
+func (p *textProgressBar) hideCursor() {
+	p.writeProgress("\x1b[?25l")
+}
+
+func (p *textProgressBar) showCursor() {
+	p.writeProgress("\x1b[?25h")
 }
 
 func (p *textProgressBar) writeProgress(progress string) {

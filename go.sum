@@ -32,8 +32,8 @@ github.com/stretchr/testify v1.2.2/go.mod h1:a8OnRcib4nhh0OaRAV+Yts87kKdq0PP7pXf
 github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.8.4 h1:CcVxjf3Q8PM0mHUKJCdn+eZZtm5yQwehR5yeSVQQcUk=
 github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
-github.com/trzsz/go-arg v1.5.2 h1:zGxCuTKvtC3jBf7HbvNk0HooUjv8uKAy2mY+bHVhRas=
-github.com/trzsz/go-arg v1.5.2/go.mod h1:IC6Z/FiVH7uYvcbp1/gJhDYCFPS/GkL0APYakVvgY4I=
+github.com/trzsz/go-arg v1.5.3 h1:eIDwDEmvSahtr5HpQOLrSa+YMqWQQ0H20xx60XgXQJw=
+github.com/trzsz/go-arg v1.5.3/go.mod h1:IC6Z/FiVH7uYvcbp1/gJhDYCFPS/GkL0APYakVvgY4I=
 github.com/trzsz/promptui v0.10.5 h1:tlzJkx+JOeE0sqKWmqgaoToZiYqj5G1Mz+QDV97VFu8=
 github.com/trzsz/promptui v0.10.5/go.mod h1:GMZtu6ZTzU73CBFkzGtmB4wnTROIAbv4GFA74fV8V8g=
 go.uber.org/goleak v1.2.1 h1:NBol2c7O1ZokfZ0LEU9K6Whx/KnwvepVetCUhtKja4A=

@@ -8,7 +8,7 @@ require (
 	github.com/klauspost/compress v1.17.4
 	github.com/ncruces/zenity v0.10.10
 	github.com/stretchr/testify v1.8.4
-	github.com/trzsz/go-arg v1.5.2
+	github.com/trzsz/go-arg v1.5.3
 	github.com/trzsz/promptui v0.10.5
 	golang.org/x/sys v0.15.0
 	golang.org/x/term v0.15.0

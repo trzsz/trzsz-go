@@ -308,6 +308,22 @@ func (filter *TrzszFilter) chooseUploadPaths(directory bool) ([]string, error) {
 	return files, nil
 }
 
+func (filter *TrzszFilter) createProgressBar(quiet bool, tmuxPaneColumns int32) {
+	if quiet {
+		filter.progress.Store(nil)
+		return
+	}
+	filter.progress.Store(newTextProgressBar(filter.clientOut, filter.options.TerminalColumns,
+		tmuxPaneColumns, filter.trigger.tmuxPrefix))
+}
+
+func (filter *TrzszFilter) resetProgressBar() {
+	if progress := filter.progress.Load(); progress != nil {
+		progress.showCursor()
+	}
+	filter.progress.Store(nil)
+}
+
 func (filter *TrzszFilter) downloadFiles(transfer *trzszTransfer) error {
 	path, err := filter.chooseDownloadPath()
 	if err == errUserCanceled {
@@ -332,12 +348,8 @@ func (filter *TrzszFilter) downloadFiles(transfer *trzszTransfer) error {
 		return err
 	}
 
-	filter.progress.Store(nil)
-	if !config.Quiet {
-		filter.progress.Store(newTextProgressBar(filter.clientOut, filter.options.TerminalColumns,
-			config.TmuxPaneColumns, filter.trigger.tmuxPrefix))
-		defer filter.progress.Store(nil)
-	}
+	filter.createProgressBar(config.Quiet, config.TmuxPaneColumns)
+	defer filter.resetProgressBar()
 
 	localNames, err := transfer.recvFiles(path, filter.progress.Load())
 	if err != nil {
@@ -378,12 +390,8 @@ func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) 
 		}
 	}
 
-	filter.progress.Store(nil)
-	if !config.Quiet {
-		filter.progress.Store(newTextProgressBar(filter.clientOut, filter.options.TerminalColumns,
-			config.TmuxPaneColumns, filter.trigger.tmuxPrefix))
-		defer filter.progress.Store(nil)
-	}
+	filter.createProgressBar(config.Quiet, config.TmuxPaneColumns)
+	defer filter.resetProgressBar()
 
 	remoteNames, err := transfer.sendFiles(files, filter.progress.Load())
 	if err != nil {
@@ -401,7 +409,6 @@ func (filter *TrzszFilter) handleTrzsz() {
 
 	defer func() {
 		transfer.cleanup()
-		showCursor(filter.clientOut)
 		filter.transfer.CompareAndSwap(transfer, nil)
 	}()
 
