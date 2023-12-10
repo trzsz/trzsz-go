@@ -85,6 +85,8 @@ func (z *zmodemTransfer) writeMessage(msg string) {
 
 func (z *zmodemTransfer) updateProgress(buf []byte) {
 	if buf == nil {
+		now := timeNowFunc()
+		z.showProgress(&now)
 		_ = writeAll(z.clientOut, []byte("\r\n"))
 		return
 	}
@@ -99,8 +101,12 @@ func (z *zmodemTransfer) updateProgress(buf []byte) {
 		return
 	}
 	z.lastUpdateTime = &now
+	z.showProgress(&now)
+}
+
+func (z *zmodemTransfer) showProgress(now *time.Time) {
 	_ = writeAll(z.clientOut, []byte(fmt.Sprintf("\r\x1b[2KTransferred %s, Speed %s.",
-		convertSizeToString(float64(z.transferredSize)), z.getSpeed(&now))))
+		convertSizeToString(float64(z.transferredSize)), z.getSpeed(now))))
 }
 
 func (z *zmodemTransfer) getSpeed(now *time.Time) string {
