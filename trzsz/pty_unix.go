@@ -40,8 +40,8 @@ import (
 )
 
 type trzszPty struct {
-	Stdin  io.ReadWriteCloser
-	Stdout io.ReadWriteCloser
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
 	ptmx   *os.File
 	cmd    *exec.Cmd
 	ch     chan os.Signal
@@ -59,7 +59,7 @@ func spawn(name string, arg ...string) (*trzszPty, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &trzszPty{Stdin: ptmx, Stdout: ptmx, ptmx: ptmx, cmd: cmd}, nil
+	return &trzszPty{stdin: ptmx, stdout: ptmx, ptmx: ptmx, cmd: cmd}, nil
 }
 
 func (t *trzszPty) OnResize(setTerminalColumns func(int32)) {

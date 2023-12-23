@@ -38,8 +38,8 @@ import (
 )
 
 type trzszPty struct {
-	Stdin     io.ReadWriteCloser
-	Stdout    io.ReadWriteCloser
+	stdin     io.WriteCloser
+	stdout    io.ReadCloser
 	cpty      *conpty.ConPty
 	width     int
 	height    int
@@ -156,8 +156,8 @@ func spawn(name string, args ...string) (*trzszPty, error) {
 	}
 
 	return &trzszPty{
-		Stdin:     cpty,
-		Stdout:    cpty,
+		stdin:     cpty,
+		stdout:    cpty,
 		cpty:      cpty,
 		width:     width,
 		height:    height,

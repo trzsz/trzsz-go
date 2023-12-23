@@ -242,7 +242,7 @@ func (t *trzszTransfer) newArchiveWriter(destPath string, srcFile *sourceFile, f
 	if !srcFile.IsDir {
 		return nil, simpleTrzszError("Archive is not a directory: %s", srcFile.getFileName())
 	}
-	if err := t.doCreateDirectory(fullPath); err != nil {
+	if err := t.doCreateDirectory(fullPath, srcFile.Perm); err != nil {
 		return nil, err
 	}
 	return &archiveFileWriter{transfer: t, path: destPath}, nil

@@ -294,6 +294,7 @@ type sourceFile struct {
 	IsDir    bool          `json:"is_dir"`
 	Archive  bool          `json:"archive"`
 	Size     int64         `json:"size"`
+	Perm     *uint32       `json:"perm"`
 	Header   string        `json:"-"`
 	SubFiles []*sourceFile `json:"-"`
 }
@@ -351,6 +352,7 @@ func unmarshalTargetFile(target string) (*targetFile, error) {
 
 func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*sourceFile,
 	relPath []string, visitedDir map[string]bool) error {
+	perm := uint32(info.Mode().Perm())
 	if !info.IsDir() {
 		if !info.Mode().IsRegular() {
 			return simpleTrzszError("Not a regular file: %s", path)
@@ -358,7 +360,7 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*sourc
 		if syscallAccessRok(path) != nil {
 			return simpleTrzszError("No permission to read: %s", path)
 		}
-		*list = append(*list, &sourceFile{PathID: pathID, AbsPath: path, RelPath: relPath, Size: info.Size()})
+		*list = append(*list, &sourceFile{PathID: pathID, AbsPath: path, RelPath: relPath, Size: info.Size(), Perm: &perm})
 		return nil
 	}
 	realPath, err := filepath.EvalSymlinks(path)
@@ -369,7 +371,7 @@ func checkPathReadable(pathID int, path string, info os.FileInfo, list *[]*sourc
 		return simpleTrzszError("Duplicate link: %s", path)
 	}
 	visitedDir[realPath] = true
-	*list = append(*list, &sourceFile{PathID: pathID, AbsPath: path, RelPath: relPath, IsDir: true})
+	*list = append(*list, &sourceFile{PathID: pathID, AbsPath: path, RelPath: relPath, IsDir: true, Perm: &perm})
 	fileObj, err := os.Open(path)
 	if err != nil {
 		return simpleTrzszError("Open [%s] error: %v", path, err)

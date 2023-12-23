@@ -156,7 +156,7 @@ func TrzszMain() int {
 
 	if args.Relay {
 		// run as relay
-		NewTrzszRelay(os.Stdin, os.Stdout, pty.Stdin, pty.Stdout, TrzszOptions{
+		NewTrzszRelay(os.Stdin, os.Stdout, pty.stdin, pty.stdout, TrzszOptions{
 			DetectTraceLog: args.TraceLog,
 		})
 		pty.OnResize(nil)
@@ -168,7 +168,7 @@ func TrzszMain() int {
 			fmt.Fprintf(os.Stderr, "pty get columns failed: %v\r\n", err)
 			return -3
 		}
-		filter := NewTrzszFilter(os.Stdin, os.Stdout, pty.Stdin, pty.Stdout, TrzszOptions{
+		filter := NewTrzszFilter(os.Stdin, os.Stdout, pty.stdin, pty.stdout, TrzszOptions{
 			TerminalColumns: columns,
 			DetectDragFile:  args.DragFile,
 			DetectTraceLog:  args.TraceLog,

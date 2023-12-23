@@ -973,12 +973,16 @@ func (t *trzszTransfer) addCreatedFiles(path string) {
 	t.createdFiles = append(t.createdFiles, path)
 }
 
-func (t *trzszTransfer) doCreateFile(path string, truncate bool) (fileWriter, error) {
+func (t *trzszTransfer) doCreateFile(path string, truncate bool, perm *uint32) (fileWriter, error) {
 	flag := os.O_RDWR | os.O_CREATE
 	if truncate {
 		flag |= os.O_TRUNC
 	}
-	file, err := os.OpenFile(path, flag, 0644)
+	fileMode := fs.FileMode(0644)
+	if perm != nil {
+		fileMode = fs.FileMode(*perm) | 0600
+	}
+	file, err := os.OpenFile(path, flag, fileMode)
 	if err != nil {
 		if e, ok := err.(*fs.PathError); ok {
 			if errno, ok := e.Unwrap().(syscall.Errno); ok {
@@ -995,10 +999,14 @@ func (t *trzszTransfer) doCreateFile(path string, truncate bool) (fileWriter, er
 	return &simpleFileWriter{file}, nil
 }
 
-func (t *trzszTransfer) doCreateDirectory(path string) error {
+func (t *trzszTransfer) doCreateDirectory(path string, perm *uint32) error {
 	stat, err := os.Stat(path)
 	if os.IsNotExist(err) {
-		err := os.MkdirAll(path, 0755)
+		fileMode := fs.FileMode(0755)
+		if perm != nil {
+			fileMode = fs.FileMode(*perm) | 0700
+		}
+		err := os.MkdirAll(path, fileMode)
 		if err != nil {
 			return err
 		}
@@ -1013,7 +1021,7 @@ func (t *trzszTransfer) doCreateDirectory(path string) error {
 	return nil
 }
 
-func (t *trzszTransfer) createFile(path, fileName string, truncate bool) (fileWriter, string, error) {
+func (t *trzszTransfer) createFile(path, fileName string, truncate bool, perm *uint32) (fileWriter, string, error) {
 	var localName string
 	if t.transferConfig.Overwrite {
 		localName = fileName
@@ -1024,7 +1032,7 @@ func (t *trzszTransfer) createFile(path, fileName string, truncate bool) (fileWr
 			return nil, "", err
 		}
 	}
-	file, err := t.doCreateFile(filepath.Join(path, localName), truncate)
+	file, err := t.doCreateFile(filepath.Join(path, localName), truncate, perm)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1051,7 +1059,7 @@ func (t *trzszTransfer) createDirOrFile(path string, srcFile *sourceFile, trunca
 	var fullPath string
 	if len(srcFile.RelPath) > 1 {
 		p := filepath.Join(append([]string{path, localName}, srcFile.RelPath[1:len(srcFile.RelPath)-1]...)...)
-		if err := t.doCreateDirectory(p); err != nil {
+		if err := t.doCreateDirectory(p, srcFile.Perm); err != nil {
 			return nil, "", err
 		}
 		fullPath = filepath.Join(p, srcFile.getFileName())
@@ -1068,13 +1076,13 @@ func (t *trzszTransfer) createDirOrFile(path string, srcFile *sourceFile, trunca
 	}
 
 	if srcFile.IsDir {
-		if err := t.doCreateDirectory(fullPath); err != nil {
+		if err := t.doCreateDirectory(fullPath, srcFile.Perm); err != nil {
 			return nil, "", err
 		}
 		return nil, localName, nil
 	}
 
-	file, err := t.doCreateFile(fullPath, truncate)
+	file, err := t.doCreateFile(fullPath, truncate, srcFile.Perm)
 	if err != nil {
 		return nil, "", err
 	}
@@ -1098,7 +1106,7 @@ func (t *trzszTransfer) recvFileName(path string, progress progressCallback) (fi
 		fileName = srcFile.getFileName()
 		file, localName, err = t.createDirOrFile(path, srcFile, true)
 	} else {
-		file, localName, err = t.createFile(path, fileName, true)
+		file, localName, err = t.createFile(path, fileName, true, nil)
 	}
 	if err != nil {
 		return nil, "", err
