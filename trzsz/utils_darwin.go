@@ -29,13 +29,14 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 
 	"golang.org/x/sys/unix"
 )
 
 func getParentWindowID() any {
-	pid := os.Getppid()
+	pid := getParentPid()
 	for i := 0; i < 1000; i++ {
 		kinfo, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
 		if err != nil {
@@ -57,6 +58,26 @@ func getParentWindowID() any {
 		}
 	}
 	return 0
+}
+
+func getParentPid() int {
+	if _, tmux := os.LookupEnv("TMUX"); !tmux {
+		return os.Getppid()
+	}
+
+	cmd := exec.Command("tmux", "display-message", "-p", "#{client_pid}")
+	cmd.Stdin = os.Stdin
+	out, err := cmd.Output()
+	if err != nil {
+		return os.Getppid()
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return os.Getppid()
+	}
+
+	return pid
 }
 
 var (

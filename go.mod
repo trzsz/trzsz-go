@@ -10,8 +10,8 @@ require (
 	github.com/stretchr/testify v1.8.4
 	github.com/trzsz/go-arg v1.5.3
 	github.com/trzsz/promptui v0.10.5
-	golang.org/x/sys v0.15.0
-	golang.org/x/term v0.15.0
+	golang.org/x/sys v0.16.0
+	golang.org/x/term v0.16.0
 	golang.org/x/text v0.14.0
 )
 
@@ -24,6 +24,6 @@ require (
 	github.com/josephspurrier/goversioninfo v1.4.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/randall77/makefat v0.0.0-20210315173500-7ddd0e42c844 // indirect
-	golang.org/x/image v0.14.0 // indirect
+	golang.org/x/image v0.15.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
