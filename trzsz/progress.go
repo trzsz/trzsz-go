@@ -31,20 +31,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
-)
 
-func getDisplayLength(str string) int {
-	length := 0
-	for _, r := range []rune(str) { // nolint:all
-		if utf8.RuneLen(r) == 1 {
-			length++
-		} else {
-			length += 2
-		}
-	}
-	return length
-}
+	"github.com/mattn/go-runewidth"
+)
 
 func getEllipsisString(str string, max int) (string, int) {
 	var b strings.Builder
@@ -52,19 +41,12 @@ func getEllipsisString(str string, max int) (string, int) {
 	max -= 3
 	length := 0
 	for _, r := range []rune(str) { // nolint:all
-		if utf8.RuneLen(r) > 1 {
-			if length+2 > max {
-				b.WriteString("...")
-				return b.String(), length + 3
-			}
-			length += 2
-		} else {
-			if length+1 > max {
-				b.WriteString("...")
-				return b.String(), length + 3
-			}
-			length++
+		rlen := runewidth.RuneWidth(r)
+		if length+rlen > max {
+			b.WriteString("...")
+			return b.String(), length + 3
 		}
+		length += rlen
 		b.WriteRune(r)
 	}
 	b.WriteString("...")
@@ -340,7 +322,7 @@ func (p *textProgressBar) getProgressText(percentage, total, speed, eta string) 
 	if p.fileCount > 1 {
 		left = fmt.Sprintf("(%d/%d) %s", p.fileIdx, p.fileCount, p.fileName)
 	}
-	leftLength := getDisplayLength(left)
+	leftLength := runewidth.StringWidth(left)
 	right := fmt.Sprintf(" %s | %s | %s | %s", percentage, total, speed, eta)
 
 	for {

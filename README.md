@@ -1,17 +1,15 @@
-# trzsz-go
-
-[trzsz](https://trzsz.github.io/) ( trz / tsz ) is a simple file transfer tools, similar to lrzsz ( rz / sz ), and compatible with tmux.
-
-Website: [https://trzsz.github.io/go](https://trzsz.github.io/go) 　中文文档：[https://trzsz.github.io/cn/go](https://trzsz.github.io/cn/go)
+# trzsz-go ( trz / tsz ) - the go version of trzsz
 
 [![MIT License](https://img.shields.io/badge/license-MIT-green.svg?style=flat)](https://choosealicense.com/licenses/mit/)
 [![GitHub Release](https://img.shields.io/github/v/release/trzsz/trzsz-go)](https://github.com/trzsz/trzsz-go/releases)
+[![WebSite](https://img.shields.io/badge/WebSite-https%3A%2F%2Ftrzsz.github.io%2Fgo-blue?style=flat)](https://trzsz.github.io/go)
+[![中文文档](https://img.shields.io/badge/%E4%B8%AD%E6%96%87%E6%96%87%E6%A1%A3-https%3A%2F%2Ftrzsz.github.io%2Fcn%2Fgo-blue?style=flat)](https://trzsz.github.io/cn/go)
 
-**_Please check [https://trzsz.github.io](https://trzsz.github.io) for more information of `trzsz`._**
+`trzsz-go` makes all terminals that support local shell to support [trzsz](https://trzsz.github.io/) ( trz / tsz ), which similar to ( rz / sz ), and compatible with tmux.
 
-`trzsz-go` is the `go` version of `trzsz`, supports native terminals that support a local shell.
+⭐ It's recommended to use the go version of `trzsz` on the server, use [trzsz-ssh ( tssh )](https://trzsz.github.io/ssh) on local.
 
-⭐ It's recommended to use the `go` version of `trzsz` on the server.
+_Please check [https://trzsz.github.io](https://trzsz.github.io) for more information about `trzsz ( trz / tsz )`._
 
 ## Installation
 
@@ -125,18 +123,20 @@ Website: [https://trzsz.github.io/go](https://trzsz.github.io/go) 　中文文�
 
   </details>
 
-- Download from the [Releases](https://github.com/trzsz/trzsz-go/releases)
+- Build from source ( Requires go 1.20 or later )
 
-  <details><summary><code>Or build and install from the source code ( Requires go 1.20 or later )</code></summary>
+  <details><summary><code>sudo make install</code></summary>
 
   ```sh
-  git clone https://github.com/trzsz/trzsz-go.git
+  git clone --depth 1 https://github.com/trzsz/trzsz-go.git
   cd trzsz-go
   make
   sudo make install
   ```
 
   </details>
+
+- Download from the [Releases](https://github.com/trzsz/trzsz-go/releases)
 
 ## Usage
 

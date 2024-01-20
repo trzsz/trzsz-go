@@ -30,12 +30,25 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 var colorRegexp = regexp.MustCompile(`\x1b\[\d+[mD]`)
+
+func getDisplayLength(str string) int {
+	length := 0
+	for _, r := range []rune(str) { // nolint:all
+		if utf8.RuneLen(r) == 1 {
+			length++
+		} else {
+			length += 2
+		}
+	}
+	return length
+}
 
 func getProgressLength(text string) int {
 	text = strings.ReplaceAll(text, "\r", "")
