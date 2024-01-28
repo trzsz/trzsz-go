@@ -136,7 +136,7 @@ _Please check [https://trzsz.github.io](https://trzsz.github.io) for more inform
 
   </details>
 
-- Download from the [Releases](https://github.com/trzsz/trzsz-go/releases)
+- Download from the [GitHub Releases](https://github.com/trzsz/trzsz-go/releases), unzip and add to `PATH` environment.
 
 ## Usage
 
