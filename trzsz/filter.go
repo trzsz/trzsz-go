@@ -234,12 +234,17 @@ var errUserCanceled = fmt.Errorf("Cancelled")
 
 var parentWindowID = getParentWindowID()
 
+func zenityExecutable() bool {
+	_, e := exec.LookPath("zenity")
+	return e == nil
+}
+
 func zenityErrorWithTips(err error) error {
-	if !isRunningOnLinux() {
-		return err
+	if err == zenity.ErrCanceled {
+		return errUserCanceled
 	}
-	if _, e := exec.LookPath("zenity"); e == nil {
-		return err
+	if !isRunningOnLinux() || zenityExecutable() {
+		return fmt.Errorf("Open file dialog failed: %v", err)
 	}
 	tips := "'zenity' needs to be installed on the Linux Desktop."
 	if os.Getenv("WSL_DISTRO_NAME") == "" {
@@ -270,11 +275,11 @@ func (filter *TrzszFilter) chooseDownloadPath() (string, error) {
 		options = append(options, zenity.Attach(parentWindowID))
 	}
 	path, err := zenity.SelectFile(options...)
-	if err == zenity.ErrCanceled || len(path) == 0 {
-		return "", errUserCanceled
-	}
 	if err != nil {
 		return "", zenityErrorWithTips(err)
+	}
+	if len(path) == 0 {
+		return "", errUserCanceled
 	}
 	return path, nil
 }
@@ -299,11 +304,11 @@ func (filter *TrzszFilter) chooseUploadPaths(directory bool) ([]string, error) {
 		options = append(options, zenity.Attach(parentWindowID))
 	}
 	files, err := zenity.SelectFileMultiple(options...)
-	if err == zenity.ErrCanceled || len(files) == 0 {
-		return nil, errUserCanceled
-	}
 	if err != nil {
 		return nil, zenityErrorWithTips(err)
+	}
+	if len(files) == 0 {
+		return nil, errUserCanceled
 	}
 	return files, nil
 }
