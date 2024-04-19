@@ -433,6 +433,11 @@ func checkDuplicateNames(sourceFiles []*sourceFile) error {
 }
 
 func getNewName(path, name string) (string, error) {
+	const maxNameLen = 255
+	if len(name) > maxNameLen {
+		return "", simpleTrzszError("File name too long: %s", name)
+	}
+
 	if _, err := os.Stat(filepath.Join(path, name)); os.IsNotExist(err) {
 		return name, nil
 	}
@@ -442,7 +447,7 @@ func getNewName(path, name string) (string, error) {
 			return newName, nil
 		}
 	}
-	return "", simpleTrzszError("Fail to assign new file name")
+	return "", simpleTrzszError("Fail to assign new file name to %s", name)
 }
 
 type tmuxModeType int
