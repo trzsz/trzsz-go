@@ -734,8 +734,7 @@ func (filter *TrzszFilter) wrapOutput() {
 			_ = writeAll(filter.clientOut, buf)
 		}
 		if err == io.EOF {
-			filter.clientOut.Close()
-			break
+			continue // ignore output EOF
 		}
 	}
 }
