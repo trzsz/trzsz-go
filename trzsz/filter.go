@@ -243,10 +243,10 @@ func zenityErrorWithTips(err error) error {
 	if err == zenity.ErrCanceled {
 		return errUserCanceled
 	}
-	if !isRunningOnLinux() || zenityExecutable() {
+	if isRunningOnMacOS() || isRunningOnWindows() || zenityExecutable() {
 		return fmt.Errorf("Open file dialog failed: %v", err)
 	}
-	tips := "'zenity' needs to be installed on the Linux Desktop."
+	tips := "'zenity' needs to be installed on your local Linux desktop."
 	if os.Getenv("WSL_DISTRO_NAME") == "" {
 		return simpleTrzszError(tips)
 	}
@@ -271,7 +271,7 @@ func (filter *TrzszFilter) chooseDownloadPath() (string, error) {
 		zenity.Directory(),
 		zenity.ShowHidden(),
 	}
-	if !isRunningOnLinux() {
+	if isRunningOnMacOS() || isRunningOnWindows() {
 		options = append(options, zenity.Attach(parentWindowID))
 	}
 	path, err := zenity.SelectFile(options...)
@@ -300,7 +300,7 @@ func (filter *TrzszFilter) chooseUploadPaths(directory bool) ([]string, error) {
 	if directory {
 		options = append(options, zenity.Directory())
 	}
-	if !isRunningOnLinux() {
+	if isRunningOnMacOS() || isRunningOnWindows() {
 		options = append(options, zenity.Attach(parentWindowID))
 	}
 	files, err := zenity.SelectFileMultiple(options...)
