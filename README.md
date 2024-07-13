@@ -202,6 +202,14 @@ DefaultDownloadPath = /Users/username/Downloads/
 
 - About the progress, the transferred and speed are not precise, there will be some deviation. It just indicating that the transfer is in progress.
 
+## Clipboard integration
+
+- Use `-o` or `--osc52` to enable the clipboard integration feature. e.g., `trzsz -o ssh remote_server`.
+
+- Clipboard integration allows remote servers to write to the local clipboard via OSC52 sequences.
+
+- On Linux, clipboard integration requires `xclip` or `xsel` command to be installed.
+
 ## Trouble shooting
 
 - If using [MSYS2](https://www.msys2.org/) or [Git Bash](https://www.atlassian.com/git/tutorials/git-bash) on windows, and getting an error `The handle is invalid`.

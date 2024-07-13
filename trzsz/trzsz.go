@@ -40,6 +40,7 @@ type trzszArgs struct {
 	TraceLog bool
 	DragFile bool
 	Zmodem   bool
+	OSC52    bool
 	Name     string
 	Args     []string
 }
@@ -59,7 +60,8 @@ func printHelp() {
 		"  -r, --relay        run as a trzsz relay server\n" +
 		"  -t, --tracelog     eanble trace log for debugging\n" +
 		"  -d, --dragfile     enable drag file(s) to upload\n" +
-		"  -z, --zmodem       enable zmodem lrzsz ( rz / sz )\n")
+		"  -z, --zmodem       enable zmodem lrzsz (rz / sz)\n" +
+		"  -o, --osc52        enable clipboard integration\n")
 }
 
 func parseTrzszArgs() *trzszArgs {
@@ -80,6 +82,8 @@ func parseTrzszArgs() *trzszArgs {
 			args.DragFile = true
 		} else if os.Args[i] == "-z" || os.Args[i] == "--zmodem" {
 			args.Zmodem = true
+		} else if os.Args[i] == "-o" || os.Args[i] == "--osc52" {
+			args.OSC52 = true
 		} else {
 			break
 		}
@@ -173,6 +177,7 @@ func TrzszMain() int {
 			DetectDragFile:  args.DragFile,
 			DetectTraceLog:  args.TraceLog,
 			EnableZmodem:    args.Zmodem,
+			EnableOSC52:     args.OSC52,
 		})
 		pty.OnResize(filter.SetTerminalColumns)
 		// handle signal

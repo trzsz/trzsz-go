@@ -202,6 +202,14 @@ DefaultDownloadPath = /Users/username/Downloads/
 
 - 关于进度条，己传文件大小和传输速度不是精确值，会有一些偏差，它的主要作用只是指示传输正在进行中。
 
+## 剪贴板集成
+
+- 使用 `-o` 或 `--osc52` 启用剪贴板集成功能，例如 `trzsz -o ssh remote_server`。
+
+- 启用剪贴板集成功能后，支持远程服务器通过 OSC52 序列写入本地剪贴板。
+
+- 在 Linux 系统，剪贴板集成功能需要安装 `xclip` 或 `xsel` 命令。
+
 ## 常见问题
 
 - 如果 [MSYS2](https://www.msys2.org/) 或 [Git Bash](https://www.atlassian.com/git/tutorials/git-bash) 遇到错误 `The handle is invalid`。

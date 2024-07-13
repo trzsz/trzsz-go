@@ -3,17 +3,18 @@ module github.com/trzsz/trzsz-go
 go 1.20
 
 require (
-	github.com/UserExistsError/conpty v0.1.3
+	github.com/UserExistsError/conpty v0.1.4
+	github.com/atotto/clipboard v0.1.4
 	github.com/creack/pty v1.1.21
-	github.com/klauspost/compress v1.17.8
+	github.com/klauspost/compress v1.17.9
 	github.com/mattn/go-runewidth v0.0.15
-	github.com/ncruces/zenity v0.10.12
+	github.com/ncruces/zenity v0.10.13
 	github.com/stretchr/testify v1.8.4
 	github.com/trzsz/go-arg v1.5.3
 	github.com/trzsz/promptui v0.10.7
-	golang.org/x/sys v0.20.0
-	golang.org/x/term v0.20.0
-	golang.org/x/text v0.15.0
+	golang.org/x/sys v0.22.0
+	golang.org/x/term v0.22.0
+	golang.org/x/text v0.16.0
 )
 
 require (
@@ -26,6 +27,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/randall77/makefat v0.0.0-20210315173500-7ddd0e42c844 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	golang.org/x/image v0.16.0 // indirect
+	golang.org/x/image v0.18.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

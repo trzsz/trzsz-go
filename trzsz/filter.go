@@ -26,6 +26,8 @@ package trzsz
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net"
@@ -39,6 +41,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/ncruces/zenity"
 	"github.com/trzsz/promptui"
 )
@@ -55,6 +58,8 @@ type TrzszOptions struct {
 	DetectTraceLog bool
 	// EnableZmodem enable zmodem lrzsz ( rz / sz ) feature.
 	EnableZmodem bool
+	// EnableOSC52 enable OSC52 clipboard feature.
+	EnableOSC52 bool
 }
 
 // TrzszFilter is a filter that supports trzsz ( trz / tsz ).
@@ -79,6 +84,7 @@ type TrzszFilter struct {
 	defaultUploadPath   atomic.Pointer[string]
 	defaultDownloadPath atomic.Pointer[string]
 	tunnelConnector     atomic.Pointer[func(int) net.Conn]
+	osc52Sequence       *bytes.Buffer
 }
 
 // NewTrzszFilter create a TrzszFilter to support trzsz ( trz / tsz ).
@@ -695,6 +701,9 @@ func (filter *TrzszFilter) wrapOutput() {
 					}
 				}
 			}
+			if filter.options.EnableOSC52 {
+				filter.detectOSC52(buf)
+			}
 
 			var trigger *trzszTrigger
 			buf, trigger = detector.detectTrzsz(buf, filter.tunnelConnector.Load() != nil)
@@ -737,4 +746,53 @@ func (filter *TrzszFilter) wrapOutput() {
 			continue // ignore output EOF
 		}
 	}
+}
+
+func (filter *TrzszFilter) detectOSC52(buf []byte) {
+	if filter.osc52Sequence == nil {
+		pos := bytes.Index(buf, []byte("\x1b]52;c;"))
+		if pos < 0 {
+			return
+		}
+		buf = buf[pos+7:]
+		pos = bytes.IndexByte(buf, '\a')
+		if pos < 0 {
+			filter.osc52Sequence = bytes.NewBuffer(nil)
+			filter.osc52Sequence.Write(buf)
+			return
+		}
+		writeToClipboard(buf[:pos])
+		buf = buf[pos+1:]
+		if len(buf) > 0 {
+			filter.detectOSC52(buf)
+		}
+		return
+	}
+
+	pos := bytes.IndexByte(buf, '\a')
+	if pos < 0 {
+		filter.osc52Sequence.Write(buf)
+		if filter.osc52Sequence.Len() > 100000 {
+			// something went wrong, just ignore it
+			filter.osc52Sequence = nil
+		}
+		return
+	}
+
+	filter.osc52Sequence.Write(buf[:pos])
+	writeToClipboard(filter.osc52Sequence.Bytes())
+	filter.osc52Sequence = nil
+
+	buf = buf[pos+1:]
+	if len(buf) > 0 {
+		filter.detectOSC52(buf)
+	}
+}
+
+func writeToClipboard(buf []byte) {
+	text, err := base64.StdEncoding.DecodeString(string(buf))
+	if err != nil {
+		return
+	}
+	_ = clipboard.WriteAll(string(text))
 }
