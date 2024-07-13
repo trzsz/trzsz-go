@@ -179,19 +179,6 @@ _Please check [https://trzsz.github.io](https://trzsz.github.io) for more inform
 
 - If using `tmux` on the local computer, run `tmux` ( without `trzsz` ) first, then `trzsz ssh` to login.
 
-## Configuration
-
-`trzsz` looks for configuration at `~/.trzsz.conf` ( `C:\Users\your_name\.trzsz.conf` on Windows ). The path have to end with `/`, e.g.:
-
-```
-DefaultUploadPath =
-DefaultDownloadPath = /Users/username/Downloads/
-```
-
-- If the `DefaultUploadPath` is not empty, the path will be opened by default while choosing upload files.
-
-- If the `DefaultDownloadPath` is not empty, downloading files will be saved to the path automatically instead of asking each time.
-
 ## Zmodem support
 
 - Use `-z` or `--zmodem` to enable the `rz / sz` feature. e.g., `trzsz -z ssh remote_server`.
@@ -209,6 +196,22 @@ DefaultDownloadPath = /Users/username/Downloads/
 - Clipboard integration allows remote servers to write to the local clipboard via OSC52 sequences.
 
 - On Linux, clipboard integration requires `xclip` or `xsel` command to be installed.
+
+## Configuration
+
+`trzsz` looks for configuration at `~/.trzsz.conf` ( `C:\Users\your_name\.trzsz.conf` on Windows ), e.g.:
+
+```
+DefaultUploadPath =
+DefaultDownloadPath = /Users/username/Downloads/
+DragFileUploadCommand = trz -y
+```
+
+- If the `DefaultUploadPath` is not empty, the path will be opened by default while choosing upload files.
+
+- If the `DefaultDownloadPath` is not empty, downloading files will be saved to the path automatically instead of asking each time.
+
+- The default value of `DragFileUploadCommand` is `trz`, configure it to `trz -y` if you want to overwrite the existing files, configure it to `rz` if you want to use `rz` to upload.
 
 ## Trouble shooting
 

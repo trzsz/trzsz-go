@@ -179,19 +179,6 @@ _有关 `trzsz ( trz / tsz )` 更详细的文档，请查看 [https://trzsz.gith
 
 - 如果在本地电脑使用 `tmux`，先不带 `trzsz` 运行 `tmux`，然后再使用 `trzsz ssh` 登录远程服务器。
 
-## 可配置项
-
-`trzsz` 使用的配置文件是 `~/.trzsz.conf`（ Windows 是 `C:\Users\your_name\.trzsz.conf` ）。注意路径必须包含 `/` 结尾，如：
-
-```
-DefaultUploadPath =
-DefaultDownloadPath = /Users/username/Downloads/
-```
-
-- 如果 `DefaultUploadPath` 不为空，上传选择文件时会默认打开此目录。
-
-- 如果 `DefaultDownloadPath` 不为空，下载文件时会自动下载到此目录（ 不需要再弹窗选择路径 ）。
-
 ## 支持 Zmodem
 
 - 使用 `-z` 或 `--zmodem` 启用 `rz / sz` 功能，例如 `trzsz -z ssh remote_server`。
@@ -209,6 +196,22 @@ DefaultDownloadPath = /Users/username/Downloads/
 - 启用剪贴板集成功能后，支持远程服务器通过 OSC52 序列写入本地剪贴板。
 
 - 在 Linux 系统，剪贴板集成功能需要安装 `xclip` 或 `xsel` 命令。
+
+## 可配置项
+
+`trzsz` 使用的配置文件是 `~/.trzsz.conf`（ Windows 是 `C:\Users\your_name\.trzsz.conf` ），如：
+
+```
+DefaultUploadPath =
+DefaultDownloadPath = /Users/username/Downloads/
+DragFileUploadCommand = trz -y
+```
+
+- 如果 `DefaultUploadPath` 不为空，上传选择文件时会默认打开此目录。
+
+- 如果 `DefaultDownloadPath` 不为空，下载文件时会自动下载到此目录（ 不需要再弹窗选择路径 ）。
+
+- `DragFileUploadCommand` 的默认值是 `trz`，如果想上传时覆盖现有文件可配置成 `trz -y`，如果想使用 `rz` 上传可配置成 `rz`。
 
 ## 常见问题
 

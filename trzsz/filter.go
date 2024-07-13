@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"github.com/atotto/clipboard"
+	"github.com/google/shlex"
 	"github.com/ncruces/zenity"
 	"github.com/trzsz/promptui"
 )
@@ -64,27 +65,30 @@ type TrzszOptions struct {
 
 // TrzszFilter is a filter that supports trzsz ( trz / tsz ).
 type TrzszFilter struct {
-	clientIn            io.Reader
-	clientOut           io.WriteCloser
-	serverIn            io.WriteCloser
-	serverOut           io.Reader
-	options             TrzszOptions
-	transfer            atomic.Pointer[trzszTransfer]
-	zmodem              atomic.Pointer[zmodemTransfer]
-	progress            atomic.Pointer[textProgressBar]
-	promptPipe          atomic.Pointer[io.PipeWriter]
-	trigger             *trzszTrigger
-	dragging            atomic.Bool
-	dragHasDir          atomic.Bool
-	dragMutex           sync.Mutex
-	dragFiles           []string
-	interrupting        atomic.Bool
-	skipTrzCommand      atomic.Bool
-	logger              *traceLogger
-	defaultUploadPath   atomic.Pointer[string]
-	defaultDownloadPath atomic.Pointer[string]
-	tunnelConnector     atomic.Pointer[func(int) net.Conn]
-	osc52Sequence       *bytes.Buffer
+	clientIn              io.Reader
+	clientOut             io.WriteCloser
+	serverIn              io.WriteCloser
+	serverOut             io.Reader
+	options               TrzszOptions
+	transfer              atomic.Pointer[trzszTransfer]
+	zmodem                atomic.Pointer[zmodemTransfer]
+	progress              atomic.Pointer[textProgressBar]
+	promptPipe            atomic.Pointer[io.PipeWriter]
+	trigger               *trzszTrigger
+	dragging              atomic.Bool
+	dragHasDir            atomic.Bool
+	dragMutex             sync.Mutex
+	dragFiles             []string
+	interrupting          atomic.Bool
+	skipUploadCommand     atomic.Bool
+	uploadCommandIsNotTrz atomic.Bool
+	logger                *traceLogger
+	defaultUploadPath     atomic.Pointer[string]
+	defaultDownloadPath   atomic.Pointer[string]
+	dragFileUploadCommand atomic.Pointer[string]
+	currentUploadCommand  atomic.Pointer[string]
+	tunnelConnector       atomic.Pointer[func(int) net.Conn]
+	osc52Sequence         *bytes.Buffer
 }
 
 // NewTrzszFilter create a TrzszFilter to support trzsz ( trz / tsz ).
@@ -162,13 +166,41 @@ func (filter *TrzszFilter) UploadFiles(filePaths []string) error {
 }
 
 // SetDefaultUploadPath set the default open path while choosing upload files.
-func (filter *TrzszFilter) SetDefaultUploadPath(uploadPath string) {
-	filter.defaultUploadPath.Store(&uploadPath)
+func (filter *TrzszFilter) SetDefaultUploadPath(path string) {
+	if path == "" {
+		filter.defaultUploadPath.Store(&path)
+		return
+	}
+	path = resolveHomeDir(path)
+	if !strings.HasSuffix(path, string(os.PathSeparator)) {
+		path += string(os.PathSeparator)
+	}
+	filter.defaultUploadPath.Store(&path)
 }
 
 // SetDefaultDownloadPath set the path to automatically save while downloading files.
-func (filter *TrzszFilter) SetDefaultDownloadPath(downloadPath string) {
-	filter.defaultDownloadPath.Store(&downloadPath)
+func (filter *TrzszFilter) SetDefaultDownloadPath(path string) {
+	if path == "" {
+		filter.defaultDownloadPath.Store(&path)
+		return
+	}
+	path = resolveHomeDir(path)
+	filter.defaultDownloadPath.Store(&path)
+}
+
+// SetDragFileUploadCommand set the command to execute while dragging files to upload.
+func (filter *TrzszFilter) SetDragFileUploadCommand(command string) {
+	filter.uploadCommandIsNotTrz.Store(false)
+	if command != "" {
+		tokens, err := shlex.Split(command)
+		if err == nil && len(tokens) > 0 {
+			name := filepath.Base(tokens[0])
+			if name != "trz" && name != "trz.exe" {
+				filter.uploadCommandIsNotTrz.Store(true)
+			}
+		}
+	}
+	filter.dragFileUploadCommand.Store(&command)
 }
 
 // SetTunnelConnector set the connector for tunnel transferring.
@@ -180,60 +212,41 @@ func (filter *TrzszFilter) SetTunnelConnector(connector func(int) net.Conn) {
 	filter.tunnelConnector.Store(&connector)
 }
 
-func (filter *TrzszFilter) getTrzszConfig(name string) string {
+func (filter *TrzszFilter) readTrzszConfig() {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ""
+		return
 	}
 	file, err := os.Open(filepath.Join(home, ".trzsz.conf"))
 	if err != nil {
-		return ""
+		return
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
-	lowerName := strings.ToLower(name)
 	for scanner.Scan() {
 		line := scanner.Text()
-		idx := strings.Index(line, "=")
+		idx := strings.Index(line, "#")
+		if idx >= 0 {
+			line = line[:idx]
+		}
+		idx = strings.Index(line, "=")
 		if idx < 0 {
 			continue
 		}
-		if strings.ToLower(strings.TrimSpace(line[:idx])) == lowerName {
-			return strings.TrimSpace(line[idx+1:])
+		name := strings.ToLower(strings.TrimSpace(line[:idx]))
+		value := strings.TrimSpace(line[idx+1:])
+		if name == "" || value == "" {
+			continue
+		}
+		switch {
+		case name == "defaultuploadpath" && filter.defaultUploadPath.Load() == nil:
+			filter.SetDefaultUploadPath(value)
+		case name == "defaultdownloadpath" && filter.defaultDownloadPath.Load() == nil:
+			filter.SetDefaultDownloadPath(value)
+		case name == "dragfileuploadcommand" && filter.dragFileUploadCommand.Load() == nil:
+			filter.SetDragFileUploadCommand(value)
 		}
 	}
-	return ""
-}
-
-func (filter *TrzszFilter) getDefaultUploadPath() string {
-	path := ""
-	if p := filter.defaultUploadPath.Load(); p != nil {
-		path = *p
-	}
-	if path == "" {
-		path = filter.getTrzszConfig("DefaultUploadPath")
-	}
-	if path == "" {
-		return ""
-	}
-	if !strings.HasSuffix(path, string(os.PathSeparator)) {
-		path += string(os.PathSeparator)
-	}
-	return resolveHomeDir(path)
-}
-
-func (filter *TrzszFilter) getDefaultDownloadPath() string {
-	path := ""
-	if p := filter.defaultDownloadPath.Load(); p != nil {
-		path = *p
-	}
-	if path == "" {
-		path = filter.getTrzszConfig("DefaultDownloadPath")
-	}
-	if path == "" {
-		return ""
-	}
-	return resolveHomeDir(path)
 }
 
 var errUserCanceled = fmt.Errorf("Cancelled")
@@ -267,7 +280,10 @@ func zenityErrorWithTips(err error) error {
 }
 
 func (filter *TrzszFilter) chooseDownloadPath() (string, error) {
-	savePath := filter.getDefaultDownloadPath()
+	savePath := ""
+	if path := filter.defaultDownloadPath.Load(); path != nil {
+		savePath = *path
+	}
 	if savePath != "" {
 		time.Sleep(50 * time.Millisecond) // wait for all output to show
 		return savePath, nil
@@ -299,7 +315,10 @@ func (filter *TrzszFilter) chooseUploadPaths(directory bool) ([]string, error) {
 		zenity.Title("Choose some files to send"),
 		zenity.ShowHidden(),
 	}
-	defaultPath := filter.getDefaultUploadPath()
+	defaultPath := ""
+	if path := filter.defaultUploadPath.Load(); path != nil {
+		defaultPath = *path
+	}
 	if defaultPath != "" {
 		options = append(options, zenity.Filename(defaultPath))
 	}
@@ -484,12 +503,19 @@ func (filter *TrzszFilter) uploadDragFiles() {
 	_ = writeAll(filter.serverIn, []byte{0x03})
 	time.Sleep(200 * time.Millisecond)
 	filter.interrupting.Store(false)
-	filter.skipTrzCommand.Store(true)
-	if filter.dragHasDir.Load() {
-		_ = writeAll(filter.serverIn, []byte("trz -d\r"))
-	} else {
-		_ = writeAll(filter.serverIn, []byte("trz\r"))
+	filter.skipUploadCommand.Store(true)
+	command := ""
+	if cmd := filter.dragFileUploadCommand.Load(); cmd != nil {
+		command = *cmd
 	}
+	if command == "" {
+		command = "trz"
+	}
+	if filter.dragHasDir.Load() && !filter.uploadCommandIsNotTrz.Load() {
+		command += " -d"
+	}
+	filter.currentUploadCommand.Store(&command)
+	_ = writeAll(filter.serverIn, []byte(command+"\r"))
 	time.Sleep(3 * time.Second)
 	filter.resetDragFiles()
 }
@@ -716,10 +742,10 @@ func (filter *TrzszFilter) wrapOutput() {
 			if filter.interrupting.Load() {
 				continue
 			}
-			if filter.skipTrzCommand.Load() {
-				filter.skipTrzCommand.Store(false)
+			if filter.skipUploadCommand.Load() {
+				filter.skipUploadCommand.Store(false)
 				output := strings.TrimRight(string(trimVT100(buf)), "\r\n")
-				if output == "trz" || output == "trz -d" {
+				if command := filter.currentUploadCommand.Load(); command != nil && *command == output {
 					_ = writeAll(filter.clientOut, []byte("\r\n"))
 					continue
 				}

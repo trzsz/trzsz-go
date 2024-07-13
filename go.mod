@@ -6,6 +6,7 @@ require (
 	github.com/UserExistsError/conpty v0.1.4
 	github.com/atotto/clipboard v0.1.4
 	github.com/creack/pty v1.1.21
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/klauspost/compress v1.17.9
 	github.com/mattn/go-runewidth v0.0.15
 	github.com/ncruces/zenity v0.10.13

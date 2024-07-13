@@ -179,6 +179,7 @@ func TrzszMain() int {
 			EnableZmodem:    args.Zmodem,
 			EnableOSC52:     args.OSC52,
 		})
+		filter.readTrzszConfig()
 		pty.OnResize(filter.SetTerminalColumns)
 		// handle signal
 		go handleSignal(pty, filter)
