@@ -62,6 +62,7 @@ type transferAction struct {
 	SupportBinary    bool   `json:"binary"`
 	SupportDirectory bool   `json:"support_dir"`
 	TunnelConnected  bool   `json:"tunnel"`
+	SupportFork      bool   `json:"fork"`
 }
 
 type transferConfig struct {
@@ -77,6 +78,7 @@ type transferConfig struct {
 	TmuxPaneColumns int32        `json:"tmux_pane_width"`
 	TmuxOutputJunk  bool         `json:"tmux_output_junk"`
 	CompressType    compressType `json:"compress"`
+	Fork            bool         `json:"fork"`
 }
 
 type trzszTransfer struct {
@@ -106,6 +108,8 @@ type trzszTransfer struct {
 	tunnelConnected  bool
 	tunnelConn       atomic.Pointer[net.Conn]
 	tunnelInitWG     sync.WaitGroup
+	bgChan           chan struct{}
+	termReseted      atomic.Bool
 }
 
 func maxDuration(a, b time.Duration) time.Duration {
@@ -143,6 +147,7 @@ func newTransfer(writer io.Writer, stdinState *term.State, flushInTime bool, log
 			MaxBufSize: 10 * 1024 * 1024,
 		},
 		logger: logger,
+		bgChan: make(chan struct{}, 1),
 	}
 	t.bufInitPhase.Store(true)
 	t.bufferSize.Store(10240)
@@ -245,6 +250,19 @@ func (t *trzszTransfer) cleanup() {
 	}
 }
 
+func (t *trzszTransfer) background() <-chan struct{} {
+	return t.bgChan
+}
+
+func (t *trzszTransfer) switchToBackground() {
+	os.Stdin.Close()
+	go func() {
+		time.Sleep(500 * time.Millisecond) // wait for client switch to background
+		t.resetTerm("Switch to transfer in background.", true)
+		os.Stderr.Close()
+	}()
+}
+
 func (t *trzszTransfer) addReceivedData(buf []byte, tunnel bool) {
 	if t.tunnelConnected && !tunnel {
 		if t.logger != nil {
@@ -253,7 +271,7 @@ func (t *trzszTransfer) addReceivedData(buf []byte, tunnel bool) {
 		return
 	}
 	if t.logger != nil {
-		t.logger.writeTraceLog(buf, "svrout")
+		t.logger.writeTraceLog(buf, "rcvbuf")
 	}
 	if !t.stopped.Load() {
 		t.buffer.addBuffer(buf)
@@ -582,6 +600,7 @@ func (t *trzszTransfer) sendAction(confirm bool, serverVersion *trzszVersion, re
 		t.writer = *conn
 		t.tunnelConnected = true
 		action.TunnelConnected = true
+		action.SupportFork = true
 	}
 
 	if !t.tunnelConnected && (isWindowsEnvironment() || remoteIsWindows) {
@@ -638,6 +657,11 @@ func (t *trzszTransfer) sendConfig(args *baseArgs, action *transferAction, escap
 	}
 	if action.TunnelConnected {
 		cfgMap["binary"] = true
+		if args.Fork {
+			t.switchToBackground()
+			cfgMap["fork"] = true
+			cfgMap["quiet"] = true
+		}
 	} else if args.Binary {
 		cfgMap["binary"] = true
 		cfgMap["escape_chars"] = escapeChars
@@ -680,6 +704,9 @@ func (t *trzszTransfer) recvConfig() (*transferConfig, error) {
 	if err := json.Unmarshal([]byte(cfgStr), &t.transferConfig); err != nil {
 		return nil, err
 	}
+	if t.transferConfig.Fork {
+		t.bgChan <- struct{}{}
+	}
 	return &t.transferConfig, nil
 }
 
@@ -693,6 +720,16 @@ func (t *trzszTransfer) recvExit() (string, error) {
 
 func (t *trzszTransfer) serverExit(msg string) {
 	t.cleanInput(500 * time.Millisecond)
+	t.resetTerm(msg, false)
+}
+
+func (t *trzszTransfer) resetTerm(msg string, ignorable bool) {
+	if !t.termReseted.CompareAndSwap(false, true) {
+		if !ignorable {
+			os.Stdout.WriteString(fmt.Sprintf("\x1b7\r\n%s\r\n\x1b8", msg))
+		}
+		return
+	}
 	if t.stdinState != nil {
 		_ = term.Restore(int(os.Stdin.Fd()), t.stdinState)
 	}

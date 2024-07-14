@@ -449,28 +449,35 @@ func (filter *TrzszFilter) handleTrzsz() {
 		transfer.connectToTunnel(*connector, filter.trigger.uniqueID, filter.trigger.tunnelPort)
 	}
 
-	defer func() {
-		transfer.cleanup()
-		filter.transfer.CompareAndSwap(transfer, nil)
-	}()
+	defer filter.transfer.CompareAndSwap(transfer, nil)
 
-	defer func() {
-		if err := recover(); err != nil {
-			transfer.clientError(newTrzszError(fmt.Sprintf("%v", err), "panic", true))
+	done := make(chan struct{}, 1)
+	go func() {
+		defer close(done)
+		defer func() {
+			if err := recover(); err != nil {
+				transfer.clientError(newTrzszError(fmt.Sprintf("%v", err), "panic", true))
+			}
+		}()
+		var err error
+		switch filter.trigger.mode {
+		case 'S':
+			err = filter.downloadFiles(transfer)
+		case 'R':
+			err = filter.uploadFiles(transfer, false)
+		case 'D':
+			err = filter.uploadFiles(transfer, true)
 		}
+		if err != nil {
+			transfer.clientError(err)
+		}
+		transfer.cleanup()
+		done <- struct{}{}
 	}()
 
-	var err error
-	switch filter.trigger.mode {
-	case 'S':
-		err = filter.downloadFiles(transfer)
-	case 'R':
-		err = filter.uploadFiles(transfer, false)
-	case 'D':
-		err = filter.uploadFiles(transfer, true)
-	}
-	if err != nil {
-		transfer.clientError(err)
+	select {
+	case <-done:
+	case <-transfer.background():
 	}
 }
 

@@ -82,6 +82,11 @@ func recvFiles(transfer *trzszTransfer, args *trzArgs, tmuxMode tmuxModeType, tm
 		args.Binary = false
 	}
 
+	// check if the client doesn't support fork to background
+	if args.Fork && !action.SupportFork {
+		return simpleTrzszError("The client doesn't support fork to background")
+	}
+
 	// check if the client doesn't support transfer directory
 	if args.Directory && !action.SupportDirectory {
 		return simpleTrzszError("The client doesn't support transfer directory")
@@ -108,6 +113,18 @@ func recvFiles(transfer *trzszTransfer, args *trzArgs, tmuxMode tmuxModeType, tm
 // TrzMain is the main function of `trz` binary.
 func TrzMain() int {
 	args := parseTrzArgs(os.Args)
+
+	// fork to background
+	if args.Fork {
+		parent, err := forkToBackground()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		if parent {
+			return 0
+		}
+	}
 
 	// cleanup on exit
 	defer cleanupOnExit()
@@ -187,11 +204,20 @@ func TrzMain() int {
 	wrapTransferInput(transfer, os.Stdin, false)
 	handleServerSignal(transfer)
 
-	if err := recvFiles(transfer, args, tmuxMode, tmuxPaneWidth); err != nil {
-		transfer.serverError(err)
-	}
+	done := make(chan struct{}, 1)
+	go func() {
+		defer close(done)
+		if err := recvFiles(transfer, args, tmuxMode, tmuxPaneWidth); err != nil {
+			transfer.serverError(err)
+		}
+		transfer.cleanup()
+		done <- struct{}{}
+	}()
 
-	transfer.cleanup()
+	select {
+	case <-done:
+	case <-transfer.background():
+	}
 
 	return 0
 }

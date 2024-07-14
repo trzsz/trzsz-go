@@ -46,6 +46,7 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+	"golang.org/x/term"
 )
 
 var onExitFuncs []func()
@@ -115,6 +116,7 @@ type baseArgs struct {
 	Escape    bool         `arg:"-e" help:"escape all known control characters"`
 	Directory bool         `arg:"-d" help:"transfer directories and files"`
 	Recursive bool         `arg:"-r" help:"transfer directories and files, same as -d"`
+	Fork      bool         `arg:"-f" help:"fork to transfer in background (implies -q)"`
 	Bufsize   bufferSize   `arg:"-B" placeholder:"N" default:"10M" help:"max buffer chunk size (1K<=N<=1G). (default: 10M)"`
 	Timeout   int          `arg:"-t" placeholder:"N" default:"20" help:"timeout ( N seconds ) for each buffer chunk.\nN <= 0 means never timeout. (default: 20)"`
 	Compress  compressType `arg:"-c" placeholder:"yes/no/auto" default:"auto" help:"compress type (default: auto)"`
@@ -1027,4 +1029,43 @@ func (w *promptWriter) Write(p []byte) (int, error) {
 
 func (w *promptWriter) Close() error {
 	return nil
+}
+
+func forkToBackground() (bool, error) {
+	if v := os.Getenv("TRZSZ-FORK-BACKGROUND"); v == "TRUE" {
+		return false, nil
+	}
+
+	cmd := exec.Command(os.Args[0], os.Args[1:]...)
+	cmd.Env = append(os.Environ(), "TRZSZ-FORK-BACKGROUND=TRUE")
+	cmd.SysProcAttr = getSysProcAttr()
+	cmd.Stdout = os.Stdout
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return true, fmt.Errorf("fork stdin pipe failed: %v", err)
+	}
+	defer stdin.Close()
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return true, fmt.Errorf("fork stderr pipe failed: %v", err)
+	}
+	defer stderr.Close()
+	if err := cmd.Start(); err != nil {
+		return true, fmt.Errorf("fork start failed: %v", err)
+	}
+
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		state, err := term.MakeRaw(fd)
+		if err != nil {
+			return true, fmt.Errorf("make stdin raw failed: %v\r\n", err)
+		}
+		defer func() { _ = term.Restore(fd, state) }()
+	}
+	go func() {
+		_, _ = io.Copy(stdin, os.Stdin)
+	}()
+
+	_, _ = io.Copy(os.Stderr, stderr)
+	return true, nil
 }

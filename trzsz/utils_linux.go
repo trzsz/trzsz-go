@@ -1,3 +1,5 @@
+//go:build !windows && !darwin
+
 /*
 MIT License
 
@@ -24,23 +26,10 @@ SOFTWARE.
 
 package trzsz
 
-import (
-	"syscall"
-
-	"golang.org/x/sys/windows"
-)
-
-var user32 = windows.NewLazyDLL("user32.dll")
-
-func getParentWindowID() uintptr {
-	hwnd, _, _ := user32.NewProc("GetForegroundWindow").Call()
-	return hwnd
+func getParentWindowID() int {
+	return 0
 }
 
 func isWarpTerminal() bool {
 	return false
-}
-
-func getSysProcAttr() *syscall.SysProcAttr {
-	return nil
 }

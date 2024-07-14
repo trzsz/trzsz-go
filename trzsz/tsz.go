@@ -81,6 +81,11 @@ func sendFiles(transfer *trzszTransfer, files []*sourceFile, args *tszArgs, tmux
 		args.Binary = false
 	}
 
+	// check if the client doesn't support fork to background
+	if args.Fork && !action.SupportFork {
+		return simpleTrzszError("The client doesn't support fork to background")
+	}
+
 	// check if the client doesn't support transfer directory
 	if args.Directory && !action.SupportDirectory {
 		return simpleTrzszError("The client doesn't support transfer directory")
@@ -107,6 +112,18 @@ func sendFiles(transfer *trzszTransfer, files []*sourceFile, args *tszArgs, tmux
 // TszMain is the main function of `tsz` binary.
 func TszMain() int {
 	args := parseTszArgs(os.Args)
+
+	// fork to background
+	if args.Fork {
+		parent, err := forkToBackground()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		if parent {
+			return 0
+		}
+	}
 
 	// cleanup on exit
 	defer cleanupOnExit()
@@ -183,11 +200,20 @@ func TszMain() int {
 	wrapTransferInput(transfer, os.Stdin, false)
 	handleServerSignal(transfer)
 
-	if err := sendFiles(transfer, files, args, tmuxMode, tmuxPaneWidth); err != nil {
-		transfer.serverError(err)
-	}
+	done := make(chan struct{}, 1)
+	go func() {
+		defer close(done)
+		if err := sendFiles(transfer, files, args, tmuxMode, tmuxPaneWidth); err != nil {
+			transfer.serverError(err)
+		}
+		transfer.cleanup()
+		done <- struct{}{}
+	}()
 
-	transfer.cleanup()
+	select {
+	case <-done:
+	case <-transfer.background():
+	}
 
 	return 0
 }

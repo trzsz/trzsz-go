@@ -1,4 +1,4 @@
-//go:build !windows && !darwin
+//go:build !windows
 
 /*
 MIT License
@@ -26,10 +26,12 @@ SOFTWARE.
 
 package trzsz
 
-func getParentWindowID() int {
-	return 0
-}
+import (
+	"syscall"
+)
 
-func isWarpTerminal() bool {
-	return false
+func getSysProcAttr() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{
+		Setsid: true,
+	}
 }
