@@ -32,6 +32,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/lucasb-eyer/go-colorful"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -171,15 +173,27 @@ type textProgressBar struct {
 	recentSpeed     recentSpeed
 	pausing         atomic.Bool
 	tmuxPrefix      string
+	colorA          *colorful.Color
+	colorB          *colorful.Color
 }
 
-func newTextProgressBar(writer io.Writer, columns int32, tmuxPaneColumns int32, tmuxPrefix string) *textProgressBar {
+func newTextProgressBar(writer io.Writer, columns int32, tmuxPaneColumns int32,
+	tmuxPrefix, colorPair string) *textProgressBar {
 	if tmuxPaneColumns > 1 {
 		columns = tmuxPaneColumns - 1 //  -1 to avoid messing up the tmux pane
 	}
 	progress := &textProgressBar{writer: writer, firstWrite: true, tmuxPrefix: tmuxPrefix}
 	progress.columns.Store(columns)
 	progress.tmuxPaneColumns.Store(tmuxPaneColumns)
+	colors := strings.Fields(colorPair)
+	if len(colors) == 2 {
+		if colorA, err := colorful.Hex("#" + colors[0]); err == nil {
+			progress.colorA = &colorA
+		}
+		if colorB, err := colorful.Hex("#" + colors[1]); err == nil {
+			progress.colorB = &colorB
+		}
+	}
 	return progress
 }
 
@@ -390,10 +404,24 @@ func (p *textProgressBar) getProgressBar(length int) string {
 	if length < 12 {
 		return ""
 	}
-	total := length - 2
-	complete := total
+	totalSize := length - 2
+	fullSize := totalSize
 	if p.fileSize != 0 {
-		complete = int(math.Round((float64(total) * float64(p.fileStep)) / float64(p.fileSize)))
+		fullSize = int(math.Round((float64(totalSize) * float64(p.fileStep)) / float64(p.fileSize)))
 	}
-	return "[\u001b[36m" + strings.Repeat("\u2588", complete) + strings.Repeat("\u2591", total-complete) + "\u001b[0m]"
+	emptySize := totalSize - fullSize
+	if p.colorA == nil || p.colorB == nil {
+		return fmt.Sprintf("[\x1b[36m%s%s\x1b[0m]",
+			strings.Repeat("\u2588", fullSize), strings.Repeat("\u2591", emptySize))
+	}
+	var buf strings.Builder
+	buf.WriteString("[")
+	for i := 0; i < fullSize; i++ {
+		color := p.colorA.BlendLuv(*p.colorB, float64(i)/float64(totalSize))
+		render := lipgloss.NewStyle().Foreground(lipgloss.Color(color.Hex()))
+		buf.WriteString(render.Render("\u2588"))
+	}
+	buf.WriteString(strings.Repeat("\u2591", emptySize))
+	buf.WriteString("]")
+	return buf.String()
 }

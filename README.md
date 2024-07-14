@@ -205,6 +205,7 @@ _Please check [https://trzsz.github.io](https://trzsz.github.io) for more inform
 DefaultUploadPath =
 DefaultDownloadPath = /Users/username/Downloads/
 DragFileUploadCommand = trz -y
+ProgressColorPair = B14FFF 00FFA3
 ```
 
 - If the `DefaultUploadPath` is not empty, the path will be opened by default while choosing upload files.
@@ -212,6 +213,8 @@ DragFileUploadCommand = trz -y
 - If the `DefaultDownloadPath` is not empty, downloading files will be saved to the path automatically instead of asking each time.
 
 - The default value of `DragFileUploadCommand` is `trz`, configure it to `trz -y` if you want to overwrite the existing files, configure it to `rz` if you want to use `rz` to upload.
+
+- The `ProgressColorPair` configures the color of the progress bar. You need to configure 2 colors and do not include `#`. The progress bar will gradient from the first color to the second color.
 
 ## Trouble shooting
 

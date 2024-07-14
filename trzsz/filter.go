@@ -89,6 +89,7 @@ type TrzszFilter struct {
 	currentUploadCommand  atomic.Pointer[string]
 	tunnelConnector       atomic.Pointer[func(int) net.Conn]
 	osc52Sequence         *bytes.Buffer
+	progressColorPair     atomic.Pointer[string]
 }
 
 // NewTrzszFilter create a TrzszFilter to support trzsz ( trz / tsz ).
@@ -203,6 +204,11 @@ func (filter *TrzszFilter) SetDragFileUploadCommand(command string) {
 	filter.dragFileUploadCommand.Store(&command)
 }
 
+// SetProgressColorPair set the color pair for the progress bar.
+func (filter *TrzszFilter) SetProgressColorPair(colorPair string) {
+	filter.progressColorPair.Store(&colorPair)
+}
+
 // SetTunnelConnector set the connector for tunnel transferring.
 func (filter *TrzszFilter) SetTunnelConnector(connector func(int) net.Conn) {
 	if connector == nil {
@@ -245,6 +251,8 @@ func (filter *TrzszFilter) readTrzszConfig() {
 			filter.SetDefaultDownloadPath(value)
 		case name == "dragfileuploadcommand" && filter.dragFileUploadCommand.Load() == nil:
 			filter.SetDragFileUploadCommand(value)
+		case name == "progresscolorpair" && filter.progressColorPair.Load() == nil:
+			filter.SetProgressColorPair(value)
 		}
 	}
 }
@@ -343,8 +351,12 @@ func (filter *TrzszFilter) createProgressBar(quiet bool, tmuxPaneColumns int32) 
 		filter.progress.Store(nil)
 		return
 	}
+	colorPair := ""
+	if color := filter.progressColorPair.Load(); color != nil {
+		colorPair = *color
+	}
 	filter.progress.Store(newTextProgressBar(filter.clientOut, filter.options.TerminalColumns,
-		tmuxPaneColumns, filter.trigger.tmuxPrefix))
+		tmuxPaneColumns, filter.trigger.tmuxPrefix, colorPair))
 }
 
 func (filter *TrzszFilter) resetProgressBar() {

@@ -205,6 +205,7 @@ _有关 `trzsz ( trz / tsz )` 更详细的文档，请查看 [https://trzsz.gith
 DefaultUploadPath =
 DefaultDownloadPath = /Users/username/Downloads/
 DragFileUploadCommand = trz -y
+ProgressColorPair = B14FFF 00FFA3
 ```
 
 - 如果 `DefaultUploadPath` 不为空，上传选择文件时会默认打开此目录。
@@ -212,6 +213,8 @@ DragFileUploadCommand = trz -y
 - 如果 `DefaultDownloadPath` 不为空，下载文件时会自动下载到此目录（ 不需要再弹窗选择路径 ）。
 
 - `DragFileUploadCommand` 的默认值是 `trz`，如果想上传时覆盖现有文件可配置成 `trz -y`，如果想使用 `rz` 上传可配置成 `rz`。
+
+- `ProgressColorPair` 配置进度条的颜色，需要配置 2 个颜色并且不要带 `#`，进度条将从第一个颜色渐变到第二个颜色。
 
 ## 常见问题
 
