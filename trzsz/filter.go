@@ -794,47 +794,59 @@ func (filter *TrzszFilter) wrapOutput() {
 }
 
 func (filter *TrzszFilter) detectOSC52(buf []byte) {
-	if filter.osc52Sequence == nil {
-		pos := bytes.Index(buf, []byte("\x1b]52;c;"))
-		if pos < 0 {
-			return
+	for len(buf) > 0 {
+		if filter.osc52Sequence == nil {
+			for {
+				pos := bytes.Index(buf, []byte("\x1b]52;"))
+				if pos < 0 {
+					return
+				}
+				buf = buf[pos+5:]
+				if len(buf) < 2 {
+					return
+				}
+				if (buf[0] == 'c' || buf[0] == 'p') && buf[1] == ';' {
+					buf = buf[2:]
+					break
+				}
+				buf = buf[2:]
+			}
+
+			pos := bytes.IndexAny(buf, "\a\x1b")
+			if pos < 0 {
+				filter.osc52Sequence = bytes.NewBuffer(nil)
+				filter.osc52Sequence.Write(buf)
+				return
+			}
+
+			writeToClipboard(buf[:pos])
+			buf = buf[pos+1:]
+			continue
 		}
-		buf = buf[pos+7:]
-		pos = bytes.IndexByte(buf, '\a')
+
+		pos := bytes.IndexAny(buf, "\a\x1b")
 		if pos < 0 {
-			filter.osc52Sequence = bytes.NewBuffer(nil)
 			filter.osc52Sequence.Write(buf)
+			if filter.osc52Sequence.Len() > 100000 {
+				for _, b := range buf {
+					if !((b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '+' || b == '/' || b == '=') {
+						// something went wrong, just ignore it
+						filter.osc52Sequence = nil
+						return
+					}
+				}
+			}
 			return
 		}
-		writeToClipboard(buf[:pos])
+
+		filter.osc52Sequence.Write(buf[:pos])
+		writeToClipboard(filter.osc52Sequence.Bytes())
+		filter.osc52Sequence = nil
 		buf = buf[pos+1:]
-		if len(buf) > 0 {
-			filter.detectOSC52(buf)
-		}
-		return
-	}
-
-	pos := bytes.IndexByte(buf, '\a')
-	if pos < 0 {
-		filter.osc52Sequence.Write(buf)
-		if filter.osc52Sequence.Len() > 100000 {
-			// something went wrong, just ignore it
-			filter.osc52Sequence = nil
-		}
-		return
-	}
-
-	filter.osc52Sequence.Write(buf[:pos])
-	writeToClipboard(filter.osc52Sequence.Bytes())
-	filter.osc52Sequence = nil
-
-	buf = buf[pos+1:]
-	if len(buf) > 0 {
-		filter.detectOSC52(buf)
 	}
 }
 
-func writeToClipboard(buf []byte) {
+var writeToClipboard = func(buf []byte) {
 	text, err := base64.StdEncoding.DecodeString(string(buf))
 	if err != nil {
 		return

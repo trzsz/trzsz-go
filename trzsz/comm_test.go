@@ -58,6 +58,10 @@ func (w *testWriter) Write(text []byte) (n int, err error) {
 	return len(text), nil
 }
 
+func (w *testWriter) clearBuffer() {
+	w.buffer = nil
+}
+
 func (w *testWriter) assertBufferCount(count int) {
 	w.t.Helper()
 	require.Equal(w.t, count, len(w.buffer))
