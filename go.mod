@@ -10,10 +10,10 @@ require (
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/klauspost/compress v1.17.9
 	github.com/lucasb-eyer/go-colorful v1.2.0
-	github.com/mattn/go-runewidth v0.0.15
+	github.com/mattn/go-runewidth v0.0.16
 	github.com/ncruces/zenity v0.10.13
 	github.com/stretchr/testify v1.8.4
-	github.com/trzsz/go-arg v1.5.3
+	github.com/trzsz/go-arg v1.5.4
 	github.com/trzsz/promptui v0.10.7
 	golang.org/x/sys v0.22.0
 	golang.org/x/term v0.22.0

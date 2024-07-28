@@ -90,6 +90,9 @@ type TrzszFilter struct {
 	tunnelConnector       atomic.Pointer[func(int) net.Conn]
 	osc52Sequence         *bytes.Buffer
 	progressColorPair     atomic.Pointer[string]
+	oneTimeUploadFiles    []string
+	oneTimeUploadResult   chan error
+	hidingCursor          bool
 }
 
 // NewTrzszFilter create a TrzszFilter to support trzsz ( trz / tsz ).
@@ -164,6 +167,40 @@ func (filter *TrzszFilter) UploadFiles(filePaths []string) error {
 	}
 	filter.addDragFiles(filePaths, hasDir, false)
 	return nil
+}
+
+// OneTimeUpload upload one time while the server is already running trz / rz.
+func (filter *TrzszFilter) OneTimeUpload(filePaths []string) (<-chan error, error) {
+	if len(filePaths) == 0 {
+		return nil, fmt.Errorf("nothing to upload")
+	}
+	for _, path := range filePaths {
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := checkPathsReadable([]string{path}, info.IsDir()); err != nil {
+			return nil, err
+		}
+	}
+	filter.oneTimeUploadFiles = filePaths
+	filter.oneTimeUploadResult = make(chan error, 1)
+	go func() {
+		time.Sleep(10 * time.Second)
+		if filter.oneTimeUploadFiles != nil {
+			filter.oneTimeUploadResult <- fmt.Errorf(
+				"The upload did not start, possibly because trzsz is not installed or trz is not found on the server")
+		}
+	}()
+	return filter.oneTimeUploadResult, nil
+}
+
+// ResetTerminal reset the terminal settings.
+func (filter *TrzszFilter) ResetTerminal() {
+	if filter.hidingCursor {
+		showCursor(filter.clientOut)
+		filter.hidingCursor = false
+	}
 }
 
 // SetDefaultUploadPath set the default open path while choosing upload files.
@@ -315,6 +352,11 @@ func (filter *TrzszFilter) chooseDownloadPath() (string, error) {
 }
 
 func (filter *TrzszFilter) chooseUploadPaths(directory bool) ([]string, error) {
+	if len(filter.oneTimeUploadFiles) > 0 {
+		files := filter.oneTimeUploadFiles
+		filter.oneTimeUploadFiles = nil
+		return files, nil
+	}
 	if filter.dragging.Load() {
 		files := filter.resetDragFiles()
 		return files, nil
@@ -465,8 +507,10 @@ func (filter *TrzszFilter) handleTrzsz() {
 			err = filter.downloadFiles(transfer)
 		case 'R':
 			err = filter.uploadFiles(transfer, false)
+			filter.setOneTimeUploadResult(err)
 		case 'D':
 			err = filter.uploadFiles(transfer, true)
+			filter.setOneTimeUploadResult(err)
 		}
 		if err != nil {
 			transfer.clientError(err)
@@ -479,6 +523,15 @@ func (filter *TrzszFilter) handleTrzsz() {
 	case <-done:
 	case <-transfer.background():
 	}
+}
+
+func (filter *TrzszFilter) setOneTimeUploadResult(err error) {
+	if filter.oneTimeUploadResult == nil {
+		return
+	}
+	filter.oneTimeUploadResult <- err
+	close(filter.oneTimeUploadResult)
+	filter.oneTimeUploadResult = nil
 }
 
 func (filter *TrzszFilter) resetDragFiles() []string {
@@ -742,6 +795,7 @@ func (filter *TrzszFilter) wrapOutput() {
 						continue
 					} else {
 						showCursor(filter.clientOut)
+						filter.hidingCursor = false
 						filter.zmodem.CompareAndSwap(zmodem, nil)
 					}
 				}
@@ -775,11 +829,20 @@ func (filter *TrzszFilter) wrapOutput() {
 					_ = writeAll(filter.clientOut, buf)
 					if filter.zmodem.CompareAndSwap(nil, zmodem) {
 						hideCursor(filter.clientOut)
+						filter.hidingCursor = true
 						go zmodem.handleZmodemEvent(filter.logger, filter.serverIn, filter.clientOut,
 							func() ([]string, error) {
 								return filter.chooseUploadPaths(false)
 							},
 							filter.chooseDownloadPath)
+						if filter.oneTimeUploadResult != nil {
+							go func() {
+								for zmodem.isTransferringFiles() {
+									time.Sleep(100 * time.Millisecond)
+								}
+								filter.setOneTimeUploadResult(nil)
+							}()
+						}
 						continue
 					}
 				}
@@ -788,6 +851,7 @@ func (filter *TrzszFilter) wrapOutput() {
 			_ = writeAll(filter.clientOut, buf)
 		}
 		if err == io.EOF {
+			time.Sleep(100 * time.Millisecond)
 			continue // ignore output EOF
 		}
 	}
