@@ -13,6 +13,7 @@ builds:
       - windows
       - darwin
       - android
+      - freebsd
     goarch:
       - "386"
       - amd64
@@ -33,6 +34,10 @@ builds:
         goarch: "386"
       - goos: android
         goarch: amd64
+      - goos: freebsd
+        goarch: arm
+      - goos: freebsd
+        goarch: "386"
   - id: tsz
     main: ./cmd/tsz
     binary: tsz
@@ -43,6 +48,7 @@ builds:
       - windows
       - darwin
       - android
+      - freebsd
     goarch:
       - "386"
       - amd64
@@ -63,6 +69,10 @@ builds:
         goarch: "386"
       - goos: android
         goarch: amd64
+      - goos: freebsd
+        goarch: arm
+      - goos: freebsd
+        goarch: "386"
   - id: trzsz
     main: ./cmd/trzsz
     binary: trzsz
@@ -73,6 +83,7 @@ builds:
       - windows
       - darwin
       - android
+      - freebsd
     goarch:
       - "386"
       - amd64
@@ -93,6 +104,10 @@ builds:
         goarch: "386"
       - goos: android
         goarch: amd64
+      - goos: freebsd
+        goarch: arm
+      - goos: freebsd
+        goarch: "386"
 archives:
   - id: trzsz
     name_template: >-
