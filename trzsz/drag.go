@@ -31,22 +31,26 @@ import (
 	"strings"
 )
 
-func detectDragFiles(buf []byte) ([]string, bool, bool) {
+func detectDragFiles(buf []byte) (dragFiles []string, hasDir bool, ignore bool, isWinPath bool) {
 	if len(buf) > 5 && bytes.Contains(buf, []byte("\x1b[20")) {
 		buf = bytes.ReplaceAll(buf, []byte("\x1b[200~"), []byte(""))
 		buf = bytes.ReplaceAll(buf, []byte("\x1b[201~"), []byte(""))
 		if len(buf) == 0 {
-			return nil, false, true
+			return nil, false, true, false
 		}
 	}
 	if isRunningOnLinux() {
-		return detectDragFilesOnLinux(buf)
+		isWinPath = false
+		dragFiles, hasDir, ignore = detectDragFilesOnLinux(buf)
+		return
 	} else if isRunningOnMacOS() {
-		return detectDragFilesOnMacOS(buf)
+		isWinPath = false
+		dragFiles, hasDir, ignore = detectDragFilesOnMacOS(buf)
+		return
 	} else if isRunningOnWindows() {
 		return detectDragFilesOnWindows(buf)
 	}
-	return nil, false, false
+	return nil, false, false, false
 }
 
 func detectFilePath(path string, dragFiles *[]string, hasDir *bool) bool {
@@ -158,10 +162,10 @@ func detectDragFilesOnMacOS(buf []byte) ([]string, bool, bool) {
 	return dragFiles, hasDir, false
 }
 
-func detectDragFilesOnWindows(buf []byte) ([]string, bool, bool) {
+func detectDragFilesOnWindows(buf []byte) ([]string, bool, bool, bool) {
 	length := len(buf)
 	if length < 4 {
-		return nil, false, false
+		return nil, false, false, false
 	}
 	hasDir := false
 	var dragFiles []string
@@ -169,7 +173,7 @@ func detectDragFilesOnWindows(buf []byte) ([]string, bool, bool) {
 		bytes.IndexByte(buf[:length-1], '"') < 0 {
 		// Cmd & PowerShell may lost the first `"`, and supports one path only.
 		if detectFilePath(string(buf[:length-1]), &dragFiles, &hasDir) {
-			return dragFiles, hasDir, false
+			return dragFiles, hasDir, false, false
 		}
 	}
 	isWinPath, isMsysPath, isCygPath := false, false, false
@@ -183,7 +187,7 @@ func detectDragFilesOnWindows(buf []byte) ([]string, bool, bool) {
 		(length > 12 && string(buf[:10]) == "/cygdrive/" && buf[10] >= 'a' && buf[10] <= 'z' && buf[11] == '/') {
 		isCygPath = true
 	} else {
-		return nil, false, false
+		return nil, false, false, false
 	}
 	var i int
 	var path string
@@ -196,13 +200,13 @@ func detectDragFilesOnWindows(buf []byte) ([]string, bool, bool) {
 			path, i = nextCygPath(buf[idx:])
 		}
 		if path == "" {
-			return nil, false, false
+			return nil, false, false, isWinPath
 		}
 		if !detectFilePath(path, &dragFiles, &hasDir) {
-			return nil, false, false
+			return nil, false, false, isWinPath
 		}
 	}
-	return dragFiles, hasDir, false
+	return dragFiles, hasDir, false, false
 }
 
 func nextWinPath(buf []byte) (string, int) {

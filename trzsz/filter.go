@@ -79,6 +79,8 @@ type TrzszFilter struct {
 	dragHasDir            atomic.Bool
 	dragMutex             sync.Mutex
 	dragFiles             []string
+	dragInputBuffer       *bytes.Buffer
+	dragBufferMutex       sync.Mutex
 	interrupting          atomic.Bool
 	skipUploadCommand     atomic.Bool
 	uploadCommandIsNotTrz atomic.Bool
@@ -735,10 +737,35 @@ func (filter *TrzszFilter) sendInput(buf []byte, detectDragFile *atomic.Bool) {
 		}
 	}
 	if detectDragFile.Load() {
-		dragFiles, hasDir, ignore := detectDragFiles(buf)
+		filter.dragBufferMutex.Lock()
+		defer filter.dragBufferMutex.Unlock()
+		if filter.dragInputBuffer != nil {
+			filter.dragInputBuffer.Write(buf)
+			return
+		}
+		dragFiles, hasDir, ignore, isWinPath := detectDragFiles(buf)
 		if dragFiles != nil {
 			filter.addDragFiles(dragFiles, hasDir, true)
 			return // don't sent the file paths to server
+		} else if isWinPath {
+			filter.dragInputBuffer = bytes.NewBuffer(nil)
+			filter.dragInputBuffer.Write(buf)
+			go func() {
+				time.Sleep(200 * time.Millisecond)
+				filter.dragBufferMutex.Lock()
+				defer filter.dragBufferMutex.Unlock()
+				buffer := filter.dragInputBuffer.Bytes()
+				filter.dragInputBuffer = nil
+				dragFiles, hasDir, ignore, _ := detectDragFiles(buffer)
+				if dragFiles != nil {
+					filter.addDragFiles(dragFiles, hasDir, true)
+					return // don't sent the file paths to server
+				} else if !ignore {
+					filter.resetDragFiles()
+				}
+				_ = writeAll(filter.serverIn, buffer)
+			}()
+			return
 		} else if !ignore {
 			filter.resetDragFiles()
 		}
