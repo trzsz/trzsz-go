@@ -1,3 +1,9 @@
+trzsz (1.1.8) trusty; urgency=medium
+
+  * trzsz-go v1.1.8
+
+ -- Lonny Wong <lonnywong@qq.com>  Sun, 18 Aug 2024 16:37:28 +0800
+
 trzsz (1.1.7) trusty; urgency=medium
 
   * trzsz-go v1.1.7
