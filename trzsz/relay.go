@@ -64,6 +64,7 @@ type TrzszRelay struct {
 	tunnelListener  atomic.Pointer[net.Listener]
 	tunnelRelay     atomic.Pointer[tunnelRelay]
 	tunnelConnected atomic.Bool
+	closed          atomic.Bool
 }
 
 type tunnelRelay struct {
@@ -82,6 +83,11 @@ func (r *TrzszRelay) SetTunnelConnector(connector func(int) net.Conn) {
 		return
 	}
 	r.tunnelConnector.Store(&connector)
+}
+
+// Close to let the relay gracefully exit.
+func (r *TrzszRelay) Close() {
+	r.closed.Store(true)
 }
 
 func (r *TrzszRelay) listenForTunnel(buf []byte) []byte {
@@ -509,7 +515,7 @@ func (r *TrzszRelay) wrapInput() {
 			}
 		}
 		if err == io.EOF {
-			if isRunningOnWindows() {
+			if isRunningOnWindows() && !r.closed.Load() {
 				r.osStdinChan <- []byte{0x1A} // ctrl + z
 				continue
 			}

@@ -57,6 +57,7 @@ type zmodemTransfer struct {
 	lastUpdateTime  *time.Time
 	transferredSize int64
 	recentSpeed     recentSpeed
+	redrawScreen    *func()
 }
 
 var zmodemOverAndOut = []byte("OO\x08\x08")
@@ -128,7 +129,11 @@ func (z *zmodemTransfer) resetCleanupTimer() {
 	}
 	z.cleanupTimer = time.AfterFunc(500*time.Millisecond, func() {
 		z.cleaned.Store(true)
-		_, _ = z.serverIn.Write([]byte("\r")) // enter for shell prompt
+		if z.redrawScreen != nil {
+			(*z.redrawScreen)()
+		} else {
+			_, _ = z.serverIn.Write([]byte("\r")) // enter for shell prompt
+		}
 	})
 }
 

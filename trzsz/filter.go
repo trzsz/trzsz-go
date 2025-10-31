@@ -90,11 +90,13 @@ type TrzszFilter struct {
 	dragFileUploadCommand atomic.Pointer[string]
 	currentUploadCommand  atomic.Pointer[string]
 	tunnelConnector       atomic.Pointer[func(int) net.Conn]
+	redrawScreenFunc      atomic.Pointer[func()]
 	osc52Sequence         *bytes.Buffer
 	progressColorPair     atomic.Pointer[string]
 	oneTimeUploadFiles    []string
 	oneTimeUploadResult   chan error
 	hidingCursor          bool
+	closed                atomic.Bool
 }
 
 // NewTrzszFilter create a TrzszFilter to support trzsz ( trz / tsz ).
@@ -255,6 +257,20 @@ func (filter *TrzszFilter) SetTunnelConnector(connector func(int) net.Conn) {
 		return
 	}
 	filter.tunnelConnector.Store(&connector)
+}
+
+// SetRedrawScreenFunc set the RedrawScreen function for transfer completed.
+func (filter *TrzszFilter) SetRedrawScreenFunc(redrawScreenFunc func()) {
+	if redrawScreenFunc == nil {
+		filter.redrawScreenFunc.Store(nil)
+		return
+	}
+	filter.redrawScreenFunc.Store(&redrawScreenFunc)
+}
+
+// Close to let the filter gracefully exit.
+func (filter *TrzszFilter) Close() {
+	filter.closed.Store(true)
 }
 
 func (filter *TrzszFilter) readTrzszConfig() {
@@ -790,11 +806,11 @@ func (filter *TrzszFilter) wrapInput() {
 			filter.sendInput(buffer[0:n], &detectDragFile)
 		}
 		if err == io.EOF {
-			if isRunningOnWindows() {
+			if isRunningOnWindows() && !filter.closed.Load() {
 				filter.sendInput([]byte{0x1A}, &detectDragFile) // ctrl + z
 				continue
 			}
-			filter.serverIn.Close()
+			_ = filter.serverIn.Close()
 			break
 		}
 	}
@@ -854,6 +870,7 @@ func (filter *TrzszFilter) wrapOutput() {
 			if filter.options.EnableZmodem {
 				if zmodem := detectZmodem(buf); zmodem != nil {
 					_ = writeAll(filter.clientOut, buf)
+					zmodem.redrawScreen = filter.redrawScreenFunc.Load()
 					if filter.zmodem.CompareAndSwap(nil, zmodem) {
 						hideCursor(filter.clientOut)
 						filter.hidingCursor = true
@@ -878,6 +895,10 @@ func (filter *TrzszFilter) wrapOutput() {
 			_ = writeAll(filter.clientOut, buf)
 		}
 		if err == io.EOF {
+			if filter.closed.Load() {
+				_ = filter.clientOut.Close()
+				break
+			}
 			time.Sleep(100 * time.Millisecond)
 			continue // ignore output EOF
 		}
