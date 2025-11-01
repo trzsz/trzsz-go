@@ -69,7 +69,7 @@ _有关 `trzsz ( trz / tsz )` 更详细的文档，请查看 [https://trzsz.gith
 
   </details>
 
-- ArchLinux 可用 [yay](https://github.com/Jguer/yay) 安装
+- ArchLinux 可用 yay 安装
 
   <details><summary><code>yay -S trzsz</code></summary>
 
@@ -80,18 +80,27 @@ _有关 `trzsz ( trz / tsz )` 更详细的文档，请查看 [https://trzsz.gith
 
   </details>
 
-- MacOS 可用 [homebrew](https://brew.sh/) 安装
+- MacOS 可用 Homebrew 安装
 
   <details><summary><code>brew install trzsz-go</code></summary>
 
   ```sh
-  brew update
   brew install trzsz-go
   ```
 
   </details>
 
-- Windows 可用 [scoop](https://scoop.sh/) / [winget](https://learn.microsoft.com/zh-cn/windows/package-manager/winget/) / [choco](https://community.chocolatey.org/) 安装
+- ChromeOS 可用 Chromebrew 安装
+
+  <details><summary><code>crew install trzsz</code></summary>
+
+  ```sh
+  crew install trzsz
+  ```
+
+  </details>
+
+- Windows 可用 scoop / winget / choco 安装
 
   <details><summary><code>scoop install trzsz</code> / <code>winget install trzsz</code> / <code>choco install trzsz</code></summary>
 

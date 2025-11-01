@@ -69,7 +69,7 @@ _Please check [https://trzsz.github.io](https://trzsz.github.io) for more inform
 
   </details>
 
-- Install with [yay](https://github.com/Jguer/yay) on ArchLinux
+- Install with yay on ArchLinux
 
   <details><summary><code>yay -S trzsz</code></summary>
 
@@ -80,18 +80,27 @@ _Please check [https://trzsz.github.io](https://trzsz.github.io) for more inform
 
   </details>
 
-- Install with [homebrew](https://brew.sh/) on MacOS
+- Install with Homebrew on MacOS
 
   <details><summary><code>brew install trzsz-go</code></summary>
 
   ```sh
-  brew update
   brew install trzsz-go
   ```
 
   </details>
 
-- Install with [scoop](https://scoop.sh/) / [winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/) / [choco](https://community.chocolatey.org/) on Windows
+- Install with Chromebrew on ChromeOS
+
+  <details><summary><code>crew install trzsz</code></summary>
+
+  ```sh
+  crew install trzsz
+  ```
+
+  </details>
+
+- Install with scoop / winget / choco on Windows
 
   <details><summary><code>scoop install trzsz</code> / <code>winget install trzsz</code> / <code>choco install trzsz</code></summary>
 
