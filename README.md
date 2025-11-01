@@ -118,7 +118,7 @@ _Please check [https://trzsz.github.io](https://trzsz.github.io) for more inform
 
   </details>
 
-- Install with Go ( Requires go 1.20 or later )
+- Install with Go ( Requires go 1.25 or later )
 
   <details><summary><code>go install github.com/trzsz/trzsz-go/cmd/...@latest</code></summary>
 
@@ -132,7 +132,7 @@ _Please check [https://trzsz.github.io](https://trzsz.github.io) for more inform
 
   </details>
 
-- Build from source ( Requires go 1.20 or later )
+- Build from source ( Requires go 1.25 or later )
 
   <details><summary><code>sudo make install</code></summary>
 

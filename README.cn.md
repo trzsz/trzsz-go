@@ -118,7 +118,7 @@ _有关 `trzsz ( trz / tsz )` 更详细的文档，请查看 [https://trzsz.gith
 
   </details>
 
-- 用 Go 直接安装（ 要求 go 1.20 以上 ）
+- 用 Go 直接安装（ 要求 go 1.25 以上 ）
 
   <details><summary><code>go install github.com/trzsz/trzsz-go/cmd/...@latest</code></summary>
 
@@ -132,7 +132,7 @@ _有关 `trzsz ( trz / tsz )` 更详细的文档，请查看 [https://trzsz.gith
 
   </details>
 
-- 用 Go 自己编译（ 要求 go 1.20 以上 ）
+- 用 Go 自己编译（ 要求 go 1.25 以上 ）
 
   <details><summary><code>sudo make install</code></summary>
 

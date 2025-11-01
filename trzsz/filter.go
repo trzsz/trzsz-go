@@ -330,7 +330,7 @@ func zenityErrorWithTips(err error) error {
 	}
 	tips := "'zenity' needs to be installed on your local Linux desktop."
 	if os.Getenv("WSL_DISTRO_NAME") == "" {
-		return simpleTrzszError(tips)
+		return simpleTrzszError("%s", tips)
 	}
 	name := ""
 	if len(os.Args) > 0 {
