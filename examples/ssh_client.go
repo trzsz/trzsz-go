@@ -34,9 +34,10 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/kevinburke/ssh_config"
+	"github.com/trzsz/ssh_config"
 	"github.com/trzsz/trzsz-go/trzsz"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/term"
 )
 
@@ -55,13 +56,29 @@ func main() {
 		return
 	}
 
+	var signers []ssh.Signer
+
+	// ssh agent
+	if addr := os.Getenv("SSH_AUTH_SOCK"); addr != "" {
+		conn, err := net.Dial("unix", addr)
+		if err != nil {
+			fmt.Printf("dial unix [%s] failed: %s\n", addr, err)
+		} else {
+			agentSigners, err := agent.NewClient(conn).Signers()
+			if err != nil {
+				fmt.Printf("agent signers [%s] failed: %s\n", addr, err)
+			} else {
+				signers = append(signers, agentSigners...)
+			}
+		}
+	}
+
 	// read private key
 	home, err := os.UserHomeDir()
 	if err != nil {
 		fmt.Printf("user home dir failed: %s\n", err)
 		return
 	}
-	var signers []ssh.Signer
 	for _, name := range []string{"id_rsa", "id_ecdsa", "id_ecdsa_sk", "id_ed25519", "id_ed25519_sk", "id_dsa"} {
 		path := filepath.Join(home, ".ssh", name)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -75,7 +92,7 @@ func main() {
 		signer, err := ssh.ParsePrivateKey(privateKey)
 		if err != nil {
 			fmt.Printf("parse private key [%s] failed: %s\n", path, err)
-			return
+			continue
 		}
 		signers = append(signers, signer)
 	}
@@ -150,7 +167,12 @@ func main() {
 		// ◄───────────│        │◄──────────────────────────────────────────┤        │
 		//   os.Stderr └────────┘                  stderr                   └────────┘
 		trzszFilter = trzsz.NewTrzszFilter(os.Stdin, os.Stdout, serverIn, serverOut,
-			trzsz.TrzszOptions{TerminalColumns: int32(width)})
+			trzsz.TrzszOptions{
+				TerminalColumns: int32(width), // the columns of the terminal
+				DetectDragFile:  true,         // enable dragging to upload feature
+				EnableZmodem:    true,         // enable zmodem lrzsz ( rz / sz ) feature
+				EnableOSC52:     true,         // enable OSC52 clipboard feature
+			})
 		session.Stderr = os.Stderr
 	} else {
 		// create a TrzszFilter to support trzsz, with stdin and stdout controllable.
@@ -168,12 +190,21 @@ func main() {
 		clientIn, stdinPipe := io.Pipe()   // You can treat stdinPipe as session.StdinPipe()
 		stdoutPipe, clientOut := io.Pipe() // You can treat stdoutPipe as session.StdoutPipe()
 		trzszFilter = trzsz.NewTrzszFilter(clientIn, clientOut, serverIn, serverOut,
-			trzsz.TrzszOptions{TerminalColumns: int32(width)})
+			trzsz.TrzszOptions{
+				TerminalColumns: int32(width), // the columns of the terminal
+				DetectDragFile:  true,         // enable dragging to upload feature
+				EnableZmodem:    true,         // enable zmodem lrzsz ( rz / sz ) feature
+				EnableOSC52:     true,         // enable OSC52 clipboard feature
+			})
 		// TODO implement your function with stdin, stdout and stderr
 		go io.Copy(stdinPipe, os.Stdin)   // nolint:all
 		go io.Copy(os.Stdout, stdoutPipe) // nolint:all
 		session.Stderr = os.Stderr
 	}
+
+	// reset and close on exit
+	trzszFilter.Close() // don't close too early
+	trzszFilter.ResetTerminal()
 
 	// connect to linux directly is not affected by Windows
 	trzsz.SetAffectedByWindows(false)
@@ -189,10 +220,22 @@ func main() {
 				continue
 			}
 			_ = session.WindowChange(height, width)
-			trzszFilter.SetTerminalColumns(int32(width))
+			trzszFilter.SetTerminalColumns(int32(width)) // set terminal columns for progress bar
 		}
 	}()
 	defer func() { signal.Stop(ch); close(ch) }()
+
+	// custom settings
+	trzszFilter.SetDefaultUploadPath("")              // default path of the file dialog for trz uploading
+	trzszFilter.SetDefaultDownloadPath("~/Downloads") // automatically save to the path for tsz downloading
+	trzszFilter.SetDragFileUploadCommand("trz -y")    // overwrite existing files when dragging to upload
+	trzszFilter.SetProgressColorPair("B14FFF 00FFA3") // progress bar gradient from the first color to the second color
+
+	// recommended: setup tunnel connect
+	trzszFilter.SetTunnelConnector(func(port int) net.Conn {
+		conn, _ := client.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		return conn
+	})
 
 	go func() {
 		// call TrzszFilter to upload some files and directories as you want
