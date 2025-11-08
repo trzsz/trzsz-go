@@ -30,6 +30,6 @@ func getParentWindowID() int {
 	return 0
 }
 
-func isWarpTerminal() bool {
+var isWarpTerminal = func() bool {
 	return false
 }

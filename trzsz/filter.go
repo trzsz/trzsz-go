@@ -759,11 +759,11 @@ func (filter *TrzszFilter) sendInput(buf []byte, detectDragFile *atomic.Bool) {
 			filter.dragInputBuffer.Write(buf)
 			return
 		}
-		dragFiles, hasDir, ignore, isWinPath := detectDragFiles(buf)
+		dragFiles, hasDir, ignore, isWinPathPrefix := detectDragFiles(buf)
 		if dragFiles != nil {
 			filter.addDragFiles(dragFiles, hasDir, true)
 			return // don't sent the file paths to server
-		} else if isWinPath {
+		} else if isWinPathPrefix {
 			filter.dragInputBuffer = bytes.NewBuffer(nil)
 			filter.dragInputBuffer.Write(buf)
 			go func() {
@@ -795,6 +795,7 @@ func (filter *TrzszFilter) wrapInput() {
 	if filter.options.DetectDragFile {
 		go func() {
 			if isWarpTerminal() {
+				// for old warp terminal, if detect drag file too early may cause block feature to not work.
 				time.Sleep(time.Second)
 			}
 			detectDragFile.Store(true)

@@ -37,7 +37,7 @@ import (
 
 func getParentWindowID() any {
 	pid := getParentPid()
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		kinfo, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
 		if err != nil {
 			return 0
@@ -85,10 +85,10 @@ var (
 	warpTerminal bool
 )
 
-func isWarpTerminal() bool {
+var isWarpTerminal = func() bool {
 	warpOnce.Do(func() {
 		pid := os.Getppid()
-		for i := 0; i < 1000; i++ {
+		for range 1000 {
 			kinfo, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
 			if err != nil {
 				return

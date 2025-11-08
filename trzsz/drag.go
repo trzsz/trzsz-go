@@ -29,9 +29,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/google/shlex"
 )
 
-func detectDragFiles(buf []byte) (dragFiles []string, hasDir bool, ignore bool, isWinPath bool) {
+func detectDragFiles(buf []byte) (dragFiles []string, hasDir bool, ignore bool, isWinPathPrefix bool) {
+	if len(buf) < 2 { // fast return for keystrokes
+		return nil, false, false, false
+	}
 	if len(buf) > 5 && bytes.Contains(buf, []byte("\x1b[20")) {
 		buf = bytes.ReplaceAll(buf, []byte("\x1b[200~"), []byte(""))
 		buf = bytes.ReplaceAll(buf, []byte("\x1b[201~"), []byte(""))
@@ -39,21 +44,38 @@ func detectDragFiles(buf []byte) (dragFiles []string, hasDir bool, ignore bool, 
 			return nil, false, true, false
 		}
 	}
-	if isRunningOnLinux() {
-		isWinPath = false
-		dragFiles, hasDir, ignore = detectDragFilesOnLinux(buf)
-		return
-	} else if isRunningOnMacOS() {
-		isWinPath = false
-		dragFiles, hasDir, ignore = detectDragFilesOnMacOS(buf)
-		return
-	} else if isRunningOnWindows() {
+
+	if buf[0] == '\x10' { // for old warp terminal
+		buf = buf[1:]
+		if len(buf) < 2 {
+			return nil, false, false, false
+		}
+	}
+	if buf[0] == '\x1b' && len(buf) > 4 && buf[1] == 'i' && buf[2] == '\x10' { // for new warp terminal on MacOS
+		buf = buf[3:]
+	}
+
+	if isRunningOnWindows() {
 		return detectDragFilesOnWindows(buf)
 	}
-	return nil, false, false, false
+
+	paths, err := shlex.Split(string(buf))
+	if err != nil {
+		return nil, false, false, false
+	}
+	hasDir = false
+	for _, path := range paths {
+		if len(path) < 2 || path[0] != '/' { // not absolute path
+			return nil, false, false, false
+		}
+		if !detectFilePath(path, &dragFiles, &hasDir) {
+			return nil, false, false, false
+		}
+	}
+	return dragFiles, hasDir, false, false
 }
 
-func detectFilePath(path string, dragFiles *[]string, hasDir *bool) bool {
+var detectFilePath = func(path string, dragFiles *[]string, hasDir *bool) bool {
 	fileInfo, err := os.Stat(path)
 	if err != nil {
 		return false
@@ -70,105 +92,22 @@ func detectFilePath(path string, dragFiles *[]string, hasDir *bool) bool {
 	return false
 }
 
-func detectDragFilesOnLinux(buf []byte) ([]string, bool, bool) {
-	length := len(buf)
-	if length < 3 || !(buf[0] == '\'' && buf[1] == '/' || buf[0] == '/') || buf[length-1] != ' ' {
-		return nil, false, false
-	}
-	hasDir := false
-	var dragFiles []string
-	var i int
-	var path string
-	for idx := 0; idx < length; idx += i {
-		path, i = nextLinuxPath(buf[idx:])
-		if path == "" {
-			return nil, false, false
-		}
-		if !detectFilePath(path, &dragFiles, &hasDir) {
-			return nil, false, false
-		}
-	}
-	return dragFiles, hasDir, false
-}
-
-func nextLinuxPath(buf []byte) (string, int) {
-	length := len(buf)
-	if length < 3 {
-		return "", 0
-	}
-	if buf[0] == '\'' && buf[1] == '/' {
-		idx := bytes.IndexByte(buf[1:], '\'')
-		if idx < 0 {
-			return "", 0
-		}
-		idx++
-		if idx+1 >= length || buf[idx+1] != ' ' {
-			return "", 0
-		}
-		return string(buf[1:idx]), idx + 2
-	} else if buf[0] == '/' {
-		idx := bytes.IndexByte(buf, ' ')
-		if idx < 0 {
-			return "", 0
-		}
-		return string(buf[:idx]), idx + 1
-	}
-	return "", 0
-}
-
-func detectDragFilesOnMacOS(buf []byte) ([]string, bool, bool) {
-	length := len(buf)
-	if isWarpTerminal() {
-		if len(buf) > 1 && buf[0] == '\x10' {
-			if buf[1] != '/' {
-				return nil, false, false
-			}
-			buf = bytes.TrimSpace(buf[1:])
-			length = len(buf)
-		}
-		if length < 3 || buf[0] != '/' {
-			return nil, false, false
-		}
-		if length > 1 && (buf[length-1] != ' ' || buf[length-2] == '\\') {
-			buf = append(buf, ' ')
-			length = len(buf)
-		}
-	}
-	if length < 3 || buf[0] != '/' || buf[length-1] != ' ' || buf[length-2] == '\\' {
-		return nil, false, false
-	}
-	hasDir := false
-	var dragFiles []string
-	pathBuf := new(bytes.Buffer)
-	for i := 0; i < length; i++ {
-		if buf[i] == ' ' {
-			path := pathBuf.String()
-			if !detectFilePath(path, &dragFiles, &hasDir) {
-				return nil, false, false
-			}
-			pathBuf.Reset()
-		} else if buf[i] == '\\' {
-			i++
-			if i < length {
-				pathBuf.WriteByte(buf[i])
-			}
-		} else {
-			pathBuf.WriteByte(buf[i])
-		}
-	}
-	if pathBuf.Len() != 0 {
-		return nil, false, false
-	}
-	return dragFiles, hasDir, false
-}
-
-func detectDragFilesOnWindows(buf []byte) ([]string, bool, bool, bool) {
+func detectDragFilesOnWindows(buf []byte) (dragFiles []string, hasDir bool, ignore bool, isWinPathPrefix bool) {
 	length := len(buf)
 	if length < 4 {
 		return nil, false, false, false
 	}
-	hasDir := false
-	var dragFiles []string
+
+	if (buf[0] == '\'' && buf[1] == '/' && buf[2] >= 'a' && buf[2] <= 'z' && buf[3] == '/') ||
+		(buf[0] == '/' && buf[1] >= 'a' && buf[1] <= 'z' && buf[2] == '/') {
+		return detectDragFilesOnMSYS(buf)
+	}
+
+	if (length > 13 && string(buf[:11]) == "'/cygdrive/" && buf[11] >= 'a' && buf[11] <= 'z' && buf[12] == '/') ||
+		(length > 12 && string(buf[:10]) == "/cygdrive/" && buf[10] >= 'a' && buf[10] <= 'z' && buf[11] == '/') {
+		return detectDragFilesOnCygwin(buf)
+	}
+
 	if buf[length-1] == '"' && buf[0] >= 'A' && buf[0] <= 'Z' && buf[1] == ':' && buf[2] == '\\' &&
 		bytes.IndexByte(buf[:length-1], '"') < 0 {
 		// Cmd & PowerShell may lost the first `"`, and supports one path only.
@@ -176,114 +115,93 @@ func detectDragFilesOnWindows(buf []byte) ([]string, bool, bool, bool) {
 			return dragFiles, hasDir, false, false
 		}
 	}
-	isWinPath, isMsysPath, isCygPath := false, false, false
-	if (buf[0] == '"' && buf[1] >= 'A' && buf[1] <= 'Z' && buf[2] == ':' && buf[3] == '\\') ||
-		(buf[0] >= 'A' && buf[0] <= 'Z' && buf[1] == ':' && buf[2] == '\\') {
-		isWinPath = true
-	} else if (buf[0] == '\'' && buf[1] == '/' && buf[2] >= 'a' && buf[2] <= 'z' && buf[3] == '/') ||
-		(buf[0] == '/' && buf[1] >= 'a' && buf[1] <= 'z' && buf[2] == '/') {
-		isMsysPath = true
-	} else if (length > 13 && string(buf[:11]) == "'/cygdrive/" && buf[11] >= 'a' && buf[11] <= 'z' && buf[12] == '/') ||
-		(length > 12 && string(buf[:10]) == "/cygdrive/" && buf[10] >= 'a' && buf[10] <= 'z' && buf[11] == '/') {
-		isCygPath = true
-	} else {
-		return nil, false, false, false
-	}
-	var i int
-	var path string
-	for idx := 0; idx < length; idx += i {
-		if isWinPath {
-			path, i = nextWinPath(buf[idx:])
-		} else if isMsysPath {
-			path, i = nextMsysPath(buf[idx:])
-		} else if isCygPath {
-			path, i = nextCygPath(buf[idx:])
+
+	if length > 4 && buf[0] >= 'A' && buf[0] <= 'Z' && buf[1] == ':' && buf[2] == '\\' && buf[3] == '\\' {
+		paths, err := shlex.Split(string(buf))
+		if err != nil {
+			return nil, false, false, false
 		}
+		for _, path := range paths {
+			if len(path) < 4 || path[0] < 'A' || path[0] > 'Z' || path[1] != ':' || path[2] != '\\' { // not absolute path
+				return nil, false, false, false
+			}
+			if !detectFilePath(path, &dragFiles, &hasDir) {
+				return nil, false, false, false
+			}
+		}
+		return dragFiles, hasDir, false, false
+	}
+
+	for idx := 0; idx < length; {
+		path, inc, isPrefix := nextWinPath(buf[idx:])
 		if path == "" {
-			return nil, false, false, isWinPath
+			return nil, false, false, isPrefix
 		}
 		if !detectFilePath(path, &dragFiles, &hasDir) {
-			return nil, false, false, isWinPath
+			return nil, false, false, isPrefix
+		}
+		idx += inc
+	}
+	return dragFiles, hasDir, false, false
+}
+
+func nextWinPath(buf []byte) (string, int, bool) {
+	length := len(buf)
+	if length < 4 {
+		return "", 0, false
+	}
+	if buf[0] == '"' && buf[1] >= 'A' && buf[1] <= 'Z' && buf[2] == ':' && buf[3] == '\\' {
+		idx := bytes.IndexByte(buf[1:], '"')
+		if idx < 0 {
+			return "", 0, true
+		}
+		idx++
+		if idx+1 < length && buf[idx+1] != ' ' {
+			return "", 0, false
+		}
+		return string(buf[1:idx]), idx + 2, false
+	} else if buf[0] >= 'A' && buf[0] <= 'Z' && buf[1] == ':' && buf[2] == '\\' {
+		idx := bytes.IndexByte(buf, ' ')
+		if idx < 0 {
+			return string(buf), length, true
+		}
+		return string(buf[:idx]), idx + 1, false
+	}
+	return "", 0, false
+}
+
+func detectDragFilesOnMSYS(buf []byte) (dragFiles []string, hasDir bool, ignore bool, isWinPathPrefix bool) {
+	paths, err := shlex.Split(string(buf))
+	if err != nil || len(paths) < 1 {
+		return nil, false, false, false
+	}
+	for _, path := range paths {
+		if len(path) < 4 || path[0] != '/' || path[1] < 'a' || path[1] > 'z' || path[2] != '/' { // not absolute path
+			return nil, false, false, false
+		}
+		if !detectFilePath(unixPathToWinPath(path), &dragFiles, &hasDir) {
+			return nil, false, false, false
 		}
 	}
 	return dragFiles, hasDir, false, false
 }
 
-func nextWinPath(buf []byte) (string, int) {
-	length := len(buf)
-	if length < 4 {
-		return "", 0
+func detectDragFilesOnCygwin(buf []byte) (dragFiles []string, hasDir bool, ignore bool, isWinPathPrefix bool) {
+	paths, err := shlex.Split(string(buf))
+	if err != nil || len(paths) < 1 {
+		return nil, false, false, false
 	}
-	if buf[0] == '"' && buf[1] >= 'A' && buf[1] <= 'Z' && buf[2] == ':' && buf[3] == '\\' {
-		idx := bytes.IndexByte(buf[1:], '"')
-		if idx < 0 {
-			return "", 0
+	for _, path := range paths {
+		if len(path) < 13 || path[:10] != "/cygdrive/" || path[10] < 'a' || path[10] > 'z' || path[11] != '/' { // not absolute path
+			return nil, false, false, false
 		}
-		idx++
-		if idx+1 < length && buf[idx+1] != ' ' {
-			return "", 0
+		if !detectFilePath(unixPathToWinPath(path[9:]), &dragFiles, &hasDir) {
+			return nil, false, false, false
 		}
-		return string(buf[1:idx]), idx + 2
-	} else if buf[0] >= 'A' && buf[0] <= 'Z' && buf[1] == ':' && buf[2] == '\\' {
-		idx := bytes.IndexByte(buf, ' ')
-		if idx < 0 {
-			return string(buf), length
-		}
-		return string(buf[:idx]), idx + 1
 	}
-	return "", 0
+	return dragFiles, hasDir, false, false
 }
 
-func nextMsysPath(buf []byte) (string, int) {
-	length := len(buf)
-	if length < 4 {
-		return "", 0
-	}
-	if buf[0] == '\'' && buf[1] == '/' && buf[2] >= 'a' && buf[2] <= 'z' && buf[3] == '/' {
-		idx := bytes.IndexByte(buf[1:], '\'')
-		if idx < 0 {
-			return "", 0
-		}
-		idx++
-		if idx+1 < length && buf[idx+1] != ' ' {
-			return "", 0
-		}
-		return unixPathToWinPath(buf[1:idx]), idx + 2
-	} else if buf[0] == '/' && buf[1] >= 'a' && buf[1] <= 'z' && buf[2] == '/' {
-		idx := bytes.IndexByte(buf, ' ')
-		if idx < 0 {
-			return unixPathToWinPath(buf), length
-		}
-		return unixPathToWinPath(buf[:idx]), idx + 1
-	}
-	return "", 0
-}
-
-func nextCygPath(buf []byte) (string, int) {
-	length := len(buf)
-	if length < 13 {
-		return "", 0
-	}
-	if string(buf[:11]) == "'/cygdrive/" && buf[11] >= 'a' && buf[11] <= 'z' && buf[12] == '/' {
-		idx := bytes.IndexByte(buf[1:], '\'')
-		if idx < 0 {
-			return "", 0
-		}
-		idx++
-		if idx+1 < length && buf[idx+1] != ' ' {
-			return "", 0
-		}
-		return unixPathToWinPath(buf[10:idx]), idx + 2
-	} else if string(buf[:10]) == "/cygdrive/" && buf[10] >= 'a' && buf[10] <= 'z' && buf[11] == '/' {
-		idx := bytes.IndexByte(buf, ' ')
-		if idx < 0 {
-			return unixPathToWinPath(buf[9:]), length
-		}
-		return unixPathToWinPath(buf[9:idx]), idx + 1
-	}
-	return "", 0
-}
-
-func unixPathToWinPath(buf []byte) string {
+func unixPathToWinPath(buf string) string {
 	return fmt.Sprintf("%c:%s", buf[1], strings.ReplaceAll(string(buf[2:]), "/", "\\"))
 }

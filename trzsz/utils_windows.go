@@ -37,7 +37,7 @@ func getParentWindowID() uintptr {
 	return hwnd
 }
 
-func isWarpTerminal() bool {
+var isWarpTerminal = func() bool {
 	return false
 }
 
