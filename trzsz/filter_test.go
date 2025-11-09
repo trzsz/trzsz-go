@@ -92,7 +92,7 @@ func TestDetectOSC52(t *testing.T) {
 
 	writer.clearBuffer()
 	filter.detectOSC52([]byte("\x1b]52;c;ABC"))
-	for i := 0; i < 2000; i++ {
+	for range 2000 {
 		filter.detectOSC52([]byte("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"))
 	}
 	filter.detectOSC52([]byte("==\x1b"))
@@ -101,7 +101,7 @@ func TestDetectOSC52(t *testing.T) {
 
 	writer.clearBuffer()
 	filter.detectOSC52([]byte("\x1b]52;c;ABC"))
-	for i := 0; i < 2000; i++ {
+	for range 2000 {
 		filter.detectOSC52([]byte("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"))
 	}
 	filter.detectOSC52([]byte("==$=="))

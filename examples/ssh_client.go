@@ -109,13 +109,13 @@ func main() {
 		fmt.Printf("ssh dial tcp [%s:%s] failed: %s\n", host, port, err)
 		return
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	session, err := client.NewSession()
 	if err != nil {
 		fmt.Printf("ssh new session failed: %s\n", err)
 		return
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	// make stdin to raw
 	fd := int(os.Stdin.Fd())
@@ -124,7 +124,7 @@ func main() {
 		fmt.Printf("term make raw failed: %s\n", err)
 		return
 	}
-	defer term.Restore(fd, state) // nolint:all
+	defer func() { _ = term.Restore(fd, state) }()
 
 	// request a pty session
 	width, height, err := term.GetSize(fd)
@@ -197,8 +197,8 @@ func main() {
 				EnableOSC52:     true,         // enable OSC52 clipboard feature
 			})
 		// TODO implement your function with stdin, stdout and stderr
-		go io.Copy(stdinPipe, os.Stdin)   // nolint:all
-		go io.Copy(os.Stdout, stdoutPipe) // nolint:all
+		go func() { _, _ = io.Copy(stdinPipe, os.Stdin) }()
+		go func() { _, _ = io.Copy(os.Stdout, stdoutPipe) }()
 		session.Stderr = os.Stderr
 	}
 
@@ -252,5 +252,5 @@ func main() {
 	}
 
 	// wait for exit
-	session.Wait() // nolint:all
+	_ = session.Wait()
 }

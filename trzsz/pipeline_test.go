@@ -41,7 +41,7 @@ import (
 
 func newTransferWithEscape(t *testing.T, transfer *trzszTransfer, escapeAll bool) *trzszTransfer {
 	t.Helper()
-	cfgMap := map[string]interface{}{
+	cfgMap := map[string]any{
 		"escape_chars": getEscapeChars(escapeAll),
 	}
 	cfgStr, err := json.Marshal(cfgMap)
@@ -262,7 +262,7 @@ func TestRecvDataReader(t *testing.T) {
 	dataChan <- []byte{10, 11}
 	close(dataChan)
 	assertReadSucc([]byte{10, 11})
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		n, err = base64Reader.Read(buf)
 		assert.Equal(0, n)
 		assert.ErrorIs(err, io.EOF)
@@ -285,7 +285,7 @@ func TestSendDataWriter(t *testing.T) {
 	newTrzszData := func(data string) trzszData {
 		return trzszData{
 			data:   []byte(data),
-			buffer: []byte(fmt.Sprintf("#DATA:%s\n", data)),
+			buffer: fmt.Appendf(nil, "#DATA:%s\n", data),
 		}
 	}
 
@@ -325,7 +325,7 @@ func TestSendDataWriter(t *testing.T) {
 	// close writer
 	assertWriteSucc([]byte("GH"))
 	assert.Empty(dataChan)
-	base64Writer.Close()
+	_ = base64Writer.Close()
 	assertChannelFrontEqual(t, newTrzszData("FGH"), dataChan)
 	assertChannelFrontEqual(t, newTrzszData(""), dataChan)
 }
@@ -357,7 +357,7 @@ func TestBase64Writer(t *testing.T) {
 	assertWriteSucc("T")
 	assertWriteSucc("rz")
 	assertWriteSucc("sz")
-	writer.Close()
+	_ = writer.Close()
 	assert.True(out.closed)
 	assert.Equal("VHJ6c3o=", out.buf.String())
 }
@@ -407,7 +407,7 @@ func TestEscapeWriter(t *testing.T) {
 	assertWriteSucc("\x13\x18\x1b\x1d")
 	assertWriteSucc("\x8d\x90\x91\x93")
 	assertWriteSucc("\x9dXZ")
-	writer.Close()
+	_ = writer.Close()
 	assert.True(out.closed)
 	assert.Equal("AB\xee\xeeC\xee1"+
 		"\xeeA\xeeB\xeeC\xeeD"+
@@ -426,7 +426,7 @@ func TestZstdReaderWriter(t *testing.T) {
 	assert.Nil(err)
 
 	buf := make([]byte, 1337)
-	for i := 0; i < len(buf); i++ {
+	for i := range buf {
 		buf[i] = byte(i)
 	}
 
@@ -462,14 +462,14 @@ func TestPipelineReadData(t *testing.T) {
 	N := 32 * 1024
 	file, err := os.CreateTemp("", "TestPipelineReadData")
 	assert.Nil(err)
-	defer os.Remove(file.Name())
+	defer func() { _ = os.Remove(file.Name()) }()
 	_, _ = file.Write(bytes.Repeat([]byte{'A'}, N))
 	_, _ = file.Write(bytes.Repeat([]byte{'B'}, N))
 	_, _ = file.Write(bytes.Repeat([]byte{'C'}, 100))
-	file.Close()
+	_ = file.Close()
 	f1, err := os.Open(file.Name())
 	assert.Nil(err)
-	defer f1.Close()
+	defer func() { _ = f1.Close() }()
 
 	// read success
 	ctx := newPipelineContext()
@@ -492,7 +492,7 @@ func TestPipelineReadData(t *testing.T) {
 	ctx = newPipelineContext()
 	f2, err := os.Open(file.Name())
 	assert.Nil(err)
-	defer f2.Close()
+	defer func() { _ = f2.Close() }()
 	fileDataChan, md5SourceChan = transfer.pipelineReadData(ctx, &simpleFileReader{f2, 200})
 	assertChannelFrontEqual(t, bytes.Repeat([]byte{'A'}, 200), fileDataChan)
 	assertChannelFrontEqual(t, bytes.Repeat([]byte{'A'}, 200), md5SourceChan)
@@ -500,7 +500,7 @@ func TestPipelineReadData(t *testing.T) {
 	// cancel read
 	f3, err := os.Open(file.Name())
 	assert.Nil(err)
-	defer f3.Close()
+	defer func() { _ = f3.Close() }()
 	fileDataChan, md5SourceChan = transfer.pipelineReadData(ctx, &simpleFileReader{f2, int64(N*2 + 100)})
 	assertChannelClosed(t, fileDataChan)
 	assertChannelClosed(t, md5SourceChan)
@@ -530,18 +530,16 @@ func TestPipelineEncodeAndDecode(t *testing.T) {
 		}()
 
 		buf := make([]byte, 1067)
-		for i := 0; i < len(buf); i++ {
+		for i := range buf {
 			buf[i] = byte(i)
 		}
 		srcDataChan <- buf
 		close(srcDataChan)
 
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			assertChannelFinalEqual(t, buf, fileDataChan)
-			wg.Done()
-		}()
+		})
 		assertChannelFinalEqual(t, buf, md5SourceChan)
 		wg.Wait()
 		assert.Nil(ctx.Err())
@@ -565,7 +563,7 @@ func TestPipelineEscapeData(t *testing.T) {
 	newTrzszData := func(data string) trzszData {
 		return trzszData{
 			data:   []byte(data),
-			buffer: []byte(fmt.Sprintf("#DATA:%d\n%s", len(data), data)),
+			buffer: fmt.Appendf(nil, "#DATA:%d\n%s", len(data), data),
 		}
 	}
 

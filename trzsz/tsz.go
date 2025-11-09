@@ -147,11 +147,11 @@ func TszMain() int {
 	}
 
 	if args.Binary && tmuxMode == tmuxControlMode {
-		os.Stdout.WriteString("Binary download in tmux control mode is slower, auto switch to base64 mode.\n")
+		_, _ = os.Stdout.WriteString("Binary download in tmux control mode is slower, auto switch to base64 mode.\n")
 		args.Binary = false
 	}
 	if args.Binary && isRunningOnWindows() {
-		os.Stdout.WriteString("Binary download on Windows is not supported, auto switch to base64 mode.\n")
+		_, _ = os.Stdout.WriteString("Binary download on Windows is not supported, auto switch to base64 mode.\n")
 		args.Binary = false
 	}
 
@@ -163,17 +163,17 @@ func TszMain() int {
 	} else if tmuxMode == tmuxNormalMode {
 		columns := getTerminalColumns()
 		if columns > 0 && columns < 40 {
-			os.Stdout.WriteString("\n\n\x1b[2A\x1b[0J")
+			_, _ = os.Stdout.WriteString("\n\n\x1b[2A\x1b[0J")
 		} else {
-			os.Stdout.WriteString("\n\x1b[1A\x1b[0J")
+			_, _ = os.Stdout.WriteString("\n\x1b[1A\x1b[0J")
 		}
 		uniqueID += 20
 	}
 
 	listener, port := listenForTunnel()
 
-	os.Stdout.WriteString(fmt.Sprintf("\x1b7\x07::TRZSZ:TRANSFER:S:%s:%013d:%d\r\n", kTrzszVersion, uniqueID, port))
-	os.Stdout.Sync()
+	_, _ = fmt.Fprintf(os.Stdout, "\x1b7\x07::TRZSZ:TRANSFER:S:%s:%013d:%d\r\n", kTrzszVersion, uniqueID, port)
+	_ = os.Stdout.Sync()
 
 	var state *term.State
 	fd := int(os.Stdin.Fd())
@@ -194,7 +194,7 @@ func TszMain() int {
 	}()
 
 	if listener != nil {
-		defer listener.Close()
+		defer func() { _ = listener.Close() }()
 		transfer.acceptOnTunnel(listener, fmt.Sprintf("%013d", uniqueID), port)
 	}
 	wrapTransferInput(transfer, os.Stdin, false)

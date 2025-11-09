@@ -81,7 +81,7 @@ func detectZmodem(buf []byte) *zmodemTransfer {
 }
 
 func (z *zmodemTransfer) writeMessage(msg string) {
-	_ = writeAll(z.clientOut, []byte(fmt.Sprintf("\r\x1b[2K%s\r\n", msg)))
+	_ = writeAll(z.clientOut, fmt.Appendf(nil, "\r\x1b[2K%s\r\n", msg))
 }
 
 func (z *zmodemTransfer) updateProgress(buf []byte) {
@@ -106,8 +106,8 @@ func (z *zmodemTransfer) updateProgress(buf []byte) {
 }
 
 func (z *zmodemTransfer) showProgress(now *time.Time) {
-	_ = writeAll(z.clientOut, []byte(fmt.Sprintf("\r\x1b[2KTransferred %s, Speed %s.",
-		convertSizeToString(float64(z.transferredSize)), z.getSpeed(now))))
+	_ = writeAll(z.clientOut, fmt.Appendf(nil, "\r\x1b[2KTransferred %s, Speed %s.",
+		convertSizeToString(float64(z.transferredSize)), z.getSpeed(now)))
 }
 
 func (z *zmodemTransfer) getSpeed(now *time.Time) string {
@@ -348,7 +348,7 @@ func (z *zmodemTransfer) launchZmodemCmd(dir, name string, args ...string) (*exe
 
 func (z *zmodemTransfer) uploadFiles(files []string) {
 	workDir := ""
-	for i := 0; i < len(files); i++ {
+	for i := range files {
 		fileDir := filepath.Dir(files[i])
 		if i == 0 {
 			workDir = fileDir

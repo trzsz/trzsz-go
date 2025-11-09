@@ -42,7 +42,7 @@ func getEllipsisString(str string, max int) (string, int) {
 	b.Grow(max)
 	max -= 3
 	length := 0
-	for _, r := range []rune(str) { // nolint:all
+	for _, r := range str {
 		rlen := runewidth.RuneWidth(r)
 		if length+rlen > max {
 			b.WriteString("...")
@@ -57,32 +57,31 @@ func getEllipsisString(str string, max int) (string, int) {
 
 func convertSizeToString(size float64) string {
 	unit := "B"
-	for {
+	func() {
 		if size < 1024 {
-			break
+			return
 		}
 		size = size / 1024
 		unit = "KB"
 
 		if size < 1024 {
-			break
+			return
 		}
 		size = size / 1024
 		unit = "MB"
 
 		if size < 1024 {
-			break
+			return
 		}
 		size = size / 1024
 		unit = "GB"
 
 		if size < 1024 {
-			break
+			return
 		}
 		size = size / 1024
 		unit = "TB"
-		break // nolint:all
-	}
+	}()
 
 	if size >= 100 {
 		return fmt.Sprintf("%.0f %s", size, unit)
@@ -339,57 +338,56 @@ func (p *textProgressBar) getProgressText(percentage, total, speed, eta string) 
 	leftLength := runewidth.StringWidth(left)
 	right := fmt.Sprintf(" %s | %s | %s | %s", percentage, total, speed, eta)
 
-	for {
+	func() {
 		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
-			break
+			return
 		}
 		if leftLength > 50 {
 			left, leftLength = getEllipsisString(left, 50)
 		}
 
 		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
-			break
+			return
 		}
 		if leftLength > 40 {
 			left, leftLength = getEllipsisString(left, 40)
 		}
 
 		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
-			break
+			return
 		}
 		right = fmt.Sprintf(" %s | %s | %s", percentage, speed, eta)
 
 		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
-			break
+			return
 		}
 		if leftLength > 30 {
 			left, leftLength = getEllipsisString(left, 30)
 		}
 
 		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
-			break
+			return
 		}
 		right = fmt.Sprintf(" %s | %s", percentage, eta)
 
 		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
-			break
+			return
 		}
 		right = fmt.Sprintf(" %s", percentage)
 
 		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
-			break
+			return
 		}
 		if leftLength > 20 {
 			left, leftLength = getEllipsisString(left, 20)
 		}
 
 		if int(p.columns.Load())-leftLength-len(right) >= barMinLength {
-			break
+			return
 		}
 		left = ""
 		leftLength = 0
-		break // nolint:all
-	}
+	}()
 
 	barLength := int(p.columns.Load()) - len(right)
 	if leftLength > 0 {

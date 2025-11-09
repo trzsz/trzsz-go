@@ -106,7 +106,7 @@ func (t *trzszPty) Close() {
 	if t.ch != nil {
 		t.ch <- syscall.SIGWINCH
 	}
-	t.ptmx.Close()
+	_ = t.ptmx.Close()
 }
 
 func (t *trzszPty) Wait() {

@@ -217,10 +217,12 @@ func (t *trzszPty) ExitCode() int {
 }
 
 func syscallAccessWok(path string) error {
+	_ = path
 	return nil
 }
 
 func syscallAccessRok(path string) error {
+	_ = path
 	return nil
 }
 

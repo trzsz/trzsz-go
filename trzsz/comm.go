@@ -188,7 +188,7 @@ func encodeBytes(buf []byte) string {
 	b := bytes.NewBuffer(make([]byte, 0, len(buf)+0x10))
 	z := zlib.NewWriter(b)
 	_ = writeAll(z, []byte(buf))
-	z.Close()
+	_ = z.Close()
 	return base64.StdEncoding.EncodeToString(b.Bytes())
 }
 
@@ -205,7 +205,7 @@ func decodeString(str string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer z.Close()
+	defer func() { _ = z.Close() }()
 	buf := bytes.NewBuffer(make([]byte, 0, len(b)<<2))
 	if _, err := io.Copy(buf, z); err != nil {
 		return nil, err
@@ -443,7 +443,7 @@ func getNewName(path, name string) (string, error) {
 	if _, err := os.Stat(filepath.Join(path, name)); os.IsNotExist(err) {
 		return name, nil
 	}
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		newName := fmt.Sprintf("%s.%d", name, i)
 		if _, err := os.Stat(filepath.Join(path, newName)); os.IsNotExist(err) {
 			return newName, nil
@@ -468,13 +468,13 @@ func checkTmux() (tmuxModeType, *os.File, int32, error) {
 	cmd := exec.Command("tmux", "display-message", "-p", "#{client_tty}:#{client_control_mode}:#{pane_width}")
 	out, err := cmd.Output()
 	if err != nil {
-		return noTmuxMode, nil, -1, fmt.Errorf("Get tmux output failed: %v", err)
+		return noTmuxMode, nil, -1, fmt.Errorf("get tmux output failed: %v", err)
 	}
 
 	output := strings.TrimSpace(string(out))
 	tokens := strings.Split(output, ":")
 	if len(tokens) != 3 {
-		return noTmuxMode, nil, -1, fmt.Errorf("Unexpect tmux output: %s", output)
+		return noTmuxMode, nil, -1, fmt.Errorf("unexpect tmux output: %s", output)
 	}
 	tmuxTty, controlMode, paneWidth := tokens[0], tokens[1], tokens[2]
 
@@ -482,7 +482,7 @@ func checkTmux() (tmuxModeType, *os.File, int32, error) {
 	if len(paneWidth) > 0 {
 		tmuxPaneWidth, err = strconv.Atoi(paneWidth)
 		if err != nil {
-			return 0, nil, -1, fmt.Errorf("Parse tmux pane width [%s] failed: %v", paneWidth, err)
+			return 0, nil, -1, fmt.Errorf("parse tmux pane width [%s] failed: %v", paneWidth, err)
 		}
 	}
 
@@ -495,7 +495,7 @@ func checkTmux() (tmuxModeType, *os.File, int32, error) {
 
 	tmuxStdout, err := os.OpenFile(tmuxTty, os.O_WRONLY, 0)
 	if err != nil {
-		return 0, nil, -1, fmt.Errorf("Open tmux tty [%s] failed: %v", tmuxTty, err)
+		return 0, nil, -1, fmt.Errorf("open tmux tty [%s] failed: %v", tmuxTty, err)
 	}
 
 	statusInterval := getTmuxStatusInterval()
@@ -601,15 +601,6 @@ func trimVT100(buf []byte) []byte {
 	return b.Bytes()
 }
 
-func containsString(elems []string, v string) bool {
-	for _, s := range elems {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
-
 func writeAll(dst io.Writer, data []byte) error {
 	m := 0
 	l := len(data)
@@ -639,7 +630,7 @@ func parseTrzszVersion(ver string) (*trzszVersion, error) {
 		return nil, simpleTrzszError("Version [%s] invalid", ver)
 	}
 	var version trzszVersion
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		v, err := strconv.ParseUint(tokens[i], 10, 32)
 		if err != nil {
 			return nil, simpleTrzszError("Version [%s] invalid", ver)
@@ -650,7 +641,7 @@ func parseTrzszVersion(ver string) (*trzszVersion, error) {
 }
 
 func (v *trzszVersion) compare(ver *trzszVersion) int {
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if v[i] < ver[i] {
 			return -1
 		}
@@ -706,7 +697,7 @@ func (detector *trzszDetector) addRelaySuffix(output []byte, idx int) []byte {
 	}
 	for ; idx < len(output); idx++ {
 		c := output[idx]
-		if c != ':' && c != '.' && !(c >= '0' && c <= '9') {
+		if c != ':' && c != '.' && (c < '0' || c > '9') {
 			break
 		}
 	}
@@ -718,7 +709,7 @@ func (detector *trzszDetector) addRelaySuffix(output []byte, idx int) []byte {
 }
 
 func (detector *trzszDetector) isRepeatedID(uniqueID string) bool {
-	if len(uniqueID) > 6 && (isWindowsEnvironment() || !(len(uniqueID) == 13 && strings.HasSuffix(uniqueID, "00"))) {
+	if len(uniqueID) > 6 && (isWindowsEnvironment() || len(uniqueID) != 13 || !strings.HasSuffix(uniqueID, "00")) {
 		if _, ok := detector.uniqueIDMap[uniqueID]; ok {
 			return true
 		}
@@ -788,7 +779,7 @@ func (detector *trzszDetector) detectTrzsz(output []byte, tunnel bool) ([]byte, 
 		return output, nil
 	}
 
-	winServer := false
+	var winServer bool
 	if uniqueID == "1" || (len(uniqueID) == 13 && strings.HasSuffix(uniqueID, "10")) {
 		winServer = true
 	}
@@ -845,7 +836,7 @@ func (logger *traceLogger) writeTraceLog(buf []byte, typ string) []byte {
 			logger.traceLogFile.Store(nil)
 			return bytes.ReplaceAll(buf, []byte("<DISABLE_TRZSZ_TRACE_LOG>"), []byte(msg))
 		}
-		*ch <- []byte(fmt.Sprintf("[%s]%s\n", typ, encodeBytes(buf)))
+		*ch <- fmt.Appendf(nil, "[%s]%s\n", typ, encodeBytes(buf))
 		return buf
 	}
 	if typ == "svrout" && bytes.Contains(buf, []byte("<ENABLE_TRZSZ_TRACE_LOG>")) {
@@ -864,7 +855,7 @@ func (logger *traceLogger) writeTraceLog(buf []byte, typ string) []byte {
 				select {
 				case buf, ok := <-ch:
 					if !ok {
-						file.Close()
+						_ = file.Close()
 						return
 					}
 					_ = writeAll(file, buf)
@@ -1006,7 +997,7 @@ func encodeTmuxOutput(prefix string, output []byte) []byte {
 			buffer.WriteByte(b)
 			continue
 		}
-		buffer.Write([]byte(fmt.Sprintf("\\%03o", b)))
+		fmt.Fprintf(buffer, "\\%03o", b)
 	}
 	buffer.Write([]byte("\r\n"))
 	return buffer.Bytes()
@@ -1044,12 +1035,12 @@ func forkToBackground() (bool, error) {
 	if err != nil {
 		return true, fmt.Errorf("fork stdin pipe failed: %v", err)
 	}
-	defer stdin.Close()
+	defer func() { _ = stdin.Close() }()
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return true, fmt.Errorf("fork stderr pipe failed: %v", err)
 	}
-	defer stderr.Close()
+	defer func() { _ = stderr.Close() }()
 	if err := cmd.Start(); err != nil {
 		return true, fmt.Errorf("fork start failed: %v", err)
 	}
@@ -1058,7 +1049,7 @@ func forkToBackground() (bool, error) {
 	if term.IsTerminal(fd) {
 		state, err := term.MakeRaw(fd)
 		if err != nil {
-			return true, fmt.Errorf("make stdin raw failed: %v\r\n", err)
+			return true, fmt.Errorf("make stdin raw failed: %v", err)
 		}
 		defer func() { _ = term.Restore(fd, state) }()
 	}

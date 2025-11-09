@@ -34,6 +34,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -166,7 +167,7 @@ func getHelloConstant(uniqueID string, port int) (string, string) {
 
 func (t *trzszTransfer) acceptOnTunnel(listener net.Listener, uniqueID string, port int) {
 	go func() {
-		defer listener.Close()
+		defer func() { _ = listener.Close() }()
 		clientHello, serverHello := getHelloConstant(uniqueID, port)
 		for {
 			conn, err := listener.Accept()
@@ -174,23 +175,23 @@ func (t *trzszTransfer) acceptOnTunnel(listener net.Listener, uniqueID string, p
 				return
 			}
 			if t.tunnelConn.Load() != nil {
-				conn.Close()
+				_ = conn.Close()
 				return
 			}
 			go func(conn net.Conn) {
 				buf := make([]byte, 100)
 				n, err := conn.Read(buf)
 				if err != nil || string(buf[:n]) != clientHello {
-					conn.Close()
+					_ = conn.Close()
 					return
 				}
 				if _, err := conn.Write([]byte(serverHello)); err != nil {
-					conn.Close()
+					_ = conn.Close()
 					return
 				}
 				if t.tunnelConn.CompareAndSwap(nil, &conn) {
 					wrapTransferInput(t, conn, true)
-					listener.Close()
+					_ = listener.Close()
 				}
 			}(conn)
 		}
@@ -198,10 +199,7 @@ func (t *trzszTransfer) acceptOnTunnel(listener net.Listener, uniqueID string, p
 }
 
 func (t *trzszTransfer) connectToTunnel(connector func(int) net.Conn, uniqueID string, port int) {
-	t.tunnelInitWG.Add(1)
-	go func() {
-		defer t.tunnelInitWG.Done()
-
+	t.tunnelInitWG.Go(func() {
 		timeout := false
 		connChan := make(chan net.Conn, 1)
 		go func() {
@@ -212,20 +210,20 @@ func (t *trzszTransfer) connectToTunnel(connector func(int) net.Conn, uniqueID s
 				return
 			}
 			if timeout {
-				conn.Close()
+				_ = conn.Close()
 				connChan <- nil
 				return
 			}
 			clientHello, serverHello := getHelloConstant(uniqueID, port)
 			if _, err := conn.Write([]byte(clientHello)); err != nil || timeout {
-				conn.Close()
+				_ = conn.Close()
 				connChan <- nil
 				return
 			}
 			buf := make([]byte, 100)
 			n, err := conn.Read(buf)
 			if err != nil || string(buf[:n]) != serverHello || timeout {
-				conn.Close()
+				_ = conn.Close()
 				connChan <- nil
 				return
 			}
@@ -241,12 +239,12 @@ func (t *trzszTransfer) connectToTunnel(connector func(int) net.Conn, uniqueID s
 		case <-time.After(time.Second):
 			timeout = true
 		}
-	}()
+	})
 }
 
 func (t *trzszTransfer) cleanup() {
 	if conn := t.tunnelConn.Load(); conn != nil {
-		(*conn).Close()
+		_ = (*conn).Close()
 	}
 }
 
@@ -255,11 +253,11 @@ func (t *trzszTransfer) background() <-chan struct{} {
 }
 
 func (t *trzszTransfer) switchToBackground() {
-	os.Stdin.Close()
+	_ = os.Stdin.Close()
 	go func() {
 		time.Sleep(500 * time.Millisecond) // wait for client switch to background
 		t.resetTerm("Switch to transfer in background.", true)
-		os.Stderr.Close()
+		_ = os.Stderr.Close()
 	}()
 }
 
@@ -357,7 +355,7 @@ func (t *trzszTransfer) writeAll(buf []byte) error {
 }
 
 func (t *trzszTransfer) sendLine(typ string, buf string) error {
-	return t.writeAll([]byte(fmt.Sprintf("#%s:%s%s", typ, buf, t.transferConfig.Newline)))
+	return t.writeAll(fmt.Appendf(nil, "#%s:%s%s", typ, buf, t.transferConfig.Newline))
 }
 
 func (t *trzszTransfer) stripTmuxStatusLine(buf []byte) []byte {
@@ -498,17 +496,6 @@ func (t *trzszTransfer) recvString(typ string, mayHasJunk bool, timeout <-chan t
 	return string(b), nil
 }
 
-func (t *trzszTransfer) checkString(expect string, timeout <-chan time.Time) error { // nolint:all
-	result, err := t.recvString("SUCC", false, timeout)
-	if err != nil {
-		return err
-	}
-	if result != expect {
-		return newTrzszError(fmt.Sprintf("String check [%s] <> [%s]", result, expect), "", true)
-	}
-	return nil
-}
-
 func (t *trzszTransfer) sendBinary(typ string, buf []byte) error {
 	return t.sendLine(typ, encodeBytes(buf))
 }
@@ -526,7 +513,7 @@ func (t *trzszTransfer) checkBinary(expect []byte, timeout <-chan time.Time) err
 	if err != nil {
 		return err
 	}
-	if bytes.Compare(result, expect) != 0 { // nolint:all
+	if !bytes.Equal(result, expect) {
 		return newTrzszError(fmt.Sprintf("Binary check [%v] <> [%v]", result, expect), "", true)
 	}
 	return nil
@@ -540,7 +527,7 @@ func (t *trzszTransfer) sendData(data []byte) error {
 		return t.sendBinary("DATA", data)
 	}
 	buf := escapeData(data, t.transferConfig.EscapeTable)
-	if err := t.writeAll([]byte(fmt.Sprintf("#DATA:%d\n", len(buf)))); err != nil {
+	if err := t.writeAll(fmt.Appendf(nil, "#DATA:%d\n", len(buf))); err != nil {
 		return err
 	}
 	return t.writeAll(buf)
@@ -649,7 +636,7 @@ func (t *trzszTransfer) recvAction() (*transferAction, error) {
 }
 
 func (t *trzszTransfer) sendConfig(args *baseArgs, action *transferAction, escapeChars [][]unicode, tmuxMode tmuxModeType, tmuxPaneWidth int32) error {
-	cfgMap := map[string]interface{}{
+	cfgMap := map[string]any{
 		"lang": "go",
 	}
 	if args.Quiet {
@@ -726,7 +713,7 @@ func (t *trzszTransfer) serverExit(msg string) {
 func (t *trzszTransfer) resetTerm(msg string, ignorable bool) {
 	if !t.termReseted.CompareAndSwap(false, true) {
 		if !ignorable {
-			os.Stdout.WriteString(fmt.Sprintf("\x1b7\r\n%s\r\n\x1b8", msg))
+			_, _ = fmt.Fprintf(os.Stdout, "\x1b7\r\n%s\r\n\x1b8", msg)
 		}
 		return
 	}
@@ -735,12 +722,12 @@ func (t *trzszTransfer) resetTerm(msg string, ignorable bool) {
 	}
 	if isRunningOnWindows() {
 		msg = strings.ReplaceAll(msg, "\n", "\r\n")
-		os.Stdout.WriteString("\x1b[H\x1b[2J\x1b[?1049l")
+		_, _ = os.Stdout.WriteString("\x1b[H\x1b[2J\x1b[?1049l")
 	} else {
-		os.Stdout.WriteString("\x1b8\x1b[0J")
+		_, _ = os.Stdout.WriteString("\x1b8\x1b[0J")
 	}
-	os.Stdout.WriteString(msg)
-	os.Stdout.WriteString("\r\n")
+	_, _ = os.Stdout.WriteString(msg)
+	_, _ = os.Stdout.WriteString("\r\n")
 	showCursor(os.Stdout)
 	if t.transferConfig.TmuxOutputJunk {
 		tmuxRefreshClient()
@@ -960,7 +947,7 @@ func (t *trzszTransfer) sendFiles(sourceFiles []*sourceFile, progress progressCa
 			return nil, err
 		}
 
-		if !containsString(remoteNames, remoteName) {
+		if !slices.Contains(remoteNames, remoteName) {
 			remoteNames = append(remoteNames, remoteName)
 		}
 
@@ -968,7 +955,7 @@ func (t *trzszTransfer) sendFiles(sourceFiles []*sourceFile, progress progressCa
 			continue
 		}
 
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		if err := t.sendFileSize(file.getSize(), progress); err != nil {
 			return nil, err
@@ -1174,7 +1161,7 @@ func (t *trzszTransfer) recvFileSize(progress progressCallback) (int64, error) {
 }
 
 func (t *trzszTransfer) recvFileData(file fileWriter, size int64, progress progressCallback) ([]byte, error) {
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	step := int64(0)
 	if progress != nil {
 		progress.onStep(step)
@@ -1210,7 +1197,7 @@ func (t *trzszTransfer) recvFileMD5(digest []byte, progress progressCallback) er
 	if err != nil {
 		return err
 	}
-	if bytes.Compare(digest, expectDigest) != 0 { // nolint:all
+	if !bytes.Equal(digest, expectDigest) {
 		return simpleTrzszError("Check MD5 failed")
 	}
 	if err := t.sendBinary("SUCC", digest); err != nil {
@@ -1229,7 +1216,7 @@ func (t *trzszTransfer) recvFiles(path string, progress progressCallback) ([]str
 	}
 
 	var localNames []string
-	for i := int64(0); i < num; i++ {
+	for range num {
 		var err error
 		var file fileWriter
 		var localName string
@@ -1242,7 +1229,7 @@ func (t *trzszTransfer) recvFiles(path string, progress progressCallback) ([]str
 			return nil, err
 		}
 
-		if !containsString(localNames, localName) {
+		if !slices.Contains(localNames, localName) {
 			localNames = append(localNames, localName)
 		}
 
@@ -1250,7 +1237,7 @@ func (t *trzszTransfer) recvFiles(path string, progress progressCallback) ([]str
 			continue
 		}
 
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 
 		size, err := t.recvFileSize(progress)
 		if err != nil {

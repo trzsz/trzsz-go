@@ -68,24 +68,23 @@ func parseTrzszArgs() *trzszArgs {
 	args := &trzszArgs{}
 	var i int
 	for i = 1; i < len(os.Args); i++ {
-		if os.Args[i] == "-h" || os.Args[i] == "--help" {
+		switch os.Args[i] {
+		case "-h", "--help":
 			args.Help = true
 			return args
-		} else if os.Args[i] == "-v" || os.Args[i] == "--version" {
+		case "-v", "--version":
 			args.Version = true
 			return args
-		} else if os.Args[i] == "-r" || os.Args[i] == "--relay" {
+		case "-r", "--relay":
 			args.Relay = true
-		} else if os.Args[i] == "-t" || os.Args[i] == "--tracelog" {
+		case "-t", "--tracelog":
 			args.TraceLog = true
-		} else if os.Args[i] == "-d" || os.Args[i] == "--dragfile" {
+		case "-d", "--dragfile":
 			args.DragFile = true
-		} else if os.Args[i] == "-z" || os.Args[i] == "--zmodem" {
+		case "-z", "--zmodem":
 			args.Zmodem = true
-		} else if os.Args[i] == "-o" || os.Args[i] == "--osc52" {
+		case "-o", "--osc52":
 			args.OSC52 = true
-		} else {
-			break
 		}
 	}
 	if i >= len(os.Args) {

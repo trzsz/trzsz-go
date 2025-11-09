@@ -110,6 +110,7 @@ func assertDragFilesPrefix(t *testing.T, buf string) {
 func TestDetectDragFilesOnLinux(t *testing.T) {
 	resetRuntime := setupTestRuntime(true, false, false)
 	defer resetRuntime()
+	assert.New(t).True(isRunningOnLinux())
 
 	addMockFile("/tmp/abc", false)
 	addMockFile("/tmp/12 3", false)

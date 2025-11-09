@@ -40,7 +40,7 @@ var colorRegexp = regexp.MustCompile(`\x1b\[\d+[mD]`)
 
 func getDisplayLength(str string) int {
 	length := 0
-	for _, r := range []rune(str) { // nolint:all
+	for _, r := range str {
 		if utf8.RuneLen(r) == 1 {
 			length++
 		} else {
@@ -136,7 +136,7 @@ func TestProgressNewestSpeed(t *testing.T) {
 	writer := newTestWriter(t)
 	now := int64(1646564135000)
 	var mockTimes []int64
-	for i := 0; i < 101; i++ {
+	for i := range 101 {
 		mockTimes = append(mockTimes, now+int64(i*1000))
 	}
 	callTimeNowCount := mockTimeNow(mockTimes, 0)
@@ -146,7 +146,7 @@ func TestProgressNewestSpeed(t *testing.T) {
 	progress.onName("中文😀test.txt")
 	progress.onSize(100000)
 	step := int64(100)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		step += int64(i * 10)
 		progress.onStep(step)
 	}
@@ -154,7 +154,7 @@ func TestProgressNewestSpeed(t *testing.T) {
 	assert.Equal(101, *callTimeNowCount)
 	writer.assertBufferCount(101)
 	total := float64(100)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		total += float64(i * 10)
 		percentageStr := fmt.Sprintf("%.0f", math.Round(total*100.0/100000.0))
 		var speed float64

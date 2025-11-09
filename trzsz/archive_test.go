@@ -84,14 +84,14 @@ func TestArchiveReadAndWrite(t *testing.T) {
 
 	testPath, err := os.MkdirTemp("", "trzsz_test_")
 	require.Nil(err)
-	defer os.RemoveAll(testPath)
+	defer func() { _ = os.RemoveAll(testPath) }()
 
 	createFile := func(paths []string, content string) string {
 		t.Helper()
 		absPath := filepath.Join(append([]string{testPath}, paths...)...)
 		file, err := os.Create(absPath)
 		require.Nil(err)
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		_, err = file.WriteString(content)
 		require.Nil(err)
 		return absPath
@@ -183,8 +183,8 @@ func TestArchiveReadAndWrite(t *testing.T) {
 			require.Nil(writeAll(writer, buf))
 			n += m
 		}
-		reader.Close()
-		writer.Close()
+		_ = reader.Close()
+		_ = writer.Close()
 		savePath = append(savePath, filepath.Join(os.TempDir(), name))
 	}
 

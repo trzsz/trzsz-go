@@ -113,7 +113,7 @@ func (f *archiveFileReader) Read(p []byte) (int, error) {
 			f.idx++
 			f.buf = append([]byte(f.src.Header), '\n')
 			if f.file != nil {
-				f.file.Close()
+				_ = f.file.Close()
 			}
 			if f.src.IsDir {
 				f.file = nil

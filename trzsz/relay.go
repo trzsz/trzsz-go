@@ -102,20 +102,20 @@ func (r *TrzszRelay) listenForTunnel(buf []byte) []byte {
 
 	r.tunnelRelayPort = port
 	if listener := r.tunnelListener.Load(); listener != nil {
-		(*listener).Close()
+		_ = (*listener).Close()
 	}
 	r.tunnelListener.Store(&listener)
 	r.acceptOnTunnel()
 
-	return bytes.ReplaceAll(buf, []byte(fmt.Sprintf(":%s:%d", r.trigger.uniqueID, r.trigger.tunnelPort)),
-		[]byte(fmt.Sprintf(":%s:%d", r.trigger.uniqueID, r.tunnelRelayPort)))
+	return bytes.ReplaceAll(buf, fmt.Appendf(nil, ":%s:%d", r.trigger.uniqueID, r.trigger.tunnelPort),
+		fmt.Appendf(nil, ":%s:%d", r.trigger.uniqueID, r.tunnelRelayPort))
 }
 
 func (r *TrzszRelay) acceptOnTunnel() {
 	go func() {
 		defer func() {
 			if listener := r.tunnelListener.Load(); listener != nil {
-				(*listener).Close()
+				_ = (*listener).Close()
 				r.tunnelListener.Store(nil)
 			}
 		}()
@@ -129,7 +129,7 @@ func (r *TrzszRelay) acceptOnTunnel() {
 				return
 			}
 			if r.tunnelRelay.Load() != nil {
-				clientConn.Close()
+				_ = clientConn.Close()
 				return
 			}
 			go r.handleTunnelConn(clientConn)
@@ -140,7 +140,7 @@ func (r *TrzszRelay) acceptOnTunnel() {
 func (r *TrzszRelay) handleTunnelConn(clientConn net.Conn) {
 	connector := r.tunnelConnector.Load()
 	if connector == nil {
-		clientConn.Close()
+		_ = clientConn.Close()
 		return
 	}
 	clientHello1, serverHello4 := getHelloConstant(r.trigger.uniqueID, r.tunnelRelayPort)
@@ -148,28 +148,28 @@ func (r *TrzszRelay) handleTunnelConn(clientConn net.Conn) {
 	buf := make([]byte, 100)
 	n, err := clientConn.Read(buf)
 	if err != nil || string(buf[:n]) != clientHello1 {
-		clientConn.Close()
+		_ = clientConn.Close()
 		return
 	}
 	serverConn := (*connector)(r.trigger.tunnelPort)
 	if serverConn == nil {
-		clientConn.Close()
+		_ = clientConn.Close()
 		return
 	}
 	if _, err := serverConn.Write([]byte(clientHello2)); err != nil {
-		clientConn.Close()
-		serverConn.Close()
+		_ = clientConn.Close()
+		_ = serverConn.Close()
 		return
 	}
 	n, err = serverConn.Read(buf)
 	if err != nil || string(buf[:n]) != serverHello3 {
-		clientConn.Close()
-		serverConn.Close()
+		_ = clientConn.Close()
+		_ = serverConn.Close()
 		return
 	}
 	if _, err := clientConn.Write([]byte(serverHello4)); err != nil {
-		clientConn.Close()
-		serverConn.Close()
+		_ = clientConn.Close()
+		_ = serverConn.Close()
 		return
 	}
 	tr := newTunnelRelay(r.logger, clientConn, serverConn)
@@ -178,7 +178,7 @@ func (r *TrzszRelay) handleTunnelConn(clientConn net.Conn) {
 		go tr.wrapInput()
 		go tr.wrapOutput()
 		if listener := r.tunnelListener.Load(); listener != nil {
-			(*listener).Close()
+			_ = (*listener).Close()
 			r.tunnelListener.Store(nil)
 		}
 	} else {
@@ -190,7 +190,7 @@ func (r *TrzszRelay) handleTunnelConn(clientConn net.Conn) {
 func newTunnelRelay(logger *traceLogger, clientConn, serverConn net.Conn) *tunnelRelay {
 	clientBufChan := make(chan []byte, 10)
 	go func() {
-		defer serverConn.Close()
+		defer func() { _ = serverConn.Close() }()
 		for buffer := range clientBufChan {
 			if logger != nil {
 				logger.writeTraceLog(buffer, "ttosvr")
@@ -201,7 +201,7 @@ func newTunnelRelay(logger *traceLogger, clientConn, serverConn net.Conn) *tunne
 
 	serverBufChan := make(chan []byte, 10)
 	go func() {
-		defer clientConn.Close()
+		defer func() { _ = clientConn.Close() }()
 		for buffer := range serverBufChan {
 			if logger != nil {
 				logger.writeTraceLog(buffer, "ttocli")
@@ -335,7 +335,7 @@ func (r *TrzszRelay) sendStringToClient(typ string, str string) error {
 	if (r.clientIsWindows || r.trigger.winServer) && !r.tunnelConnected.Load() {
 		newline = "!\n"
 	}
-	buffer := []byte(fmt.Sprintf("#%s:%s%s", typ, encodeString(str), newline))
+	buffer := fmt.Appendf(nil, "#%s:%s%s", typ, encodeString(str), newline)
 	if t := r.tunnelRelay.Load(); t != nil && r.tunnelConnected.Load() {
 		t.serverBufChan <- buffer
 	} else {
@@ -349,7 +349,7 @@ func (r *TrzszRelay) sendStringToServer(typ string, str string) error {
 	if r.trigger.winServer && (!r.tunnelConnected.Load() || typ == "ACT") {
 		newline = "!\n"
 	}
-	buffer := []byte(fmt.Sprintf("#%s:%s%s", typ, encodeString(str), newline))
+	buffer := fmt.Appendf(nil, "#%s:%s%s", typ, encodeString(str), newline)
 	if t := r.tunnelRelay.Load(); t != nil && r.tunnelConnected.Load() {
 		t.clientBufChan <- buffer
 	} else {
@@ -471,7 +471,7 @@ func (r *TrzszRelay) resetToStandby(status int32) {
 		return
 	}
 	if listener := r.tunnelListener.Load(); listener != nil {
-		(*listener).Close()
+		_ = (*listener).Close()
 		r.tunnelListener.Store(nil)
 	}
 	if t := r.tunnelRelay.Load(); t != nil {

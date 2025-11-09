@@ -49,13 +49,11 @@ func TestBufferReadLine(t *testing.T) {
 
 	// read line before add buffer
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		beginTime := time.Now()
 		assertReadSucc([]byte("test message"))
 		assert.GreaterOrEqual(time.Since(beginTime), 100*time.Millisecond)
-		wg.Done()
-	}()
+	})
 	time.Sleep(100 * time.Millisecond)
 	tb.addBuffer([]byte("test message\n"))
 	wg.Wait()
@@ -127,7 +125,7 @@ func TestBufferReadBinary(t *testing.T) {
 
 	// read binary after add buffer
 	data := make([]byte, 300)
-	for i := 0; i < len(data); i++ {
+	for i := range data {
 		data[i] = byte(i & 0xff)
 	}
 	tb.addBuffer(data)
@@ -136,14 +134,12 @@ func TestBufferReadBinary(t *testing.T) {
 
 	// read binary before add buffer
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		beginTime := time.Now()
 		assertReadSucc(100, data[:100])
 		assertReadSucc(200, data[100:])
 		assert.GreaterOrEqual(time.Since(beginTime), 100*time.Millisecond)
-		wg.Done()
-	}()
+	})
 	time.Sleep(100 * time.Millisecond)
 	tb.addBuffer(data)
 	wg.Wait()

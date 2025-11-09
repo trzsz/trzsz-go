@@ -50,7 +50,7 @@ func (s unicode) MarshalJSON() ([]byte, error) {
 		if c < 128 && strconv.IsPrint(c) {
 			b.WriteRune(c)
 		} else {
-			b.WriteString(fmt.Sprintf("\\u%04x", c))
+			fmt.Fprintf(b, "\\u%04x", c)
 		}
 	}
 	b.WriteByte('"')
@@ -73,7 +73,7 @@ func getEscapeChars(escapeAll bool) [][]unicode {
 	return escapeChars
 }
 
-func escapeCharsToTable(escapeChars []interface{}) (*escapeTable, error) {
+func escapeCharsToTable(escapeChars []any) (*escapeTable, error) {
 	table := &escapeTable{
 		totalCount:    len(escapeChars),
 		escapeCodes:   make([]*byte, 256),
@@ -81,7 +81,7 @@ func escapeCharsToTable(escapeChars []interface{}) (*escapeTable, error) {
 	}
 	encoder := charmap.ISO8859_1.NewEncoder()
 	for _, v := range escapeChars {
-		a, ok := v.([]interface{})
+		a, ok := v.([]any)
 		if !ok {
 			return nil, simpleTrzszError("Escape chars invalid: %v", v)
 		}
@@ -120,7 +120,7 @@ func escapeCharsToTable(escapeChars []interface{}) (*escapeTable, error) {
 }
 
 func (c *escapeTable) UnmarshalJSON(data []byte) error {
-	var codes []interface{}
+	var codes []any
 	if err := json.Unmarshal(data, &codes); err != nil {
 		return err
 	}

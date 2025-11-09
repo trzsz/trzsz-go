@@ -91,9 +91,7 @@ func (t *trzszTransfer) recvHashAck() (*prefixHashAck, error) {
 func (t *trzszTransfer) pipelineSendHash(ctx context.Context, cancel context.CancelCauseFunc,
 	stopNow *atomic.Bool, file *os.File, size int64) *sync.WaitGroup {
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		step := int64(0)
 		hasher := md5.New()
 		buffer := make([]byte, kPrefixHashStep)
@@ -122,7 +120,7 @@ func (t *trzszTransfer) pipelineSendHash(ctx context.Context, cancel context.Can
 			cancel(err)
 			return
 		}
-	}()
+	})
 	return &wg
 }
 
@@ -247,7 +245,7 @@ func (t *trzszTransfer) sendFileNameV3(srcFile *sourceFile, progress progressCal
 
 	size, err := t.sendPrefixHash(file, srcFile, tgtFile, progress)
 	if err != nil {
-		file.Close()
+		_ = file.Close()
 		return nil, "", err
 	}
 
@@ -340,7 +338,7 @@ func (t *trzszTransfer) recvFileNameV3(path string, progress progressCallback) (
 	if file != nil && file.getFile() != nil {
 		stat, err := file.getFile().Stat()
 		if err != nil {
-			file.Close()
+			_ = file.Close()
 			return nil, "", err
 		}
 		size = stat.Size()
@@ -350,14 +348,14 @@ func (t *trzszTransfer) recvFileNameV3(path string, progress progressCallback) (
 	target, err := tgtFile.marshalTargetFile()
 	if err != nil {
 		if file != nil {
-			file.Close()
+			_ = file.Close()
 		}
 		return nil, "", err
 	}
 
 	if err := t.sendString("SUCC", target); err != nil {
 		if file != nil {
-			file.Close()
+			_ = file.Close()
 		}
 		return nil, "", err
 	}
@@ -368,7 +366,7 @@ func (t *trzszTransfer) recvFileNameV3(path string, progress progressCallback) (
 
 	if err := t.recvPrefixHash(file, srcFile, tgtFile, progress); err != nil {
 		if file != nil {
-			file.Close()
+			_ = file.Close()
 		}
 		return nil, "", err
 	}

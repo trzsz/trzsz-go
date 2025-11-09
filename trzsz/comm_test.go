@@ -82,7 +82,7 @@ func (w *testWriter) assertLastBufferEqual(expected string) {
 func (w *testWriter) assertBase64DataEqual(expected []string) {
 	w.t.Helper()
 	require.Less(w.t, 0, len(expected)*3)
-	for i := 0; i < len(expected); i++ {
+	for i := range expected {
 		j := len(w.buffer) - (len(expected)-i)*3
 		w.assertBufferEqual(j, "#DATA:")
 		w.assertBufferEqual(j+1, expected[i])
@@ -93,7 +93,7 @@ func (w *testWriter) assertBase64DataEqual(expected []string) {
 func (w *testWriter) assertBinaryDataEqual(expected []string) {
 	w.t.Helper()
 	require.Less(w.t, 0, len(expected)*2)
-	for i := 0; i < len(expected); i++ {
+	for i := range expected {
 		j := len(w.buffer) - (len(expected)-i)*2
 		w.assertBufferEqual(j, fmt.Sprintf("#DATA:%d\n", len(expected[i])))
 		w.assertBufferEqual(j+1, expected[i])
@@ -211,7 +211,7 @@ func TestTrzszDetector(t *testing.T) {
 			assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", (i-1)*100+10), false, nil)
 		}
 	}
-	for i := 0; i < 49; i++ {
+	for i := range 49 {
 		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), false,
 			newTrigger110('R', int64(i*100+10), true, 0))
 		assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", i*100+10), false, nil)

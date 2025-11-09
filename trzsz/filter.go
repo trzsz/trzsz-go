@@ -193,7 +193,7 @@ func (filter *TrzszFilter) OneTimeUpload(filePaths []string) (<-chan error, erro
 		time.Sleep(10 * time.Second)
 		if filter.oneTimeUploadFiles != nil {
 			filter.oneTimeUploadResult <- fmt.Errorf(
-				"The upload did not start, possibly because trzsz is not installed or trz is not found on the server")
+				"the upload did not start, possibly because trzsz is not installed or trz is not found on the server")
 		}
 	}()
 	return filter.oneTimeUploadResult, nil
@@ -282,7 +282,7 @@ func (filter *TrzszFilter) readTrzszConfig() {
 	if err != nil {
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -326,7 +326,7 @@ func zenityErrorWithTips(err error) error {
 		return errUserCanceled
 	}
 	if isRunningOnMacOS() || isRunningOnWindows() || zenityExecutable() {
-		return fmt.Errorf("Open file dialog failed: %v", err)
+		return fmt.Errorf("open file dialog failed: %v", err)
 	}
 	tips := "'zenity' needs to be installed on your local Linux desktop."
 	if os.Getenv("WSL_DISTRO_NAME") == "" {
@@ -621,7 +621,7 @@ func (filter *TrzszFilter) transformPromptInput(promptPipe *io.PipeWriter, buf [
 					input = append(input, match[2]...)
 					continue
 				}
-				for _, hex := range strings.Fields(string(match[2])) {
+				for hex := range strings.FieldsSeq(string(match[2])) {
 					if strings.HasPrefix(hex, "0x") {
 						if char, err := strconv.ParseInt(hex[2:], 16, 32); err == nil {
 							input = append(input, byte(char))
@@ -670,17 +670,19 @@ func (filter *TrzszFilter) transformPromptInput(promptPipe *io.PipeWriter, buf [
 func (filter *TrzszFilter) confirmStopTransfer(transfer *trzszTransfer) {
 	pipeIn, pipeOut := io.Pipe()
 	if !filter.promptPipe.CompareAndSwap(nil, pipeOut) {
-		pipeIn.Close()
-		pipeOut.Close()
+		_ = pipeIn.Close()
+		_ = pipeOut.Close()
 		return
 	}
 
 	transfer.pauseTransferringFiles()
 
 	go func() {
-		defer pipeIn.Close()
-		defer pipeOut.Close()
-		defer filter.promptPipe.Store(nil)
+		defer func() {
+			filter.promptPipe.Store(nil)
+			_ = pipeOut.Close()
+			_ = pipeIn.Close()
+		}()
 
 		writer := &promptWriter{filter.trigger.tmuxPrefix, filter.clientOut}
 		if progress := filter.progress.Load(); progress != nil {
@@ -942,7 +944,7 @@ func (filter *TrzszFilter) detectOSC52(buf []byte) {
 			filter.osc52Sequence.Write(buf)
 			if filter.osc52Sequence.Len() > 100000 {
 				for _, b := range buf {
-					if !((b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '+' || b == '/' || b == '=') {
+					if (b < 'A' || b > 'Z') && (b < 'a' || b > 'z') && (b < '0' || b > '9') && b != '+' && b != '/' && b != '=' {
 						// something went wrong, just ignore it
 						filter.osc52Sequence = nil
 						return

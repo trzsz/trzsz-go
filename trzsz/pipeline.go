@@ -343,7 +343,7 @@ func (t *trzszTransfer) checkStopAndPause(typ string) error {
 			if err := t.checkStop(); err != nil {
 				return err
 			}
-			if err := t.writeAll([]byte(fmt.Sprintf("#%s:=%s", typ, t.transferConfig.Newline))); err != nil {
+			if err := t.writeAll(fmt.Appendf(nil, "#%s:=%s", typ, t.transferConfig.Newline)); err != nil {
 				return err
 			}
 			time.Sleep(100 * time.Millisecond)
@@ -414,7 +414,7 @@ func (t *trzszTransfer) sendDataV2(buffer []byte, length int, encoded bool) (*ti
 		return &beginTime, t.writeAll(buffer)
 	}
 	if t.transferConfig.Binary {
-		if err := t.writeAll([]byte(fmt.Sprintf("#DATA:%d%s", length, t.transferConfig.Newline))); err != nil {
+		if err := t.writeAll(fmt.Appendf(nil, "#DATA:%d%s", length, t.transferConfig.Newline)); err != nil {
 			return nil, err
 		}
 		return &beginTime, t.writeAll(buffer)
@@ -455,7 +455,7 @@ func (t *trzszTransfer) sendCompressFlag(file fileReader) (bool, error) {
 	}
 	compress, err := isCompressionProfitable(file)
 	if err != nil {
-		return false, fmt.Errorf("Compression detect failed: %v", err)
+		return false, fmt.Errorf("compression detect failed: %v", err)
 	}
 	return compress, t.sendLine("COMP", strconv.FormatBool(compress))
 }
@@ -511,10 +511,7 @@ func (t *trzszTransfer) pipelineReadData(ctx *pipelineContext, file fileReader) 
 		size := file.getSize()
 		bufSize := int64(32 * 1024)
 		for step < size && ctx.Err() == nil {
-			m := size - step
-			if m > bufSize {
-				m = bufSize
-			}
+			m := min(size-step, bufSize)
 			buffer := make([]byte, m)
 			n, err := file.Read(buffer)
 			if n > 0 {
@@ -684,10 +681,7 @@ func (t *trzszTransfer) pipelineSendData(ctx *pipelineContext, sendDataChan <-ch
 			// split and send
 			for data.index < len(data.data) {
 				left := len(data.data) - data.index
-				bufSize := int(t.bufferSize.Load())
-				if bufSize > left {
-					bufSize = left
-				}
+				bufSize := min(int(t.bufferSize.Load()), left)
 				nextIdx := data.index + bufSize
 				if err := deliver(data.data[data.index:nextIdx], bufSize, false); err != nil {
 					ctx.cancel(err)
@@ -751,10 +745,7 @@ func (t *trzszTransfer) pipelineRecvAck(ctx *pipelineContext, size int64, ackCha
 						t.bufInitWG.Done()
 					}
 					if chunkTime >= 2*time.Second && length <= bufSize {
-						bufSize = bufSize / int64(chunkTime/time.Second)
-						if bufSize < 1024 {
-							bufSize = 1024
-						}
+						bufSize = max(bufSize/int64(chunkTime/time.Second), 1024)
 						t.bufferSize.Store(bufSize)
 					}
 				}
@@ -779,16 +770,14 @@ func (t *trzszTransfer) pipelineRecvAck(ctx *pipelineContext, size int64, ackCha
 func (t *trzszTransfer) pipelineShowProgress(ctx *pipelineContext, progress progressCallback,
 	progressChan <-chan int64) *sync.WaitGroup {
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for step := range progressChan {
 			progress.onStep(step)
 			if ctx.Err() != nil {
 				return
 			}
 		}
-	}()
+	})
 	return &wg
 }
 
@@ -867,7 +856,7 @@ func (t *trzszTransfer) pipelineSendAck(ctx *pipelineContext, size int64, ackCha
 				return
 			}
 			step := t.savedSteps.Load()
-			if err := t.writeAll([]byte(fmt.Sprintf("#SUCC:%d/%d%s", length, step, t.transferConfig.Newline))); err != nil {
+			if err := t.writeAll(fmt.Appendf(nil, "#SUCC:%d/%d%s", length, step, t.transferConfig.Newline)); err != nil {
 				ctx.cancel(err)
 				return
 			}
@@ -1050,7 +1039,7 @@ func (t *trzszTransfer) pipelineSaveData(ctx *pipelineContext, file fileWriter, 
 }
 
 func (t *trzszTransfer) recvFileDataV2(file fileWriter, size int64, progress progressCallback) ([]byte, error) {
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	compress, err := t.recvCompressFlag(size)
 	if err != nil {
