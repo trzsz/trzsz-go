@@ -20,9 +20,12 @@ builds:
       - arm
       - arm64
       - loong64
+      - mipsle
     goarm:
       - "6"
       - "7"
+    gomips:
+      - softfloat
     ignore:
       - goos: windows
         goarch: arm
@@ -55,9 +58,12 @@ builds:
       - arm
       - arm64
       - loong64
+      - mipsle
     goarm:
       - "6"
       - "7"
+    gomips:
+      - softfloat
     ignore:
       - goos: windows
         goarch: arm
@@ -90,9 +96,12 @@ builds:
       - arm
       - arm64
       - loong64
+      - mipsle
     goarm:
       - "6"
       - "7"
+    gomips:
+      - softfloat
     ignore:
       - goos: windows
         goarch: arm
