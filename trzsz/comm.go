@@ -45,6 +45,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chzyer/readline"
 	"github.com/klauspost/compress/zstd"
 	"golang.org/x/term"
 )
@@ -1009,6 +1010,9 @@ type promptWriter struct {
 }
 
 func (w *promptWriter) Write(p []byte) (int, error) {
+	if len(p) == 1 && p[0] == readline.CharBell { // no bell ringing
+		return 1, nil
+	}
 	if w.prefix == "" {
 		return w.writer.Write(p)
 	}

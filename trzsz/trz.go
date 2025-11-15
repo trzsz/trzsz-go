@@ -176,7 +176,7 @@ func TrzMain() int {
 	if args.Directory {
 		mode = "D"
 	}
-	_, _ = fmt.Fprintf(os.Stdout, "\x1b7\x07::TRZSZ:TRANSFER:%s:%s:%013d:%d\r\n", mode, kTrzszVersion, uniqueID, port)
+	_, _ = fmt.Fprintf(os.Stdout, "\x1b7::TRZSZ:TRANSFER:%s:%s:%013d:%d\r\n", mode, kTrzszVersion, uniqueID, port)
 	_ = os.Stdout.Sync()
 
 	var state *term.State

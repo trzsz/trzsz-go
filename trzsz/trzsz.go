@@ -67,6 +67,7 @@ func printHelp() {
 func parseTrzszArgs() *trzszArgs {
 	args := &trzszArgs{}
 	var i int
+out:
 	for i = 1; i < len(os.Args); i++ {
 		switch os.Args[i] {
 		case "-h", "--help":
@@ -85,6 +86,8 @@ func parseTrzszArgs() *trzszArgs {
 			args.Zmodem = true
 		case "-o", "--osc52":
 			args.OSC52 = true
+		default:
+			break out
 		}
 	}
 	if i >= len(os.Args) {

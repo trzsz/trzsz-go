@@ -196,6 +196,21 @@ func TestTrzszDetector(t *testing.T) {
 	assertDetectTrzsz("XYX\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:7890EFG\r\n", false,
 		newTrigger100('S', "1", true, 1337))
 
+	assertDetectTrzsz("\x1b7::TRZSZ:TRANSFER:"+"S:1.0.0:1", false,
+		newTrigger100('S', "1", true, 0))
+	assertDetectTrzsz("\x1b7::TRZSZ:TRANSFER:"+"S:1.0.0:1:1234", false,
+		newTrigger100('S', "1", true, 1234))
+	assertDetectTrzsz("XYX\x1b7::TRZSZ:TRANSFER:"+"S:1.0.0:1:7890", false,
+		newTrigger100('S', "1", true, 7890))
+	assertDetectTrzsz("\x1b7::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:1234", false,
+		newTrigger100('S', "1", true, 1337))
+	assertDetectTrzsz("XYX\x1b7::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:7890", false,
+		newTrigger100('S', "1", true, 1337))
+	assertDetectTrzsz("\x1b7::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:1234ABC\n", false,
+		newTrigger100('S', "1", true, 1337))
+	assertDetectTrzsz("XYX\x1b7::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:7890EFG\r\n", false,
+		newTrigger100('S', "1", true, 1337))
+
 	// repeated trigger
 	uniqueID := time.Now().UnixMilli() % 10e10
 	newTrigger110 := func(mode byte, uid int64, win bool, port int) *trzszTrigger {
@@ -236,6 +251,18 @@ func TestTrzszDetector(t *testing.T) {
 	assertDetectTrzsz("%extended-output %0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", true,
 		newTriggerTMUX("%extended-output %0 0 : ", 1337))
 
+	assertDetectTrzsz("%output %1 \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
+	assertDetectTrzsz("%output %23 \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
+	assertDetectTrzsz("%extended-output %0 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
+	assertDetectTrzsz("%extended-output %10 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
+
+	assertDetectTrzsz("%output %1 \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", false, nil)
+	assertDetectTrzsz("%extended-output %0 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", false, nil)
+	assertDetectTrzsz("%output %1 \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", true,
+		newTriggerTMUX("%output %1 ", 1337))
+	assertDetectTrzsz("%extended-output %0 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", true,
+		newTriggerTMUX("%extended-output %0 0 : ", 1337))
+
 	tmuxTrigger := newTriggerTMUX("", 0)
 	assertDetectTrzsz("%output %x \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
 	assertDetectTrzsz("%output 1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
@@ -248,12 +275,24 @@ func TestTrzszDetector(t *testing.T) {
 	assertDetectTrzsz("%extended-output 0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
 	assertDetectTrzsz("%extended-output % 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
 	assertDetectTrzsz("%extended-output %0 0 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+
+	assertDetectTrzsz("%output %x \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("%output 1 \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("%output % \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("output %1 \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+
+	assertDetectTrzsz("%extended-output %a 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("%extended-output %0 b : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("extended-output %0 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("%extended-output 0 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("%extended-output % 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("%extended-output %0 0 \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
 }
 
 func TestRelayDetector(t *testing.T) {
 	assert := assert.New(t)
 	detector := newTrzszDetector(true, true)
-	prefix := "\x1b7\x07::TRZSZ:TRANSFER:R:1.0.0"
+	prefix := "\x1b7::TRZSZ:TRANSFER:R:1.0.0"
 	assertRewriteEqual := func(output, expected string, trigger *trzszTrigger) {
 		t.Helper()
 		detector.uniqueIDMap = make(map[string]int) // ignore unique check

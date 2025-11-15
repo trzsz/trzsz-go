@@ -172,7 +172,7 @@ func TszMain() int {
 
 	listener, port := listenForTunnel()
 
-	_, _ = fmt.Fprintf(os.Stdout, "\x1b7\x07::TRZSZ:TRANSFER:S:%s:%013d:%d\r\n", kTrzszVersion, uniqueID, port)
+	_, _ = fmt.Fprintf(os.Stdout, "\x1b7::TRZSZ:TRANSFER:S:%s:%013d:%d\r\n", kTrzszVersion, uniqueID, port)
 	_ = os.Stdout.Sync()
 
 	var state *term.State
