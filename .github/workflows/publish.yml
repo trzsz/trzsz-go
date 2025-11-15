@@ -19,6 +19,9 @@ jobs:
           distribution: goreleaser
           version: "~> v1"
           args: release --clean --skip=publish
+      - name: Show Checksum
+        run: |
+          sha256sum dist/*.tar.gz dist/*.zip dist/*.rpm dist/*_checksums.txt
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
@@ -34,44 +37,3 @@ jobs:
           for filename in dist/trzsz*.rpm; do
             curl -F package=@"$filename" https://{$FURY_TOKEN}@push.fury.io/trzsz/
           done
-  compile-inno-setup:
-    name: Compile setup and publish
-    needs: release-and-publish
-    runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: inno_setup
-    steps:
-      - name: Checkout trzsz-go
-        uses: actions/checkout@v4
-      - name: Get trzsz-go version
-        id: trzsz-go-version
-        uses: actions/github-script@v7
-        with:
-          github-token: NO_NEED
-          result-encoding: string
-          script: return "${{ github.event.release.tag_name }}".substring(1)
-      - name: Install Inno Setup
-        run: |
-          curl --retry 10 --retry-all-errors -L -o installer.exe https://jrsoftware.org/download.php/is.exe
-          ./installer.exe /verysilent /allusers /dir=inst
-          sleep 60
-      - name: Download trzsz-go packages
-        env:
-          TRZSZ_VERSION: ${{ steps.trzsz-go-version.outputs.result }}
-          DOWNLOAD_URL: https://github.com/${{ github.event.repository.full_name }}/releases/download
-        run: |
-          curl -L -o i386.zip    ${{ env.DOWNLOAD_URL }}/v${{ env.TRZSZ_VERSION }}/trzsz_${{ env.TRZSZ_VERSION }}_windows_i386.zip    && unzip i386.zip
-          curl -L -o x86_64.zip  ${{ env.DOWNLOAD_URL }}/v${{ env.TRZSZ_VERSION }}/trzsz_${{ env.TRZSZ_VERSION }}_windows_x86_64.zip  && unzip x86_64.zip
-          curl -L -o aarch64.zip ${{ env.DOWNLOAD_URL }}/v${{ env.TRZSZ_VERSION }}/trzsz_${{ env.TRZSZ_VERSION }}_windows_aarch64.zip && unzip aarch64.zip
-      - name: Compile by Inno Setup
-        env:
-          TRZSZ_VERSION: ${{ steps.trzsz-go-version.outputs.result }}
-        run: |
-          ./inst/iscc trzsz_windows_i386.iss
-          ./inst/iscc trzsz_windows_x86_64.iss
-          ./inst/iscc trzsz_windows_aarch64.iss
-      - name: Upload Inno Setup Assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: inno_setup/Output/*.exe
