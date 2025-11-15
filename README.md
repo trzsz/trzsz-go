@@ -69,6 +69,17 @@ _Please check [https://trzsz.github.io](https://trzsz.github.io) for more inform
 
   </details>
 
+- Install with dnf on Linux
+
+  <details><summary><code>sudo dnf install trzsz</code></summary>
+
+  ```sh
+  sudo dnf copr enable @trzsz/trzsz
+  sudo dnf install trzsz
+  ```
+
+  </details>
+
 - Install with yay on ArchLinux
 
   <details><summary><code>yay -S trzsz</code></summary>

@@ -69,6 +69,17 @@ _有关 `trzsz ( trz / tsz )` 更详细的文档，请查看 [https://trzsz.gith
 
   </details>
 
+- Linux 可用 dnf 安装
+
+  <details><summary><code>sudo dnf install trzsz</code></summary>
+
+  ```sh
+  sudo dnf copr enable @trzsz/trzsz
+  sudo dnf install trzsz
+  ```
+
+  </details>
+
 - ArchLinux 可用 yay 安装
 
   <details><summary><code>yay -S trzsz</code></summary>
