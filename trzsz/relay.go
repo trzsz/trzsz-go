@@ -520,6 +520,8 @@ func (r *TrzszRelay) wrapInput() {
 				continue
 			}
 			break
+		} else if err != nil {
+			break
 		}
 	}
 }
@@ -570,7 +572,7 @@ func (r *TrzszRelay) wrapOutput() {
 
 			r.osStdoutChan <- buf
 		}
-		if err == io.EOF {
+		if err != nil {
 			break
 		}
 	}
@@ -607,7 +609,7 @@ func (t *tunnelRelay) wrapInput() {
 
 			t.clientBufChan <- buf
 		}
-		if err == io.EOF {
+		if err != nil {
 			for t.relay.Load() != nil { // wait for reset
 				time.Sleep(50 * time.Millisecond)
 			}
@@ -648,7 +650,7 @@ func (t *tunnelRelay) wrapOutput() {
 
 			t.serverBufChan <- buf
 		}
-		if err == io.EOF {
+		if err != nil {
 			for t.relay.Load() != nil { // wait for reset
 				time.Sleep(50 * time.Millisecond)
 			}

@@ -792,6 +792,7 @@ func (filter *TrzszFilter) sendInput(buf []byte, detectDragFile *atomic.Bool) {
 }
 
 func (filter *TrzszFilter) wrapInput() {
+	defer func() { _ = filter.serverIn.Close() }()
 	buffer := make([]byte, 32*1024)
 	var detectDragFile atomic.Bool
 	if filter.options.DetectDragFile {
@@ -813,13 +814,15 @@ func (filter *TrzszFilter) wrapInput() {
 				filter.sendInput([]byte{0x1A}, &detectDragFile) // ctrl + z
 				continue
 			}
-			_ = filter.serverIn.Close()
+			break
+		} else if err != nil {
 			break
 		}
 	}
 }
 
 func (filter *TrzszFilter) wrapOutput() {
+	defer func() { _ = filter.clientOut.Close() }()
 	const bufSize = 32 * 1024
 	buffer := make([]byte, bufSize)
 	detector := newTrzszDetector(false, false)
@@ -897,13 +900,8 @@ func (filter *TrzszFilter) wrapOutput() {
 
 			_ = writeAll(filter.clientOut, buf)
 		}
-		if err == io.EOF {
-			if filter.closed.Load() {
-				_ = filter.clientOut.Close()
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-			continue // ignore output EOF
+		if err != nil {
+			break
 		}
 	}
 }
