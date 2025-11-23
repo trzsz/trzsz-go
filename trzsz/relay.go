@@ -666,6 +666,10 @@ func (t *tunnelRelay) wrapOutput() {
 // │ Client │              │ TrzszRelay │              │ Server │
 // │        │◄─────────────┤            │◄─────────────┤        │
 // └────────┘   ClientOut  └────────────┘   ServerOut  └────────┘
+//
+// Note that if you pass os.Stdout directly as clientOut,
+// os.Stdout will be closed when serverOut is closed,
+// and you will no longer be able to use os.Stdout to output anything else.
 func NewTrzszRelay(clientIn io.Reader, clientOut io.WriteCloser,
 	serverIn io.WriteCloser, serverOut io.Reader, options TrzszOptions) *TrzszRelay {
 
@@ -676,6 +680,7 @@ func NewTrzszRelay(clientIn io.Reader, clientOut io.WriteCloser,
 
 	osStdinChan := make(chan []byte, 10)
 	go func() {
+		defer func() { _ = serverIn.Close() }()
 		for buffer := range osStdinChan {
 			if logger != nil {
 				logger.writeTraceLog(buffer, "tosvr")
@@ -686,6 +691,7 @@ func NewTrzszRelay(clientIn io.Reader, clientOut io.WriteCloser,
 
 	osStdoutChan := make(chan []byte, 10)
 	go func() {
+		defer func() { _ = clientOut.Close() }()
 		for buffer := range osStdoutChan {
 			if logger != nil {
 				logger.writeTraceLog(buffer, "stdout")
@@ -699,6 +705,7 @@ func NewTrzszRelay(clientIn io.Reader, clientOut io.WriteCloser,
 	if tmuxMode == tmuxNormalMode {
 		bypassTmuxChan = make(chan []byte, 10)
 		go func() {
+			defer func() { _ = bypassTmuxOut.Close() }()
 			for buffer := range bypassTmuxChan {
 				if logger != nil {
 					logger.writeTraceLog(buffer, "tocli")

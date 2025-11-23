@@ -107,7 +107,11 @@ type TrzszFilter struct {
 // │        │◄─────────────┤             │◄─────────────┤        │
 // └────────┘   ClientOut  └─────────────┘   ServerOut  └────────┘
 //
-// Specify the columns of the terminal in options.TerminalColumns.
+// Please specify the columns of the terminal in options.TerminalColumns.
+//
+// Note that if you pass os.Stdout directly as clientOut,
+// os.Stdout will be closed when serverOut is closed,
+// and you will no longer be able to use os.Stdout to output anything else.
 func NewTrzszFilter(clientIn io.Reader, clientOut io.WriteCloser,
 	serverIn io.WriteCloser, serverOut io.Reader, options TrzszOptions) *TrzszFilter {
 	filter := &TrzszFilter{
