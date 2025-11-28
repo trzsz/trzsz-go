@@ -159,6 +159,7 @@ nfpms:
     license: MIT
     formats:
       - rpm
+      - deb
     bindir: /usr/bin
     rpm:
       group: Unspecified

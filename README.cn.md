@@ -156,7 +156,25 @@ _有关 `trzsz ( trz / tsz )` 更详细的文档，请查看 [https://trzsz.gith
 
   </details>
 
-- 可从 [GitHub Releases](https://github.com/trzsz/trzsz-go/releases) 中下载，国内可从 [Gitee 发行版](https://gitee.com/trzsz/trzsz-go/releases) 中下载，解压并加到 `PATH` 环境变量中。
+- 可从 [GitHub Releases](https://github.com/trzsz/trzsz-go/releases) 中下载，国内可从 [Gitee 发行版](https://gitee.com/trzsz/trzsz-go/releases) 中下载，然后本地安装。
+
+  <details><summary><code>下载并本地安装</code></summary>
+
+  ```sh
+  sudo apt install /tmp/trzsz_*.deb
+
+  sudo dpkg -i /tmp/trzsz_*.deb
+
+  sudo dnf install /tmp/trzsz_*.rpm
+
+  sudo yum install /tmp/trzsz_*.rpm
+
+  sudo rpm -i /tmp/trzsz_*.rpm
+
+  tar zxvf trzsz_*.tar.gz && sudo cp trzsz_*/t* /usr/bin/
+  ```
+
+  </details>
 
 ## 使用方法
 

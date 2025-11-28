@@ -156,7 +156,25 @@ _Please check [https://trzsz.github.io](https://trzsz.github.io) for more inform
 
   </details>
 
-- Download from the [GitHub Releases](https://github.com/trzsz/trzsz-go/releases), unzip and add to `PATH` environment.
+- Download from the [GitHub Releases](https://github.com/trzsz/trzsz-go/releases) and install locally
+
+  <details><summary><code>download and install locally</code></summary>
+
+  ```sh
+  sudo apt install /tmp/trzsz_*.deb
+
+  sudo dpkg -i /tmp/trzsz_*.deb
+
+  sudo dnf install /tmp/trzsz_*.rpm
+
+  sudo yum install /tmp/trzsz_*.rpm
+
+  sudo rpm -i /tmp/trzsz_*.rpm
+
+  tar zxvf trzsz_*.tar.gz && sudo cp trzsz_*/t* /usr/bin/
+  ```
+
+  </details>
 
 ## Usage
 
