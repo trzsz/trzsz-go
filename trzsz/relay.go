@@ -516,7 +516,8 @@ func (r *TrzszRelay) wrapInput() {
 		}
 		if err == io.EOF {
 			if isRunningOnWindows() && !r.closed.Load() {
-				r.osStdinChan <- []byte{0x1A} // ctrl + z
+				r.osStdinChan <- []byte{0x1A}      // ctrl + z
+				time.Sleep(100 * time.Millisecond) // give it a break just in case of real EOF
 				continue
 			}
 			break

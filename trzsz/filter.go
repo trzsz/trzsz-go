@@ -816,6 +816,7 @@ func (filter *TrzszFilter) wrapInput() {
 		if err == io.EOF {
 			if isRunningOnWindows() && !filter.closed.Load() {
 				filter.sendInput([]byte{0x1A}, &detectDragFile) // ctrl + z
+				time.Sleep(100 * time.Millisecond)              // give it a break just in case of real EOF
 				continue
 			}
 			break

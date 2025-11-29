@@ -29,6 +29,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -37,10 +38,36 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+type safeConPty struct {
+	*conpty.ConPty
+	closed atomic.Bool
+	mutex  sync.Mutex
+}
+
+func (p *safeConPty) Close() error {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	if !p.closed.CompareAndSwap(false, true) {
+		// crash if close multiple times
+		return nil
+	}
+	return p.ConPty.Close()
+}
+
+func (p *safeConPty) Resize(width, height int) error {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	if p.closed.Load() {
+		// crash if resize after close
+		return nil
+	}
+	return p.ConPty.Resize(width, height)
+}
+
 type trzszPty struct {
 	stdin     io.WriteCloser
 	stdout    io.ReadCloser
-	cpty      *conpty.ConPty
+	spty      *safeConPty
 	width     int
 	height    int
 	closed    atomic.Bool
@@ -155,10 +182,11 @@ func spawn(name string, args ...string) (*trzszPty, error) {
 		return nil, err
 	}
 
+	spty := &safeConPty{ConPty: cpty}
 	return &trzszPty{
-		stdin:     cpty,
-		stdout:    cpty,
-		cpty:      cpty,
+		stdin:     spty,
+		stdout:    spty,
+		spty:      spty,
 		width:     width,
 		height:    height,
 		startTime: time.Now(),
@@ -179,7 +207,7 @@ func (t *trzszPty) OnResize(setTerminalColumns func(int32)) {
 			if t.width != width || t.height != height {
 				t.width = width
 				t.height = height
-				t.cpty.Resize(width, height)
+				t.spty.Resize(width, height)
 				if setTerminalColumns != nil {
 					setTerminalColumns(int32(width))
 				}
@@ -197,11 +225,11 @@ func (t *trzszPty) Close() {
 		return
 	}
 	t.closed.Store(true)
-	t.cpty.Close()
+	t.spty.Close()
 }
 
 func (t *trzszPty) Wait() {
-	code, _ := t.cpty.Wait(context.Background())
+	code, _ := t.spty.Wait(context.Background())
 	t.exitCode = &code
 }
 
