@@ -34,8 +34,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,7 +42,6 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/google/shlex"
 	"github.com/ncruces/zenity"
-	"github.com/trzsz/promptui"
 )
 
 // TrzszOptions specify the options to create a TrzszFilter.
@@ -73,7 +70,6 @@ type TrzszFilter struct {
 	transfer              atomic.Pointer[trzszTransfer]
 	zmodem                atomic.Pointer[zmodemTransfer]
 	progress              atomic.Pointer[textProgressBar]
-	promptPipe            atomic.Pointer[io.PipeWriter]
 	trigger               *trzszTrigger
 	dragging              atomic.Bool
 	dragHasDir            atomic.Bool
@@ -91,6 +87,7 @@ type TrzszFilter struct {
 	currentUploadCommand  atomic.Pointer[string]
 	tunnelConnector       atomic.Pointer[func(int) net.Conn]
 	redrawScreenFunc      atomic.Pointer[func()]
+	transferStateCallback atomic.Pointer[func(bool)]
 	osc52Sequence         *bytes.Buffer
 	progressColorPair     atomic.Pointer[string]
 	oneTimeUploadFiles    []string
@@ -129,7 +126,7 @@ func NewTrzszFilter(clientIn io.Reader, clientOut io.WriteCloser,
 	return filter
 }
 
-// SetTerminalColumns set the latest columns of the terminal.
+// SetTerminalColumns sets the latest columns of the terminal.
 func (filter *TrzszFilter) SetTerminalColumns(columns int32) {
 	filter.options.TerminalColumns = columns
 	if progress := filter.progress.Load(); progress != nil {
@@ -211,7 +208,7 @@ func (filter *TrzszFilter) ResetTerminal() {
 	}
 }
 
-// SetDefaultUploadPath set the default open path while choosing upload files.
+// SetDefaultUploadPath sets the default open path while choosing upload files.
 func (filter *TrzszFilter) SetDefaultUploadPath(path string) {
 	if path == "" {
 		filter.defaultUploadPath.Store(&path)
@@ -224,7 +221,7 @@ func (filter *TrzszFilter) SetDefaultUploadPath(path string) {
 	filter.defaultUploadPath.Store(&path)
 }
 
-// SetDefaultDownloadPath set the path to automatically save while downloading files.
+// SetDefaultDownloadPath sets the path to automatically save while downloading files.
 func (filter *TrzszFilter) SetDefaultDownloadPath(path string) {
 	if path == "" {
 		filter.defaultDownloadPath.Store(&path)
@@ -234,7 +231,7 @@ func (filter *TrzszFilter) SetDefaultDownloadPath(path string) {
 	filter.defaultDownloadPath.Store(&path)
 }
 
-// SetDragFileUploadCommand set the command to execute while dragging files to upload.
+// SetDragFileUploadCommand sets the command to execute while dragging files to upload.
 func (filter *TrzszFilter) SetDragFileUploadCommand(command string) {
 	filter.uploadCommandIsNotTrz.Store(false)
 	if command != "" {
@@ -249,12 +246,12 @@ func (filter *TrzszFilter) SetDragFileUploadCommand(command string) {
 	filter.dragFileUploadCommand.Store(&command)
 }
 
-// SetProgressColorPair set the color pair for the progress bar.
+// SetProgressColorPair sets the color pair for the progress bar.
 func (filter *TrzszFilter) SetProgressColorPair(colorPair string) {
 	filter.progressColorPair.Store(&colorPair)
 }
 
-// SetTunnelConnector set the connector for tunnel transferring.
+// SetTunnelConnector sets the connector for tunnel transferring.
 func (filter *TrzszFilter) SetTunnelConnector(connector func(int) net.Conn) {
 	if connector == nil {
 		filter.tunnelConnector.Store(nil)
@@ -263,13 +260,22 @@ func (filter *TrzszFilter) SetTunnelConnector(connector func(int) net.Conn) {
 	filter.tunnelConnector.Store(&connector)
 }
 
-// SetRedrawScreenFunc set the RedrawScreen function for transfer completed.
+// SetRedrawScreenFunc sets the RedrawScreen function for transfer completed.
 func (filter *TrzszFilter) SetRedrawScreenFunc(redrawScreenFunc func()) {
 	if redrawScreenFunc == nil {
 		filter.redrawScreenFunc.Store(nil)
 		return
 	}
 	filter.redrawScreenFunc.Store(&redrawScreenFunc)
+}
+
+// SetTransferStateCallback sets the callback for starting and ending the transfer.
+func (filter *TrzszFilter) SetTransferStateCallback(transferStateCallback func(transferring bool)) {
+	if transferStateCallback == nil {
+		filter.transferStateCallback.Store(nil)
+		return
+	}
+	filter.transferStateCallback.Store(&transferStateCallback)
 }
 
 // Close to let the filter gracefully exit.
@@ -442,10 +448,6 @@ func (filter *TrzszFilter) downloadFiles(transfer *trzszTransfer) error {
 		return err
 	}
 
-	if !filter.transfer.CompareAndSwap(nil, transfer) {
-		return simpleTrzszError("Swap transfer failed")
-	}
-
 	if err := transfer.sendAction(true, filter.trigger.version, filter.trigger.winServer); err != nil {
 		return err
 	}
@@ -478,10 +480,6 @@ func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) 
 		return err
 	}
 
-	if !filter.transfer.CompareAndSwap(nil, transfer) {
-		return simpleTrzszError("Swap transfer failed")
-	}
-
 	if err := transfer.sendAction(true, filter.trigger.version, filter.trigger.winServer); err != nil {
 		return err
 	}
@@ -507,13 +505,30 @@ func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) 
 }
 
 func (filter *TrzszFilter) handleTrzsz() {
-	transfer := newTransfer(filter.serverIn, nil, isWindowsEnvironment() || filter.trigger.winServer, filter.logger)
+	transfer := newTransfer(filter.serverIn, nil)
+	transfer.trzszFilter = filter
+	transfer.flushInTime = isWindowsEnvironment() || filter.trigger.winServer
+	if filter.trigger.tmuxPaneID != "" {
+		transfer.tmuxPaneID = []byte(filter.trigger.tmuxPaneID)
+		transfer.tmuxInputAckChan = make(chan bool, 100)
+	}
+
+	if !filter.transfer.CompareAndSwap(nil, transfer) {
+		return
+	}
+	if callback := filter.transferStateCallback.Load(); callback != nil {
+		go (*callback)(true)
+	}
+	defer func() {
+		filter.transfer.CompareAndSwap(transfer, nil)
+		if callback := filter.transferStateCallback.Load(); callback != nil {
+			go (*callback)(false)
+		}
+	}()
 
 	if connector := filter.tunnelConnector.Load(); connector != nil {
 		transfer.connectToTunnel(*connector, filter.trigger.uniqueID, filter.trigger.tunnelPort)
 	}
-
-	defer filter.transfer.CompareAndSwap(transfer, nil)
 
 	done := make(chan struct{}, 1)
 	go func() {
@@ -545,6 +560,7 @@ func (filter *TrzszFilter) handleTrzsz() {
 	case <-done:
 	case <-transfer.background():
 	}
+	transfer.tmuxAckWaitGroup.Wait()
 }
 
 func (filter *TrzszFilter) setOneTimeUploadResult(err error) {
@@ -614,140 +630,16 @@ func (filter *TrzszFilter) uploadDragFiles() {
 	filter.resetDragFiles()
 }
 
-var tmuxInputRegexp = regexp.MustCompile(`send -(l?)t %\d+ (.*?)[;\r]`)
-
-func (filter *TrzszFilter) transformPromptInput(promptPipe *io.PipeWriter, buf []byte) {
-	if len(buf) > 6 {
-		var input []byte
-		for _, match := range tmuxInputRegexp.FindAllSubmatch(buf, -1) {
-			if len(match) == 3 {
-				if len(match[1]) == 1 {
-					input = append(input, match[2]...)
-					continue
-				}
-				for hex := range strings.FieldsSeq(string(match[2])) {
-					if strings.HasPrefix(hex, "0x") {
-						if char, err := strconv.ParseInt(hex[2:], 16, 32); err == nil {
-							input = append(input, byte(char))
-						}
-					}
-				}
-			}
-		}
-		buf = input
-	}
-
-	const keyPrev = '\x10'
-	const keyNext = '\x0E'
-	const keyEnter = '\r'
-	moveNext := func() { _, _ = promptPipe.Write([]byte{keyNext}) }
-	movePrev := func() { _, _ = promptPipe.Write([]byte{keyPrev}) }
-	stop := func() { _, _ = promptPipe.Write([]byte{keyPrev, keyPrev, keyEnter}) }
-	quit := func() { _, _ = promptPipe.Write([]byte{keyNext, keyNext, keyEnter}) }
-	confirm := func() { _, _ = promptPipe.Write([]byte{keyEnter}) }
-
-	if len(buf) == 3 && buf[0] == '\x1b' && buf[1] == '[' {
-		switch buf[2] {
-		case '\x42': // ↓ to Next
-			moveNext()
-		case '\x41', '\x5A': // ↑ Shift-TAB to Prev
-			movePrev()
-		}
-	}
-
-	if len(buf) == 1 {
-		switch buf[0] {
-		case '\x03': // Ctrl-C to Stop
-			stop()
-		case 'q', 'Q', '\x11': // q Ctrl-C Ctrl-Q to Quit
-			quit()
-		case '\t', '\x0E', 'j', 'J', '\x0A': // Tab ↓ j Ctrl-J to Next
-			moveNext()
-		case '\x10', 'k', 'K', '\x0B': // ↑ k Ctrl-K to Prev
-			movePrev()
-		case '\r': // Enter
-			confirm()
-		}
-	}
-}
-
-func (filter *TrzszFilter) confirmStopTransfer(transfer *trzszTransfer) {
-	pipeIn, pipeOut := io.Pipe()
-	if !filter.promptPipe.CompareAndSwap(nil, pipeOut) {
-		_ = pipeIn.Close()
-		_ = pipeOut.Close()
-		return
-	}
-
-	transfer.pauseTransferringFiles()
-
-	go func() {
-		defer func() {
-			filter.promptPipe.Store(nil)
-			_ = pipeOut.Close()
-			_ = pipeIn.Close()
-		}()
-
-		writer := &promptWriter{filter.trigger.tmuxPrefix, filter.clientOut}
-		if progress := filter.progress.Load(); progress != nil {
-			progress.setPause(true)
-			defer func() {
-				progress.setTerminalColumns(filter.options.TerminalColumns)
-				progress.setPause(false)
-			}()
-			time.Sleep(50 * time.Millisecond)   // wait for the progress bar output
-			_, _ = writer.Write([]byte("\r\n")) // keep the progress bar displayed
-		}
-
-		prompt := promptui.Select{
-			Label: "Are you sure you want to stop transferring files",
-			Items: []string{
-				"Stop and keep transferred files",
-				"Stop and delete transferred files",
-				"Continue to transfer remaining files",
-			},
-			Stdin:  pipeIn,
-			Stdout: writer,
-			Templates: &promptui.SelectTemplates{
-				Help: `{{ "Use ↓ ↑ j k <tab> to navigate" | faint }}`,
-			},
-		}
-
-		idx, _, err := prompt.Run()
-
-		if transfer := filter.transfer.Load(); transfer != nil {
-			if err != nil || idx == 2 {
-				transfer.resumeTransferringFiles()
-			} else if idx == 0 {
-				transfer.stopTransferringFiles(false)
-			} else if idx == 1 {
-				transfer.stopTransferringFiles(true)
-			}
-		}
-	}()
-}
-
-var ctrlCRegexp = regexp.MustCompile(`^send -t %\d+ 0x3\r$`)
-
 func (filter *TrzszFilter) sendInput(buf []byte, detectDragFile *atomic.Bool) {
 	if filter.logger != nil {
 		filter.logger.writeTraceLog(buf, "stdin")
 	}
-	if promptPipe := filter.promptPipe.Load(); promptPipe != nil {
-		filter.transformPromptInput(promptPipe, buf)
-		return
-	}
+
 	if transfer := filter.transfer.Load(); transfer != nil {
-		if len(buf) == 1 && buf[0] == '\x03' || len(buf) > 14 && ctrlCRegexp.Match(buf) {
-			// `ctrl + c` to stop transferring files
-			if filter.trigger.version.compare(&trzszVersion{1, 1, 3}) > 0 {
-				filter.confirmStopTransfer(transfer)
-			} else {
-				transfer.stopTransferringFiles(false)
-			}
-		}
+		transfer.handleClientInput(buf)
 		return
 	}
+
 	if filter.options.EnableZmodem {
 		if zmodem := filter.zmodem.Load(); zmodem != nil {
 			if len(buf) == 1 && buf[0] == '\x03' {
@@ -758,6 +650,7 @@ func (filter *TrzszFilter) sendInput(buf []byte, detectDragFile *atomic.Bool) {
 			}
 		}
 	}
+
 	if detectDragFile.Load() {
 		filter.dragBufferMutex.Lock()
 		defer filter.dragBufferMutex.Unlock()
@@ -792,6 +685,7 @@ func (filter *TrzszFilter) sendInput(buf []byte, detectDragFile *atomic.Bool) {
 			filter.resetDragFiles()
 		}
 	}
+
 	_ = writeAll(filter.serverIn, buf)
 }
 
@@ -851,6 +745,9 @@ func (filter *TrzszFilter) wrapOutput() {
 						showCursor(filter.clientOut)
 						filter.hidingCursor = false
 						filter.zmodem.CompareAndSwap(zmodem, nil)
+						if callback := filter.transferStateCallback.Load(); callback != nil {
+							go (*callback)(false)
+						}
 					}
 				}
 			}
@@ -859,7 +756,7 @@ func (filter *TrzszFilter) wrapOutput() {
 			}
 
 			var trigger *trzszTrigger
-			buf, trigger = detector.detectTrzsz(buf, filter.tunnelConnector.Load() != nil)
+			buf, trigger = detector.detectTrzsz(buf, true)
 			if trigger != nil {
 				_ = writeAll(filter.clientOut, buf)
 				filter.trigger = trigger
@@ -883,6 +780,9 @@ func (filter *TrzszFilter) wrapOutput() {
 					_ = writeAll(filter.clientOut, buf)
 					zmodem.redrawScreen = filter.redrawScreenFunc.Load()
 					if filter.zmodem.CompareAndSwap(nil, zmodem) {
+						if callback := filter.transferStateCallback.Load(); callback != nil {
+							go (*callback)(true)
+						}
 						hideCursor(filter.clientOut)
 						filter.hidingCursor = true
 						go zmodem.handleZmodemEvent(filter.logger, filter.serverIn, filter.clientOut,

@@ -47,7 +47,7 @@ func newTransferWithEscape(t *testing.T, transfer *trzszTransfer, escapeAll bool
 	cfgStr, err := json.Marshal(cfgMap)
 	assert.Nil(t, err)
 	if transfer == nil {
-		transfer = newTransfer(nil, nil, false, nil)
+		transfer = newTransfer(nil, nil)
 	}
 	err = json.Unmarshal([]byte(cfgStr), &transfer.transferConfig)
 	assert.Nil(t, err)
@@ -271,7 +271,7 @@ func TestRecvDataReader(t *testing.T) {
 
 func TestSendDataWriter(t *testing.T) {
 	assert := assert.New(t)
-	transfer := newTransfer(nil, nil, false, nil)
+	transfer := newTransfer(nil, nil)
 	transfer.bufInitPhase.Store(false)
 	transfer.bufferSize.Store(4)
 	dataChan := make(chan trzszData, 3)
@@ -442,7 +442,7 @@ func TestZstdReaderWriter(t *testing.T) {
 
 func TestPipelineCalculateMD5(t *testing.T) {
 	assert := assert.New(t)
-	transfer := newTransfer(nil, nil, false, nil)
+	transfer := newTransfer(nil, nil)
 	sourceChan := make(chan []byte, 10)
 	digestChan := transfer.pipelineCalculateMD5(newPipelineContext(), sourceChan)
 	sourceChan <- []byte("123")
@@ -473,7 +473,7 @@ func TestPipelineReadData(t *testing.T) {
 
 	// read success
 	ctx := newPipelineContext()
-	transfer := newTransfer(nil, nil, false, nil)
+	transfer := newTransfer(nil, nil)
 	fileDataChan, md5SourceChan := transfer.pipelineReadData(ctx, &simpleFileReader{f1, int64(N*2 + 100)})
 
 	assertChannelFrontEqual(t, bytes.Repeat([]byte{'A'}, N), fileDataChan)
@@ -509,7 +509,7 @@ func TestPipelineReadData(t *testing.T) {
 func TestPipelineEncodeAndDecode(t *testing.T) {
 	assert := assert.New(t)
 
-	transfer := newTransfer(nil, nil, false, nil)
+	transfer := newTransfer(nil, nil)
 	transfer.bufInitPhase.Store(false)
 	transfer.bufferSize.Store(4)
 
@@ -555,7 +555,7 @@ func TestPipelineEscapeData(t *testing.T) {
 	assert := assert.New(t)
 
 	fileDataChan := make(chan []byte, 100)
-	transfer := newTransfer(nil, nil, false, nil)
+	transfer := newTransfer(nil, nil)
 	transfer.bufInitPhase.Store(false)
 	transfer.bufferSize.Store(4)
 	transfer.transferConfig.Binary = true
@@ -697,7 +697,7 @@ func TestPipelineUnescapeData(t *testing.T) {
 func TestPipelineSendData(t *testing.T) {
 	writer := newTestWriter(t)
 	sendDataChan := make(chan trzszData, 100)
-	transfer := newTransfer(writer, nil, false, nil)
+	transfer := newTransfer(writer, nil)
 	transfer.bufferSize.Store(3)
 	ctx := newPipelineContext()
 	ackChan := transfer.pipelineSendData(ctx, sendDataChan)

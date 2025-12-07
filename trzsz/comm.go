@@ -45,7 +45,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/chzyer/readline"
 	"github.com/klauspost/compress/zstd"
 	"golang.org/x/term"
 )
@@ -660,6 +659,7 @@ type trzszTrigger struct {
 	winServer  bool
 	tunnelPort int
 	tmuxPrefix string
+	tmuxPaneID string
 }
 
 type trzszDetector struct {
@@ -674,7 +674,7 @@ func newTrzszDetector(relay, tmux bool) *trzszDetector {
 
 var trzszRegexp = regexp.MustCompile(`::TRZSZ:TRANSFER:([SRD]):(\d+\.\d+\.\d+)(:\d+)?(:\d+)?`)
 var uniqueIDRegexp = regexp.MustCompile(`::TRZSZ:TRANSFER:[SRD]:\d+\.\d+\.\d+:(\d{13}\d*)`)
-var tmuxControlModeRegexp = regexp.MustCompile(`((%output %\d+ )|(%extended-output %\d+ \d+ : )).*::TRZSZ:TRANSFER:`)
+var tmuxControlModeRegexp = regexp.MustCompile(`((%output( %\d+ ))|(%extended-output( %\d+ )\d+ .*: )).*::TRZSZ:TRANSFER:`)
 
 func (detector *trzszDetector) rewriteTrzszTrigger(buf []byte) []byte {
 	for _, match := range uniqueIDRegexp.FindAllSubmatch(buf, -1) {
@@ -728,7 +728,7 @@ func (detector *trzszDetector) isRepeatedID(uniqueID string) bool {
 	return false
 }
 
-func (detector *trzszDetector) detectTrzsz(output []byte, tunnel bool) ([]byte, *trzszTrigger) {
+func (detector *trzszDetector) detectTrzsz(output []byte, supportTmuxCC bool) ([]byte, *trzszTrigger) {
 	if len(output) < 24 {
 		return output, nil
 	}
@@ -748,13 +748,18 @@ func (detector *trzszDetector) detectTrzsz(output []byte, tunnel bool) ([]byte, 
 		return output, nil
 	}
 
-	tmuxPrefix := ""
+	var tmuxPrefix, tmuxPaneID string
 	tmuxMatch := tmuxControlModeRegexp.FindSubmatch(output)
-	if len(tmuxMatch) > 1 {
-		if !tunnel || len(match) < 5 || match[4] == nil {
+	if len(tmuxMatch) > 5 {
+		if !supportTmuxCC {
 			return output, nil
 		}
 		tmuxPrefix = string(tmuxMatch[1])
+		tmuxPaneID = string(tmuxMatch[3])
+		if tmuxPaneID == "" {
+			tmuxPaneID = string(tmuxMatch[5])
+			tmuxPrefix = fmt.Sprintf("%%extended-output%s0 : ", tmuxPaneID)
+		}
 	}
 
 	if len(subOutput) > 40 {
@@ -805,6 +810,7 @@ func (detector *trzszDetector) detectTrzsz(output []byte, tunnel bool) ([]byte, 
 		winServer:  winServer,
 		tunnelPort: port,
 		tmuxPrefix: tmuxPrefix,
+		tmuxPaneID: tmuxPaneID,
 	}
 }
 
@@ -988,42 +994,6 @@ func listenForTunnel() (net.Listener, int) {
 		return nil, 0
 	}
 	return listener, listener.Addr().(*net.TCPAddr).Port
-}
-
-func encodeTmuxOutput(prefix string, output []byte) []byte {
-	buffer := bytes.NewBuffer(make([]byte, 0, len(prefix)+len(output)<<2+2))
-	buffer.Write([]byte(prefix))
-	for _, b := range output {
-		if b >= '0' && b <= '9' || b >= 'A' && b <= 'Z' || b >= 'a' && b <= 'z' {
-			buffer.WriteByte(b)
-			continue
-		}
-		fmt.Fprintf(buffer, "\\%03o", b)
-	}
-	buffer.Write([]byte("\r\n"))
-	return buffer.Bytes()
-}
-
-type promptWriter struct {
-	prefix string
-	writer io.Writer
-}
-
-func (w *promptWriter) Write(p []byte) (int, error) {
-	if len(p) == 1 && p[0] == readline.CharBell { // no bell ringing
-		return 1, nil
-	}
-	if w.prefix == "" {
-		return w.writer.Write(p)
-	}
-	if err := writeAll(w.writer, encodeTmuxOutput(w.prefix, p)); err != nil {
-		return 0, err
-	}
-	return len(p), nil
-}
-
-func (w *promptWriter) Close() error {
-	return nil
 }
 
 func forkToBackground() (bool, error) {

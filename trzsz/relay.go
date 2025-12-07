@@ -60,6 +60,7 @@ type TrzszRelay struct {
 	logger          *traceLogger
 	trigger         *trzszTrigger
 	tunnelConnector atomic.Pointer[func(int) net.Conn]
+	tStateCallback  atomic.Pointer[func(bool)]
 	tunnelRelayPort int
 	tunnelListener  atomic.Pointer[net.Listener]
 	tunnelRelay     atomic.Pointer[tunnelRelay]
@@ -76,13 +77,22 @@ type tunnelRelay struct {
 	serverBufChan chan []byte
 }
 
-// SetTunnelConnector set the connector for tunnel transferring.
+// SetTunnelConnector sets the connector for tunnel transferring.
 func (r *TrzszRelay) SetTunnelConnector(connector func(int) net.Conn) {
 	if connector == nil {
 		r.tunnelConnector.Store(nil)
 		return
 	}
 	r.tunnelConnector.Store(&connector)
+}
+
+// SetTransferStateCallback sets the callback for starting and ending the relay transfer.
+func (r *TrzszRelay) SetTransferStateCallback(transferStateCallback func(transferring bool)) {
+	if transferStateCallback == nil {
+		r.tStateCallback.Store(nil)
+		return
+	}
+	r.tStateCallback.Store(&transferStateCallback)
 }
 
 // Close to let the relay gracefully exit.
@@ -264,6 +274,9 @@ func (r *TrzszRelay) flushHandshakeBuffer(confirm bool) {
 
 	if confirm {
 		r.relayStatus.Store(kRelayTransferring)
+		if callback := r.tStateCallback.Load(); callback != nil {
+			go (*callback)(true)
+		}
 	} else {
 		r.resetToStandby(kRelayHandshaking)
 	}
@@ -480,6 +493,9 @@ func (r *TrzszRelay) resetToStandby(status int32) {
 	}
 	r.tunnelConnected.Store(false)
 	tmuxRefreshClient()
+	if callback := r.tStateCallback.Load(); callback != nil {
+		go (*callback)(false)
+	}
 }
 
 func (r *TrzszRelay) wrapInput() {
@@ -563,7 +579,7 @@ func (r *TrzszRelay) wrapOutput() {
 			}
 
 			var trigger *trzszTrigger
-			buf, trigger = detector.detectTrzsz(buf, r.tunnelConnector.Load() != nil)
+			buf, trigger = detector.detectTrzsz(buf, false)
 			if trigger != nil {
 				r.relayStatus.Store(kRelayHandshaking) // store status before send to client
 				r.trigger = trigger

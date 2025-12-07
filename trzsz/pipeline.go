@@ -735,7 +735,7 @@ func (t *trzszTransfer) pipelineRecvAck(ctx *pipelineContext, size int64, ackCha
 				bufSize := t.bufferSize.Load()
 
 				if length == bufSize && chunkTime < 500*time.Millisecond && bufSize < t.transferConfig.MaxBufSize {
-					t.bufferSize.Store(minInt64(bufSize*2, t.transferConfig.MaxBufSize))
+					t.bufferSize.Store(min(bufSize*2, t.transferConfig.MaxBufSize))
 					if t.bufInitPhase.Load() {
 						t.bufInitWG.Done()
 					}

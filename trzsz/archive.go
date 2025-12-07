@@ -132,7 +132,7 @@ func (f *archiveFileReader) Read(p []byte) (int, error) {
 			return n, nil
 		}
 		if f.file != nil {
-			m := minInt64(int64(len(p)), f.left)
+			m := min(int64(len(p)), f.left)
 			n, err := f.file.Read(p[:int(m)])
 			f.left -= int64(n)
 			if err == io.EOF {
@@ -195,7 +195,7 @@ type archiveFileWriter struct {
 
 func (f *archiveFileWriter) Write(p []byte) (int, error) {
 	if f.left > 0 && f.file != nil {
-		m := minInt64(f.left, int64(len(p)))
+		m := min(f.left, int64(len(p)))
 		n, err := f.file.Write(p[:int(m)])
 		f.left -= int64(n)
 		return n, err

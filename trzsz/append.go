@@ -178,7 +178,7 @@ func (t *trzszTransfer) sendPrefixHash(file *os.File, srcFile *sourceFile, tgtFi
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
 
-	size := minInt64(srcFile.Size, tgtFile.Size)
+	size := min(srcFile.Size, tgtFile.Size)
 	wg := t.pipelineSendHash(ctx, cancel, &stopNow, file, size)
 	matchChan := t.pipelineRecvHashAck(ctx, cancel, size, progress)
 

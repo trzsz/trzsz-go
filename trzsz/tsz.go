@@ -172,7 +172,7 @@ func TszMain() int {
 
 	listener, port := listenForTunnel()
 
-	_, _ = fmt.Fprintf(os.Stdout, "\x1b7::TRZSZ:TRANSFER:S:%s:%013d:%d\r\n", kTrzszVersion, uniqueID, port)
+	_, _ = fmt.Fprintf(os.Stdout, "\x1b[s::TRZSZ:TRANSFER:S:%s:%013d:%d\r\n", kTrzszVersion, uniqueID, port)
 	_ = os.Stdout.Sync()
 
 	var state *term.State
@@ -186,7 +186,7 @@ func TszMain() int {
 		defer func() { _ = term.Restore(fd, state) }()
 	}
 
-	transfer := newTransfer(realStdout, state, false, nil)
+	transfer := newTransfer(realStdout, state)
 	defer func() {
 		if err := recover(); err != nil {
 			transfer.serverError(newTrzszError(fmt.Sprintf("%v", err), "panic", true))

@@ -176,7 +176,7 @@ func TrzMain() int {
 	if args.Directory {
 		mode = "D"
 	}
-	_, _ = fmt.Fprintf(os.Stdout, "\x1b7::TRZSZ:TRANSFER:%s:%s:%013d:%d\r\n", mode, kTrzszVersion, uniqueID, port)
+	_, _ = fmt.Fprintf(os.Stdout, "\x1b[s::TRZSZ:TRANSFER:%s:%s:%013d:%d\r\n", mode, kTrzszVersion, uniqueID, port)
 	_ = os.Stdout.Sync()
 
 	var state *term.State
@@ -190,7 +190,7 @@ func TrzMain() int {
 		defer func() { _ = term.Restore(fd, state) }()
 	}
 
-	transfer := newTransfer(realStdout, state, false, nil)
+	transfer := newTransfer(realStdout, state)
 	defer func() {
 		if err := recover(); err != nil {
 			transfer.serverError(newTrzszError(fmt.Sprintf("%v", err), "panic", true))

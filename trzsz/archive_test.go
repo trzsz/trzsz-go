@@ -116,7 +116,7 @@ func TestArchiveReadAndWrite(t *testing.T) {
 	require.Nil(err)
 	assert.Equal(7, len(srcFiles))
 
-	transfer := newTransfer(nil, nil, false, nil)
+	transfer := newTransfer(nil, nil)
 	transfer.transferConfig.Overwrite = false
 	transfer.transferConfig.Protocol = kProtocolVersion4
 	defer transfer.deleteCreatedFiles()
@@ -178,7 +178,7 @@ func TestArchiveReadAndWrite(t *testing.T) {
 		}
 		n := 0
 		for n < buffer.Len() {
-			m := minInt(buffer.Len()-n, N)
+			m := min(buffer.Len()-n, N)
 			buf := buffer.Bytes()[n : m+n]
 			require.Nil(writeAll(writer, buf))
 			n += m

@@ -104,50 +104,35 @@ type trzszTransfer struct {
 	bufferSize       atomic.Int64
 	savedSteps       atomic.Int64
 	transferConfig   transferConfig
-	logger           *traceLogger
+	trzszFilter      *TrzszFilter
 	createdFiles     []string
 	tunnelConnected  bool
 	tunnelConn       atomic.Pointer[net.Conn]
 	tunnelInitWG     sync.WaitGroup
 	bgChan           chan struct{}
 	termReseted      atomic.Bool
+	tmuxPaneID       []byte
+	tmuxInputBuf     []byte
+	tmuxOutputBuf    []byte
+	tmuxInputMutex   sync.Mutex
+	tmuxInputAckChan chan bool
+	tmuxBeginBuffer  []byte
+	tmuxAckWaitGroup sync.WaitGroup
+	promptPipeWriter atomic.Pointer[io.PipeWriter]
 }
 
-func maxDuration(a, b time.Duration) time.Duration {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func minInt64(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func newTransfer(writer io.Writer, stdinState *term.State, flushInTime bool, logger *traceLogger) *trzszTransfer {
+func newTransfer(writer io.Writer, stdinState *term.State) *trzszTransfer {
 	t := &trzszTransfer{
 		buffer:       newTrzszBuffer(),
 		writer:       writer,
 		cleanTimeout: 100 * time.Millisecond,
 		stdinState:   stdinState,
 		fileNameMap:  make(map[int]string),
-		flushInTime:  flushInTime,
 		transferConfig: transferConfig{
 			Timeout:    20,
 			Newline:    "\n",
 			MaxBufSize: 10 * 1024 * 1024,
 		},
-		logger: logger,
 		bgChan: make(chan struct{}, 1),
 	}
 	t.bufInitPhase.Store(true)
@@ -235,6 +220,8 @@ func (t *trzszTransfer) connectToTunnel(connector func(int) net.Conn, uniqueID s
 			if conn != nil {
 				t.tunnelConn.Store(&conn)
 				wrapTransferInput(t, conn, true)
+				t.writer = conn
+				t.tunnelConnected = true
 			}
 		case <-time.After(time.Second):
 			timeout = true
@@ -261,16 +248,25 @@ func (t *trzszTransfer) switchToBackground() {
 	}()
 }
 
-func (t *trzszTransfer) addReceivedData(buf []byte, tunnel bool) {
-	if t.tunnelConnected && !tunnel {
-		if t.logger != nil {
-			t.logger.writeTraceLog(buf, "ignout")
-		}
+func (t *trzszTransfer) writeTraceLog(buf []byte, typ string) {
+	if t.trzszFilter == nil || t.trzszFilter.logger == nil {
 		return
 	}
-	if t.logger != nil {
-		t.logger.writeTraceLog(buf, "rcvbuf")
+	t.trzszFilter.logger.writeTraceLog(buf, typ)
+}
+
+func (t *trzszTransfer) addReceivedData(buf []byte, tunnel bool) {
+	if len(t.tmuxPaneID) > 0 && !tunnel {
+		t.handleTmuxOutput(buf)
+		return
 	}
+
+	if t.tunnelConnected && !tunnel {
+		t.writeTraceLog(buf, "ignout")
+		return
+	}
+
+	t.writeTraceLog(buf, "rcvbuf")
 	if !t.stopped.Load() {
 		t.buffer.addBuffer(buf)
 	}
@@ -296,7 +292,7 @@ func (t *trzszTransfer) stopTransferringFiles(stopAndDelete bool) {
 		if beginTime > 0 {
 			waitTime -= time.Since(time.UnixMilli(beginTime))
 		}
-		t.cleanTimeout = maxDuration(waitTime, 500*time.Millisecond)
+		t.cleanTimeout = max(waitTime, 500*time.Millisecond)
 	}
 }
 
@@ -348,9 +344,10 @@ func (t *trzszTransfer) cleanInput(timeoutDuration time.Duration) {
 }
 
 func (t *trzszTransfer) writeAll(buf []byte) error {
-	if t.logger != nil {
-		t.logger.writeTraceLog(buf, "tosvr")
+	if !t.tunnelConnected && len(t.tmuxPaneID) > 0 {
+		return t.tmuxccWriteAll(buf)
 	}
+	t.writeTraceLog(buf, "tosvr")
 	return writeAll(t.writer, buf)
 }
 
@@ -583,13 +580,14 @@ func (t *trzszTransfer) sendAction(confirm bool, serverVersion *trzszVersion, re
 	}
 
 	t.tunnelInitWG.Wait()
-	if conn := t.tunnelConn.Load(); conn != nil {
-		t.writer = *conn
-		t.tunnelConnected = true
+	if t.tunnelConnected {
 		action.TunnelConnected = true
 		action.SupportFork = true
 	}
 
+	if !t.tunnelConnected && len(t.tmuxPaneID) > 0 {
+		action.SupportBinary = false
+	}
 	if !t.tunnelConnected && (isWindowsEnvironment() || remoteIsWindows) {
 		action.Newline = "!\n"
 		action.SupportBinary = false
@@ -668,7 +666,7 @@ func (t *trzszTransfer) sendConfig(args *baseArgs, action *transferAction, escap
 		cfgMap["tmux_pane_width"] = tmuxPaneWidth
 	}
 	if action.Protocol > 0 {
-		cfgMap["protocol"] = minInt(action.Protocol, kProtocolVersion)
+		cfgMap["protocol"] = min(action.Protocol, kProtocolVersion)
 	}
 	if args.Compress != kCompressAuto {
 		cfgMap["compress"] = args.Compress
@@ -698,7 +696,8 @@ func (t *trzszTransfer) recvConfig() (*transferConfig, error) {
 }
 
 func (t *trzszTransfer) clientExit(msg string) error {
-	return t.sendString("EXIT", msg)
+	err := t.sendString("EXIT", msg)
+	return err
 }
 
 func (t *trzszTransfer) recvExit() (string, error) {
@@ -713,7 +712,8 @@ func (t *trzszTransfer) serverExit(msg string) {
 func (t *trzszTransfer) resetTerm(msg string, ignorable bool) {
 	if !t.termReseted.CompareAndSwap(false, true) {
 		if !ignorable {
-			_, _ = fmt.Fprintf(os.Stdout, "\x1b7\r\n%s\r\n\x1b8", msg)
+			_, _ = fmt.Fprintf(os.Stdout, "\x1b[s\x1b[H\x1b[42;30m%s\x1b[K\x1b[0m\x1b[u",
+				strings.ReplaceAll(strings.ReplaceAll(msg, "\r\n", "\n"), "\n", "\x1b[K\r\n"))
 		}
 		return
 	}
@@ -724,7 +724,7 @@ func (t *trzszTransfer) resetTerm(msg string, ignorable bool) {
 		msg = strings.ReplaceAll(msg, "\n", "\r\n")
 		_, _ = os.Stdout.WriteString("\x1b[H\x1b[2J\x1b[?1049l")
 	} else {
-		_, _ = os.Stdout.WriteString("\x1b8\x1b[0J")
+		_, _ = os.Stdout.WriteString("\x1b[u\x1b[0J")
 	}
 	_, _ = os.Stdout.WriteString(msg)
 	_, _ = os.Stdout.WriteString("\r\n")
@@ -749,6 +749,7 @@ func (t *trzszTransfer) deleteCreatedFiles() []string {
 
 func (t *trzszTransfer) clientError(err error) {
 	t.cleanInput(t.cleanTimeout)
+	t.tunnelInitWG.Wait()
 
 	trace := true
 	if e, ok := err.(*trzszError); ok {
@@ -903,7 +904,7 @@ func (t *trzszTransfer) sendFileData(file fileReader, progress progressCallback)
 		}
 		chunkTime := time.Since(beginTime)
 		if length == bufSize && chunkTime < 500*time.Millisecond && bufSize < t.transferConfig.MaxBufSize {
-			bufSize = minInt64(bufSize*2, t.transferConfig.MaxBufSize)
+			bufSize = min(bufSize*2, t.transferConfig.MaxBufSize)
 			buffer = make([]byte, bufSize)
 		} else if chunkTime >= 2*time.Second && bufSize > 1024 {
 			bufSize = 1024

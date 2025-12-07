@@ -157,9 +157,9 @@ func TestTrzszVersion(t *testing.T) {
 func TestTrzszDetector(t *testing.T) {
 	assert := assert.New(t)
 	detector := newTrzszDetector(false, false)
-	assertDetectTrzsz := func(output string, tunnel bool, trigger *trzszTrigger) {
+	assertDetectTrzsz := func(output string, supportTmuxCC bool, trigger *trzszTrigger) {
 		t.Helper()
-		buf, t := detector.detectTrzsz([]byte(output), tunnel)
+		buf, t := detector.detectTrzsz([]byte(output), supportTmuxCC)
 		assert.Equal(trigger, t)
 		if trigger == nil {
 			assert.Equal([]byte(output), buf)
@@ -175,7 +175,7 @@ func TestTrzszDetector(t *testing.T) {
 
 	// normal trzsz trigger
 	newTrigger100 := func(mode byte, uid string, win bool, port int) *trzszTrigger {
-		return &trzszTrigger{mode, &trzszVersion{1, 0, 0}, uid, win, port, ""}
+		return &trzszTrigger{mode, &trzszVersion{1, 0, 0}, uid, win, port, "", ""}
 	}
 	assertDetectTrzsz("::TRZSZ:TRANSFER:"+"R:1.0.0:0", false,
 		newTrigger100('R', "0", false, 0))
@@ -196,25 +196,25 @@ func TestTrzszDetector(t *testing.T) {
 	assertDetectTrzsz("XYX\x1b7\x07::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:7890EFG\r\n", false,
 		newTrigger100('S', "1", true, 1337))
 
-	assertDetectTrzsz("\x1b7::TRZSZ:TRANSFER:"+"S:1.0.0:1", false,
+	assertDetectTrzsz("\x1b[s::TRZSZ:TRANSFER:"+"S:1.0.0:1", false,
 		newTrigger100('S', "1", true, 0))
-	assertDetectTrzsz("\x1b7::TRZSZ:TRANSFER:"+"S:1.0.0:1:1234", false,
+	assertDetectTrzsz("\x1b[s::TRZSZ:TRANSFER:"+"S:1.0.0:1:1234", false,
 		newTrigger100('S', "1", true, 1234))
-	assertDetectTrzsz("XYX\x1b7::TRZSZ:TRANSFER:"+"S:1.0.0:1:7890", false,
+	assertDetectTrzsz("XYX\x1b[s::TRZSZ:TRANSFER:"+"S:1.0.0:1:7890", false,
 		newTrigger100('S', "1", true, 7890))
-	assertDetectTrzsz("\x1b7::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:1234", false,
+	assertDetectTrzsz("\x1b[s::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:1234", false,
 		newTrigger100('S', "1", true, 1337))
-	assertDetectTrzsz("XYX\x1b7::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:7890", false,
+	assertDetectTrzsz("XYX\x1b[s::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:7890", false,
 		newTrigger100('S', "1", true, 1337))
-	assertDetectTrzsz("\x1b7::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:1234ABC\n", false,
+	assertDetectTrzsz("\x1b[s::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:1234ABC\n", false,
 		newTrigger100('S', "1", true, 1337))
-	assertDetectTrzsz("XYX\x1b7::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:7890EFG\r\n", false,
+	assertDetectTrzsz("XYX\x1b[s::TRZSZ:TRANSFER:"+"S:1.0.0:1:1337:7890EFG\r\n", false,
 		newTrigger100('S', "1", true, 1337))
 
 	// repeated trigger
 	uniqueID := time.Now().UnixMilli() % 10e10
 	newTrigger110 := func(mode byte, uid int64, win bool, port int) *trzszTrigger {
-		return &trzszTrigger{mode, &trzszVersion{1, 1, 0}, fmt.Sprintf("%013d", uid), win, port, ""}
+		return &trzszTrigger{mode, &trzszVersion{1, 1, 0}, fmt.Sprintf("%013d", uid), win, port, "", ""}
 	}
 	assertDetectTrzsz(fmt.Sprintf("::TRZSZ:TRANSFER:R:1.1.0:%013d", uniqueID*100+10), false,
 		newTrigger110('R', uniqueID*100+10, true, 0))
@@ -236,8 +236,8 @@ func TestTrzszDetector(t *testing.T) {
 	}
 
 	// tmux control mode
-	newTriggerTMUX := func(prefix string, port int) *trzszTrigger {
-		return &trzszTrigger{'R', &trzszVersion{1, 0, 0}, "0", false, port, prefix}
+	newTriggerTMUX := func(prefix, paneID string, port int) *trzszTrigger {
+		return &trzszTrigger{'R', &trzszVersion{1, 0, 0}, "0", false, port, prefix, paneID}
 	}
 	assertDetectTrzsz("%output %1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
 	assertDetectTrzsz("%output %23 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
@@ -246,53 +246,55 @@ func TestTrzszDetector(t *testing.T) {
 
 	assertDetectTrzsz("%output %1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", false, nil)
 	assertDetectTrzsz("%extended-output %0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", false, nil)
-	assertDetectTrzsz("%output %1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", true,
-		newTriggerTMUX("%output %1 ", 1337))
-	assertDetectTrzsz("%extended-output %0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", true,
-		newTriggerTMUX("%extended-output %0 0 : ", 1337))
+	assertDetectTrzsz("%output %8 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", true,
+		newTriggerTMUX("%output %8 ", " %8 ", 1337))
+	assertDetectTrzsz("%extended-output %155 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", true,
+		newTriggerTMUX("%extended-output %155 0 : ", " %155 ", 1337))
 
-	assertDetectTrzsz("%output %1 \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
-	assertDetectTrzsz("%output %23 \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
-	assertDetectTrzsz("%extended-output %0 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
-	assertDetectTrzsz("%extended-output %10 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
+	assertDetectTrzsz("%output %1 \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
+	assertDetectTrzsz("%output %23 \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
+	assertDetectTrzsz("%extended-output %0 0 : \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
+	assertDetectTrzsz("%extended-output %10 0 : \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, nil)
 
-	assertDetectTrzsz("%output %1 \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", false, nil)
-	assertDetectTrzsz("%extended-output %0 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", false, nil)
-	assertDetectTrzsz("%output %1 \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", true,
-		newTriggerTMUX("%output %1 ", 1337))
-	assertDetectTrzsz("%extended-output %0 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", true,
-		newTriggerTMUX("%extended-output %0 0 : ", 1337))
+	assertDetectTrzsz("%output %1 \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", false, nil)
+	assertDetectTrzsz("%extended-output %0 0 : \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", false, nil)
+	assertDetectTrzsz("%output %188 \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", true,
+		newTriggerTMUX("%output %188 ", " %188 ", 1337))
+	assertDetectTrzsz("%extended-output %12 0 : \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", true,
+		newTriggerTMUX("%extended-output %12 0 : ", " %12 ", 1337))
+	assertDetectTrzsz("%extended-output %399 0 additional-params : \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0:1337ABC", true,
+		newTriggerTMUX("%extended-output %399 0 : ", " %399 ", 1337))
 
-	tmuxTrigger := newTriggerTMUX("", 0)
-	assertDetectTrzsz("%output %x \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("%output 1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("%output % \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("output %1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	notTmuxTrigger := newTriggerTMUX("", "", 0)
+	assertDetectTrzsz("%output %x \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("%output 1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("%output % \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("output %1 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
 
-	assertDetectTrzsz("%extended-output %a 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("%extended-output %0 b : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("extended-output %0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("%extended-output 0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("%extended-output % 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("%extended-output %0 0 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("%extended-output %a 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("%extended-output %0 b : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("extended-output %0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("%extended-output 0 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("%extended-output % 0 : \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("%extended-output %0 0 \x1b7\x07::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
 
-	assertDetectTrzsz("%output %x \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("%output 1 \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("%output % \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("output %1 \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("%output %x \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("%output 1 \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("%output % \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("output %1 \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
 
-	assertDetectTrzsz("%extended-output %a 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("%extended-output %0 b : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("extended-output %0 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("%extended-output 0 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("%extended-output % 0 : \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
-	assertDetectTrzsz("%extended-output %0 0 \x1b7::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, tmuxTrigger)
+	assertDetectTrzsz("%extended-output %a 0 : \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("%extended-output %0 b : \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("extended-output %0 0 : \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("%extended-output 0 0 : \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("%extended-output % 0 : \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
+	assertDetectTrzsz("%extended-output %0 0 \x1b[s::TRZSZ:TRANSFER:"+"R:1.0.0:0ABC", false, notTmuxTrigger)
 }
 
 func TestRelayDetector(t *testing.T) {
 	assert := assert.New(t)
 	detector := newTrzszDetector(true, true)
-	prefix := "\x1b7::TRZSZ:TRANSFER:R:1.0.0"
+	prefix := "\x1b[s::TRZSZ:TRANSFER:R:1.0.0"
 	assertRewriteEqual := func(output, expected string, trigger *trzszTrigger) {
 		t.Helper()
 		detector.uniqueIDMap = make(map[string]int) // ignore unique check
@@ -301,7 +303,7 @@ func TestRelayDetector(t *testing.T) {
 		assert.Equal(t, trigger)
 	}
 	newTrigger := func(uid string, win bool, port int) *trzszTrigger {
-		return &trzszTrigger{'R', &trzszVersion{1, 0, 0}, uid, win, port, ""}
+		return &trzszTrigger{'R', &trzszVersion{1, 0, 0}, uid, win, port, "", ""}
 	}
 
 	assertRewriteEqual(":0", ":0#R", newTrigger("0", false, 0))

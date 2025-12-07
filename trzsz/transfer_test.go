@@ -39,8 +39,8 @@ func TestTransferAction(t *testing.T) {
 
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	clientTransfer := newTransfer(writer, nil, false, nil)
-	serverTransfer := newTransfer(writer, nil, false, nil)
+	clientTransfer := newTransfer(writer, nil)
+	serverTransfer := newTransfer(writer, nil)
 
 	// compatible with older versions
 	serverTransfer.addReceivedData(
@@ -141,7 +141,7 @@ func TestTransferConfig(t *testing.T) {
 
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	transfer := newTransfer(writer, nil, false, nil)
+	transfer := newTransfer(writer, nil)
 
 	escapeChars := getEscapeChars(true)
 	err := transfer.sendConfig(&baseArgs{Quiet: true, Overwrite: true, Binary: true, Escape: true, Directory: true,
@@ -198,7 +198,7 @@ func TestTransferConfig(t *testing.T) {
 func TestStripTmuxStatusLine(t *testing.T) {
 	assert := assert.New(t)
 	writer := newTestWriter(t)
-	transfer := newTransfer(writer, nil, false, nil)
+	transfer := newTransfer(writer, nil)
 
 	P := "\x1bP=1s\x1b\\\x1b[?25l\x1b[?12l\x1b[?25h\x1b[5 q\x1bP=2s\x1b\\"
 	assert.Equal([]byte("ABC123"), transfer.stripTmuxStatusLine([]byte("ABC"+"123")))
