@@ -520,9 +520,10 @@ func (filter *TrzszFilter) handleTrzsz() {
 		go (*callback)(true)
 	}
 	defer func() {
-		filter.transfer.CompareAndSwap(transfer, nil)
-		if callback := filter.transferStateCallback.Load(); callback != nil {
-			go (*callback)(false)
+		if filter.transfer.CompareAndSwap(transfer, nil) {
+			if callback := filter.transferStateCallback.Load(); callback != nil {
+				go (*callback)(false)
+			}
 		}
 	}()
 
@@ -744,9 +745,10 @@ func (filter *TrzszFilter) wrapOutput() {
 					} else {
 						showCursor(filter.clientOut)
 						filter.hidingCursor = false
-						filter.zmodem.CompareAndSwap(zmodem, nil)
-						if callback := filter.transferStateCallback.Load(); callback != nil {
-							go (*callback)(false)
+						if filter.zmodem.CompareAndSwap(zmodem, nil) {
+							if callback := filter.transferStateCallback.Load(); callback != nil {
+								go (*callback)(false)
+							}
 						}
 					}
 				}

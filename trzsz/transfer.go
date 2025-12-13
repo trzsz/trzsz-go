@@ -64,6 +64,7 @@ type transferAction struct {
 	SupportDirectory bool   `json:"support_dir"`
 	TunnelConnected  bool   `json:"tunnel"`
 	SupportFork      bool   `json:"fork"`
+	TmuxIntegration  bool   `json:"tmuxcc"`
 }
 
 type transferConfig struct {
@@ -585,6 +586,9 @@ func (t *trzszTransfer) sendAction(confirm bool, serverVersion *trzszVersion, re
 		action.SupportFork = true
 	}
 
+	if len(t.tmuxPaneID) > 0 {
+		action.TmuxIntegration = true
+	}
 	if !t.tunnelConnected && len(t.tmuxPaneID) > 0 {
 		action.SupportBinary = false
 	}
@@ -664,6 +668,10 @@ func (t *trzszTransfer) sendConfig(args *baseArgs, action *transferAction, escap
 	}
 	if tmuxPaneWidth > 0 {
 		cfgMap["tmux_pane_width"] = tmuxPaneWidth
+	} else if action.TmuxIntegration {
+		if width, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && width > 0 {
+			cfgMap["tmux_pane_width"] = width
+		}
 	}
 	if action.Protocol > 0 {
 		cfgMap["protocol"] = min(action.Protocol, kProtocolVersion)
