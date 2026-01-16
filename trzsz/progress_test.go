@@ -27,16 +27,14 @@ package trzsz
 import (
 	"fmt"
 	"math"
-	"regexp"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-var colorRegexp = regexp.MustCompile(`\x1b\[\d+[mD]`)
 
 func getDisplayLength(str string) int {
 	length := 0
@@ -54,7 +52,7 @@ func getProgressLength(text string) int {
 	text = strings.ReplaceAll(text, "\r", "")
 	text = strings.ReplaceAll(text, "\u2588", "*")
 	text = strings.ReplaceAll(text, "\u2591", "*")
-	text = colorRegexp.ReplaceAllString(text, "")
+	text = ansi.Strip(text)
 	return getDisplayLength(text)
 }
 
@@ -336,7 +334,7 @@ func TestProgressWithoutBar(t *testing.T) {
 
 	assert.Equal(2, *callTimeNowCount)
 	writer.assertBufferCount(2)
-	assert.Equal("30%", writer.buffer[1])
+	assert.Equal("30%", ansi.Strip(writer.buffer[1]))
 }
 
 func TestProgressWithMultiFiles(t *testing.T) {

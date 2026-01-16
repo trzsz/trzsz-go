@@ -314,6 +314,7 @@ func (p *textProgressBar) showProgress() {
 		etaStr = fmt.Sprintf("%s ETA", convertTimeToString(math.Round(float64(p.fileSize-p.fileStep)/speed)))
 	}
 	progressText := p.getProgressText(percentage, total, speedStr, etaStr)
+	progressText = fmt.Sprintf("\x1b[?7l%s\x1b[?7h", progressText) // no auto wrap
 
 	if p.firstWrite {
 		p.firstWrite = false
