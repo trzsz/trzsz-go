@@ -71,10 +71,7 @@ type TrzszFilter struct {
 	zmodem                atomic.Pointer[zmodemTransfer]
 	progress              atomic.Pointer[textProgressBar]
 	trigger               *trzszTrigger
-	dragging              atomic.Bool
-	dragHasDir            atomic.Bool
-	dragMutex             sync.Mutex
-	dragFiles             []string
+	dragFiles             atomic.Pointer[[]string]
 	dragInputBuffer       *bytes.Buffer
 	dragBufferMutex       sync.Mutex
 	interrupting          atomic.Bool
@@ -167,10 +164,10 @@ func (filter *TrzszFilter) UploadFiles(filePaths []string) error {
 	if filter.IsTransferringFiles() {
 		return simpleTrzszError("Is transferring files now")
 	}
-	if filter.dragging.Load() {
+	if filter.dragFiles.Load() != nil {
 		return simpleTrzszError("Is dragging files to upload")
 	}
-	filter.addDragFiles(filePaths, hasDir, false)
+	go filter.uploadDragFiles(&dragFilesInfo{files: filePaths, hasDir: hasDir})
 	return nil
 }
 
@@ -385,9 +382,8 @@ func (filter *TrzszFilter) chooseUploadPaths(directory bool) ([]string, error) {
 		filter.oneTimeUploadFiles = nil
 		return files, nil
 	}
-	if filter.dragging.Load() {
-		files := filter.resetDragFiles()
-		return files, nil
+	if files := filter.dragFiles.Swap(nil); files != nil {
+		return *files, nil
 	}
 	options := []zenity.Option{
 		zenity.Title("Choose some files to send"),
@@ -573,47 +569,28 @@ func (filter *TrzszFilter) setOneTimeUploadResult(err error) {
 	filter.oneTimeUploadResult = nil
 }
 
-func (filter *TrzszFilter) resetDragFiles() []string {
-	if !filter.dragging.Load() {
-		return nil
-	}
-	filter.dragMutex.Lock()
-	defer filter.dragMutex.Unlock()
-	filter.dragging.Store(false)
-	filter.dragHasDir.Store(false)
-	dragFiles := filter.dragFiles
-	filter.dragFiles = nil
-	return dragFiles
-}
-
-func (filter *TrzszFilter) addDragFiles(dragFiles []string, hasDir bool, delay bool) {
-	filter.dragMutex.Lock()
-	defer filter.dragMutex.Unlock()
-	filter.dragging.Store(true)
-	if hasDir {
-		filter.dragHasDir.Store(true)
-	}
-	if filter.dragFiles == nil {
-		filter.dragFiles = dragFiles
-		go func() {
-			if delay {
-				time.Sleep(300 * time.Millisecond)
-			}
-			filter.uploadDragFiles()
-		}()
-	} else {
-		filter.dragFiles = append(filter.dragFiles, dragFiles...)
-	}
-}
-
-func (filter *TrzszFilter) uploadDragFiles() {
-	if !filter.dragging.Load() {
+func (filter *TrzszFilter) uploadDragFiles(dragInfo *dragFilesInfo) {
+	if !filter.dragFiles.CompareAndSwap(nil, &dragInfo.files) {
 		return
 	}
+
 	filter.interrupting.Store(true)
-	_ = writeAll(filter.serverIn, []byte{0x03})
+	if dragInfo.tmuxPaneID != "" {
+		if count := dragInfo.tmuxBlocks - 1; count > 0 {
+			now := time.Now().Unix()
+			ack := fmt.Appendf(nil, "%%begin %d 1 1\r\n%%end %d 1 1\r\n", now, now)
+			for range count {
+				_, _ = os.Stderr.Write(ack)
+			}
+		}
+		_ = writeAll(filter.serverIn, []byte(fmt.Sprintf("send -t %%%s 0x3\r", dragInfo.tmuxPaneID)))
+		time.Sleep(300 * time.Millisecond) // sleep a bit longer to avoid iTerm2 receiving %begin/%end
+	} else {
+		_ = writeAll(filter.serverIn, []byte{0x03})
+	}
 	time.Sleep(200 * time.Millisecond)
 	filter.interrupting.Store(false)
+
 	filter.skipUploadCommand.Store(true)
 	command := ""
 	if cmd := filter.dragFileUploadCommand.Load(); cmd != nil {
@@ -622,13 +599,30 @@ func (filter *TrzszFilter) uploadDragFiles() {
 	if command == "" {
 		command = "trz"
 	}
-	if filter.dragHasDir.Load() && !filter.uploadCommandIsNotTrz.Load() {
+	if dragInfo.hasDir && !filter.uploadCommandIsNotTrz.Load() {
 		command += " -d"
 	}
 	filter.currentUploadCommand.Store(&command)
-	_ = writeAll(filter.serverIn, []byte(command+"\r"))
+
+	command += "\r"
+	buffer := []byte(command)
+	if dragInfo.tmuxPaneID != "" {
+		var buf bytes.Buffer
+		buf.WriteString("send -t %")
+		buf.WriteString(dragInfo.tmuxPaneID)
+		buf.WriteByte(' ')
+		buf.Write(convertToHexStrings(buffer))
+		buf.WriteByte('\r')
+		buffer = buf.Bytes()
+	}
+
+	if filter.logger != nil {
+		filter.logger.writeTraceLog(buffer, "upload")
+	}
+	_ = writeAll(filter.serverIn, buffer)
+
 	time.Sleep(3 * time.Second)
-	filter.resetDragFiles()
+	filter.dragFiles.CompareAndSwap(&dragInfo.files, nil)
 }
 
 func (filter *TrzszFilter) sendInput(buf []byte, detectDragFile *atomic.Bool) {
@@ -659,31 +653,22 @@ func (filter *TrzszFilter) sendInput(buf []byte, detectDragFile *atomic.Bool) {
 			filter.dragInputBuffer.Write(buf)
 			return
 		}
-		dragFiles, hasDir, ignore, isWinPathPrefix := detectDragFiles(buf)
-		if dragFiles != nil {
-			filter.addDragFiles(dragFiles, hasDir, true)
-			return // don't sent the file paths to server
-		} else if isWinPathPrefix {
+		if dragInfo := detectDragFiles(buf); dragInfo.files != nil || dragInfo.prefix {
 			filter.dragInputBuffer = bytes.NewBuffer(nil)
 			filter.dragInputBuffer.Write(buf)
 			go func() {
-				time.Sleep(200 * time.Millisecond)
+				time.Sleep(300 * time.Millisecond)
 				filter.dragBufferMutex.Lock()
 				defer filter.dragBufferMutex.Unlock()
 				buffer := filter.dragInputBuffer.Bytes()
 				filter.dragInputBuffer = nil
-				dragFiles, hasDir, ignore, _ := detectDragFiles(buffer)
-				if dragFiles != nil {
-					filter.addDragFiles(dragFiles, hasDir, true)
+				if dragInfo := detectDragFiles(buffer); dragInfo.files != nil {
+					go filter.uploadDragFiles(&dragInfo)
 					return // don't sent the file paths to server
-				} else if !ignore {
-					filter.resetDragFiles()
 				}
 				_ = writeAll(filter.serverIn, buffer)
 			}()
 			return
-		} else if !ignore {
-			filter.resetDragFiles()
 		}
 	}
 

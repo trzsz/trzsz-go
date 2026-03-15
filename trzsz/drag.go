@@ -28,51 +28,91 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	"github.com/google/shlex"
 )
 
-func detectDragFiles(buf []byte) (dragFiles []string, hasDir bool, ignore bool, isWinPathPrefix bool) {
+type dragFilesInfo struct {
+	files      []string
+	hasDir     bool
+	prefix     bool
+	tmuxPaneID string
+	tmuxBlocks int
+}
+
+func detectDragFiles(buf []byte) (dragInfo dragFilesInfo) {
 	if len(buf) < 2 { // fast return for keystrokes
-		return nil, false, false, false
+		return
 	}
+
+	realInput, rawInput := buf, buf
+	defer func() {
+		if dragInfo.files != nil || dragInfo.prefix {
+			text, _ := clipboard.ReadAll()
+			if text == string(realInput) {
+				dragInfo.files, dragInfo.prefix = nil, false
+			}
+		}
+		if dragInfo.files != nil && dragInfo.tmuxPaneID != "" {
+			for _, b := range rawInput {
+				if b == ';' || b == '\r' {
+					dragInfo.tmuxBlocks++
+				}
+			}
+		}
+	}()
+
+	if buf[0] == 's' && len(buf) > 15 && slices.ContainsFunc(bytes.Split(buf, []byte("\r")), hasTmuxSendPrefix) { // tmux -CC
+		buf, dragInfo.tmuxPaneID = decodeTmuxInput(buf)
+		if len(buf) < 2 {
+			return
+		}
+		realInput = buf
+	}
+
 	if len(buf) > 5 && bytes.Contains(buf, []byte("\x1b[20")) {
 		buf = bytes.ReplaceAll(buf, []byte("\x1b[200~"), []byte(""))
 		buf = bytes.ReplaceAll(buf, []byte("\x1b[201~"), []byte(""))
 		if len(buf) == 0 {
-			return nil, false, true, false
+			return
 		}
+		realInput = buf
 	}
 
 	if buf[0] == '\x10' { // for old warp terminal
 		buf = buf[1:]
 		if len(buf) < 2 {
-			return nil, false, false, false
+			return
 		}
 	}
-	if buf[0] == '\x1b' && len(buf) > 4 && buf[1] == 'i' && buf[2] == '\x10' { // for new warp terminal on MacOS
+	if buf[0] == '\x1b' && len(buf) > 4 && buf[1] == 'i' && buf[2] == '\x10' { // for new warp terminal
 		buf = buf[3:]
 	}
 
 	if isRunningOnWindows() {
-		return detectDragFilesOnWindows(buf)
+		detectDragFilesOnWindows(buf, &dragInfo)
+		return
 	}
 
 	paths, err := shlex.Split(string(buf))
 	if err != nil {
-		return nil, false, false, false
+		return
 	}
-	hasDir = false
 	for _, path := range paths {
 		if len(path) < 2 || path[0] != '/' { // not absolute path
-			return nil, false, false, false
+			dragInfo.files = nil
+			return
 		}
-		if !detectFilePath(path, &dragFiles, &hasDir) {
-			return nil, false, false, false
+		if !detectFilePath(path, &dragInfo.files, &dragInfo.hasDir) {
+			dragInfo.files = nil
+			return
 		}
+		dragInfo.prefix = true
 	}
-	return dragFiles, hasDir, false, false
+	return
 }
 
 var detectFilePath = func(path string, dragFiles *[]string, hasDir *bool) bool {
@@ -92,57 +132,121 @@ var detectFilePath = func(path string, dragFiles *[]string, hasDir *bool) bool {
 	return false
 }
 
-func detectDragFilesOnWindows(buf []byte) (dragFiles []string, hasDir bool, ignore bool, isWinPathPrefix bool) {
+func hasTmuxSendPrefix(buf []byte) bool {
+	if !isRunningOnMacOS() {
+		return false
+	}
+
+	i := 0
+	n := len(buf)
+	match := func(s string) bool {
+		if n-i < len(s) {
+			return false
+		}
+		for j := 0; j < len(s); j++ {
+			if buf[i+j] != s[j] {
+				return false
+			}
+		}
+		i += len(s)
+		return true
+	}
+	skipNum := func() bool {
+		start := i
+		for i < n && buf[i] >= '0' && buf[i] <= '9' {
+			i++
+		}
+		return i > start
+	}
+
+	// send -lt %N /
+	if match("send -lt %") && skipNum() && match(" /") && !match("\r") {
+		return true
+	}
+
+	i = 0
+	// send -t %N 0x1b 0x5b;
+	if !match("send -t %") || !skipNum() || !match(" 0x1b 0x5b; ") {
+		return false
+	}
+	// send -lt %N 200;
+	if !match("send -lt %") || !skipNum() || !match(" 200; ") {
+		return false
+	}
+	// send -t %N 0x7e;
+	if !match("send -t %") || !skipNum() || !match(" 0x7e; ") {
+		return false
+	}
+	// send -lt %N /
+	if !match("send -lt %") || !skipNum() || !match(" /") || match("\r") {
+		return false
+	}
+
+	return true
+}
+
+func detectDragFilesOnWindows(buf []byte, dragInfo *dragFilesInfo) {
 	length := len(buf)
 	if length < 4 {
-		return nil, false, false, false
+		return
 	}
 
 	if (buf[0] == '\'' && buf[1] == '/' && buf[2] >= 'a' && buf[2] <= 'z' && buf[3] == '/') ||
 		(buf[0] == '/' && buf[1] >= 'a' && buf[1] <= 'z' && buf[2] == '/') {
-		return detectDragFilesOnMSYS(buf)
+		detectDragFilesOnMSYS(buf, dragInfo)
+		return
 	}
 
 	if (length > 13 && string(buf[:11]) == "'/cygdrive/" && buf[11] >= 'a' && buf[11] <= 'z' && buf[12] == '/') ||
 		(length > 12 && string(buf[:10]) == "/cygdrive/" && buf[10] >= 'a' && buf[10] <= 'z' && buf[11] == '/') {
-		return detectDragFilesOnCygwin(buf)
+		detectDragFilesOnCygwin(buf, dragInfo)
+		return
 	}
 
 	if buf[length-1] == '"' && buf[0] >= 'A' && buf[0] <= 'Z' && buf[1] == ':' && buf[2] == '\\' &&
 		bytes.IndexByte(buf[:length-1], '"') < 0 {
 		// Cmd & PowerShell may lost the first `"`, and supports one path only.
-		if detectFilePath(string(buf[:length-1]), &dragFiles, &hasDir) {
-			return dragFiles, hasDir, false, false
+		if detectFilePath(string(buf[:length-1]), &dragInfo.files, &dragInfo.hasDir) {
+			dragInfo.prefix = true
+			return
 		}
 	}
 
 	if length > 4 && buf[0] >= 'A' && buf[0] <= 'Z' && buf[1] == ':' && buf[2] == '\\' && buf[3] == '\\' {
 		paths, err := shlex.Split(string(buf))
 		if err != nil {
-			return nil, false, false, false
+			return
 		}
 		for _, path := range paths {
 			if len(path) < 4 || path[0] < 'A' || path[0] > 'Z' || path[1] != ':' || path[2] != '\\' { // not absolute path
-				return nil, false, false, false
+				dragInfo.files = nil
+				return
 			}
-			if !detectFilePath(path, &dragFiles, &hasDir) {
-				return nil, false, false, false
+			if !detectFilePath(path, &dragInfo.files, &dragInfo.hasDir) {
+				dragInfo.files = nil
+				return
 			}
+			dragInfo.prefix = true
 		}
-		return dragFiles, hasDir, false, false
+		return
 	}
 
 	for idx := 0; idx < length; {
 		path, inc, isPrefix := nextWinPath(buf[idx:])
 		if path == "" {
-			return nil, false, false, isPrefix
+			dragInfo.files = nil
+			dragInfo.prefix = dragInfo.prefix || isPrefix
+			return
 		}
-		if !detectFilePath(path, &dragFiles, &hasDir) {
-			return nil, false, false, isPrefix
+		if !detectFilePath(path, &dragInfo.files, &dragInfo.hasDir) {
+			dragInfo.files = nil
+			dragInfo.prefix = dragInfo.prefix || isPrefix
+			return
 		}
+		dragInfo.prefix = true
 		idx += inc
 	}
-	return dragFiles, hasDir, false, false
+	return
 }
 
 func nextWinPath(buf []byte) (string, int, bool) {
@@ -170,36 +274,42 @@ func nextWinPath(buf []byte) (string, int, bool) {
 	return "", 0, false
 }
 
-func detectDragFilesOnMSYS(buf []byte) (dragFiles []string, hasDir bool, ignore bool, isWinPathPrefix bool) {
+func detectDragFilesOnMSYS(buf []byte, dragInfo *dragFilesInfo) {
 	paths, err := shlex.Split(string(buf))
 	if err != nil || len(paths) < 1 {
-		return nil, false, false, false
+		return
 	}
 	for _, path := range paths {
 		if len(path) < 4 || path[0] != '/' || path[1] < 'a' || path[1] > 'z' || path[2] != '/' { // not absolute path
-			return nil, false, false, false
+			dragInfo.files = nil
+			return
 		}
-		if !detectFilePath(unixPathToWinPath(path), &dragFiles, &hasDir) {
-			return nil, false, false, false
+		if !detectFilePath(unixPathToWinPath(path), &dragInfo.files, &dragInfo.hasDir) {
+			dragInfo.files = nil
+			return
 		}
+		dragInfo.prefix = true
 	}
-	return dragFiles, hasDir, false, false
+	return
 }
 
-func detectDragFilesOnCygwin(buf []byte) (dragFiles []string, hasDir bool, ignore bool, isWinPathPrefix bool) {
+func detectDragFilesOnCygwin(buf []byte, dragInfo *dragFilesInfo) {
 	paths, err := shlex.Split(string(buf))
 	if err != nil || len(paths) < 1 {
-		return nil, false, false, false
+		return
 	}
 	for _, path := range paths {
 		if len(path) < 13 || path[:10] != "/cygdrive/" || path[10] < 'a' || path[10] > 'z' || path[11] != '/' { // not absolute path
-			return nil, false, false, false
+			dragInfo.files = nil
+			return
 		}
-		if !detectFilePath(unixPathToWinPath(path[9:]), &dragFiles, &hasDir) {
-			return nil, false, false, false
+		if !detectFilePath(unixPathToWinPath(path[9:]), &dragInfo.files, &dragInfo.hasDir) {
+			dragInfo.files = nil
+			return
 		}
+		dragInfo.prefix = true
 	}
-	return dragFiles, hasDir, false, false
+	return
 }
 
 func unixPathToWinPath(buf string) string {

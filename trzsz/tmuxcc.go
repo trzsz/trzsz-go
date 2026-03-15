@@ -45,6 +45,62 @@ func encodeTmuxOutput(prefix string, output []byte) []byte {
 	return buffer.Bytes()
 }
 
+func decodeTmuxInput(input []byte) ([]byte, string) {
+	var buf bytes.Buffer
+	var paneID []byte
+
+	start := 0
+	n := len(input)
+	for i := 0; i <= n; i++ {
+		if i < n && input[i] != ';' && input[i] != '\r' {
+			continue
+		}
+
+		cmd := bytes.TrimSpace(input[start:i])
+		start = i + 1
+
+		if len(cmd) < 13 {
+			continue
+		}
+
+		if !bytes.HasPrefix(cmd, []byte("send ")) {
+			continue
+		}
+
+		if bytes.HasPrefix(cmd[5:], []byte("-lt %")) {
+			pos := bytes.IndexByte(cmd[10:], ' ')
+			if pos < 0 {
+				continue
+			}
+			if paneID == nil {
+				paneID = cmd[10 : 10+pos]
+			}
+			buf.Write(cmd[11+pos:])
+		} else if bytes.HasPrefix(cmd[5:], []byte("-t %")) {
+			pos := bytes.IndexByte(cmd[9:], ' ')
+			if pos < 0 {
+				continue
+			}
+			if paneID == nil {
+				paneID = cmd[9 : 9+pos]
+			}
+			for hex := range bytes.FieldsSeq(cmd[10+pos:]) {
+				if bytes.HasPrefix(hex, []byte("0x")) {
+					if char, err := strconv.ParseUint(string(hex[2:]), 16, 8); err == nil {
+						buf.WriteByte(byte(char))
+					}
+				}
+			}
+		}
+
+		if i == n {
+			break
+		}
+	}
+
+	return buf.Bytes(), string(paneID)
+}
+
 func canSendAsLiteralCharacter(b byte) bool {
 	if b < 0x21 || b >= 0x7f {
 		return false
@@ -189,7 +245,7 @@ func (t *trzszTransfer) tmuxccClientCommand(cmd []byte, promptInput bool) []byte
 				} else {
 					for hex := range bytes.FieldsSeq(data) {
 						if bytes.HasPrefix(hex, []byte("0x")) {
-							if char, err := strconv.ParseInt(string(hex[2:]), 16, 32); err == nil {
+							if char, err := strconv.ParseUint(string(hex[2:]), 16, 8); err == nil {
 								input = append(input, byte(char))
 							}
 						}

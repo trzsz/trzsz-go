@@ -60,51 +60,47 @@ func setupTestRuntime(linux, macos, windows bool) func() {
 func assertHasDragFiles(t *testing.T, buf string, files []string) {
 	t.Helper()
 	assert := assert.New(t)
-	dragFiles, hasDir, ignore, isWinPathPrefix := detectDragFiles([]byte(buf))
-	assert.Equal(files, dragFiles)
-	assert.False(hasDir)
-	assert.False(ignore)
-	assert.False(isWinPathPrefix)
+	assert.Equal(dragFilesInfo{
+		files:  files,
+		prefix: true,
+	}, detectDragFiles([]byte(buf)))
 }
 
 func assertHasDragDirs(t *testing.T, buf string, files []string) {
 	t.Helper()
 	assert := assert.New(t)
-	dragFiles, hasDir, ignore, isWinPathPrefix := detectDragFiles([]byte(buf))
-	assert.Equal(files, dragFiles)
-	assert.True(hasDir)
-	assert.False(ignore)
-	assert.False(isWinPathPrefix)
+	assert.Equal(dragFilesInfo{
+		files:  files,
+		hasDir: true,
+		prefix: true,
+	}, detectDragFiles([]byte(buf)))
 }
 
-func assertNoDragFiles(t *testing.T, buf string) {
+func assertNoDragFiles(t *testing.T, buf string, prefix bool) {
 	t.Helper()
 	assert := assert.New(t)
-	dragFiles, hasDir, ignore, isWinPathPrefix := detectDragFiles([]byte(buf))
-	assert.Nil(dragFiles)
-	assert.False(hasDir)
-	assert.False(ignore)
-	assert.False(isWinPathPrefix)
-}
-
-func assertIgnoreDragFiles(t *testing.T, buf string) {
-	t.Helper()
-	assert := assert.New(t)
-	dragFiles, hasDir, ignore, isWinPathPrefix := detectDragFiles([]byte(buf))
-	assert.Nil(dragFiles)
-	assert.False(hasDir)
-	assert.True(ignore)
-	assert.False(isWinPathPrefix)
+	assert.Equal(dragFilesInfo{
+		prefix: prefix,
+	}, detectDragFiles([]byte(buf)))
 }
 
 func assertDragFilesPrefix(t *testing.T, buf string) {
 	t.Helper()
 	assert := assert.New(t)
-	dragFiles, hasDir, ignore, isWinPathPrefix := detectDragFiles([]byte(buf))
-	assert.Nil(dragFiles)
-	assert.False(hasDir)
-	assert.False(ignore)
-	assert.True(isWinPathPrefix)
+	assert.Equal(dragFilesInfo{
+		prefix: true,
+	}, detectDragFiles([]byte(buf)))
+}
+
+func assertTmuxDragFiles(t *testing.T, buf string, files []string, id string, count int) {
+	t.Helper()
+	assert := assert.New(t)
+	assert.Equal(dragFilesInfo{
+		files:      files,
+		prefix:     true,
+		tmuxPaneID: id,
+		tmuxBlocks: count,
+	}, detectDragFiles([]byte(buf)))
 }
 
 func TestDetectDragFilesOnLinux(t *testing.T) {
@@ -124,16 +120,13 @@ func TestDetectDragFilesOnLinux(t *testing.T) {
 
 	addMockFile("x", false)
 	addMockFile("xyz", true)
-	assertNoDragFiles(t, "x")
-	assertNoDragFiles(t, "xyz")
-	assertNoDragFiles(t, "/tmp/xyz ")
-	assertNoDragFiles(t, "/tmp/abc x ")
-	assertNoDragFiles(t, "/tmp/abc xyz ")
-	assertNoDragFiles(t, "/tmp/abc '/x ")
-	assertNoDragFiles(t, "/tmp/abc '/x'a ")
-
-	assertIgnoreDragFiles(t, "\x1b[200~\x1b[201~")
-	assertIgnoreDragFiles(t, "\x1b[200~\x1b[201~\x1b[200~\x1b[201~")
+	assertNoDragFiles(t, "x", false)
+	assertNoDragFiles(t, "xyz", false)
+	assertNoDragFiles(t, "/tmp/xyz ", false)
+	assertNoDragFiles(t, "/tmp/abc x ", true)
+	assertNoDragFiles(t, "/tmp/abc xyz ", true)
+	assertNoDragFiles(t, "/tmp/abc '/x ", false)
+	assertNoDragFiles(t, "/tmp/abc '/x'a ", true)
 }
 
 func TestDetectDragFilesOnMacOS(t *testing.T) {
@@ -154,17 +147,14 @@ func TestDetectDragFilesOnMacOS(t *testing.T) {
 
 	addMockFile("x", false)
 	addMockFile("xyz", true)
-	assertNoDragFiles(t, "x")
-	assertNoDragFiles(t, "xyz")
-	assertNoDragFiles(t, "/tmp/xyz ")
-	assertNoDragFiles(t, "/tmp/abc\\")
-	assertNoDragFiles(t, "/tmp/abc x ")
-	assertNoDragFiles(t, "/tmp/abc xyz ")
-	assertNoDragFiles(t, "/tmp/abc '/x ")
-	assertNoDragFiles(t, "/tmp/abc '/x'a ")
-
-	assertIgnoreDragFiles(t, "\x1b[200~\x1b[201~")
-	assertIgnoreDragFiles(t, "\x1b[200~\x1b[201~\x1b[200~\x1b[201~")
+	assertNoDragFiles(t, "x", false)
+	assertNoDragFiles(t, "xyz", false)
+	assertNoDragFiles(t, "/tmp/xyz ", false)
+	assertNoDragFiles(t, "/tmp/abc\\", false)
+	assertNoDragFiles(t, "/tmp/abc x ", true)
+	assertNoDragFiles(t, "/tmp/abc xyz ", true)
+	assertNoDragFiles(t, "/tmp/abc '/x ", false)
+	assertNoDragFiles(t, "/tmp/abc '/x'a ", true)
 
 	oriIsWarpTerminal := isWarpTerminal
 	isWarpTerminal = func() bool { return true }
@@ -172,11 +162,32 @@ func TestDetectDragFilesOnMacOS(t *testing.T) {
 	assertHasDragFiles(t, "\x10/tmp/abc ", []string{"/tmp/abc"})
 	assertHasDragFiles(t, "\x10/tmp/abc", []string{"/tmp/abc"})
 	assertHasDragFiles(t, "\x10/tmp/kkk\\ ", []string{"/tmp/kkk "})
-	assertNoDragFiles(t, "\x10/")
-	assertNoDragFiles(t, "\x10x")
+	assertNoDragFiles(t, "\x10/", false)
+	assertNoDragFiles(t, "\x10x", false)
 	assertHasDragFiles(t, "\x1bi\x10/tmp/abc ", []string{"/tmp/abc"})
 	assertHasDragFiles(t, "\x1bi\x10/tmp/abc", []string{"/tmp/abc"})
 	assertHasDragFiles(t, "\x1bi\x10/tmp/kkk\\ ", []string{"/tmp/kkk "})
+}
+
+func TestDetectDragFilesOnTmuxCC(t *testing.T) {
+	resetRuntime := setupTestRuntime(false, true, false)
+	defer resetRuntime()
+
+	addMockFile("/tmp/abc", false)
+	addMockFile("/tmp/12 3", false)
+	addMockFile("/tmp/kkk ", false)
+
+	assertTmuxDragFiles(t, "send -lt %26 /tmp/abc; send -t %26 0x20\r",
+		[]string{"/tmp/abc"}, "26", 2)
+
+	assertTmuxDragFiles(t, "select-window -t @92\rsend -lt %251 /tmp/abc; send -t %251 0x20; send -lt %251 /tmp/12; "+
+		"send -t %251 0x5c 0x20; send -lt %251 3; send -t %251 0x20\r",
+		[]string{"/tmp/abc", "/tmp/12 3"}, "251", 7)
+
+	assertTmuxDragFiles(t, "send -t %237 0x1b 0x5b; send -lt %237 200; send -t %237 0x7e; "+
+		"send -lt %237 /tmp/abc; send -t %237 0x20; send -lt %237 /tmp/kkk; send -t %237 "+
+		"0x5c 0x20 0x20 0x1b 0x5b; send -lt %237 201; send -t %237 0x7e\r",
+		[]string{"/tmp/abc", "/tmp/kkk "}, "237", 9)
 }
 
 func TestDetectDragFilesOnMSYS2(t *testing.T) {
@@ -196,16 +207,13 @@ func TestDetectDragFilesOnMSYS2(t *testing.T) {
 
 	addMockFile("x", false)
 	addMockFile("xyzz", true)
-	assertNoDragFiles(t, "x")
-	assertNoDragFiles(t, "xyzz")
-	assertNoDragFiles(t, "/c/xyzz ")
-	assertNoDragFiles(t, "/c/abc x ")
-	assertNoDragFiles(t, "/c/abc xyzz ")
-	assertNoDragFiles(t, "/c/abc '/x/x ")
-	assertNoDragFiles(t, "/c/abc '/x/x'a ")
-
-	assertIgnoreDragFiles(t, "\x1b[200~\x1b[201~")
-	assertIgnoreDragFiles(t, "\x1b[200~\x1b[201~\x1b[200~\x1b[201~")
+	assertNoDragFiles(t, "x", false)
+	assertNoDragFiles(t, "xyzz", false)
+	assertNoDragFiles(t, "/c/xyzz ", false)
+	assertNoDragFiles(t, "/c/abc x ", true)
+	assertNoDragFiles(t, "/c/abc xyzz ", true)
+	assertNoDragFiles(t, "/c/abc '/x/x ", false)
+	assertNoDragFiles(t, "/c/abc '/x/x'a ", true)
 }
 
 func TestDetectDragFilesOnCygwin(t *testing.T) {
@@ -225,16 +233,13 @@ func TestDetectDragFilesOnCygwin(t *testing.T) {
 
 	addMockFile("x", false)
 	addMockFile("xyz1234567890", true)
-	assertNoDragFiles(t, "x")
-	assertNoDragFiles(t, "xyz1234567890")
-	assertNoDragFiles(t, "/cygdrive/c/xyz1234567890 ")
-	assertNoDragFiles(t, "/cygdrive/c/abc x ")
-	assertNoDragFiles(t, "/cygdrive/c/abc xyz1234567890 ")
-	assertNoDragFiles(t, "/cygdrive/c/abc '/cygdrive/x/x ")
-	assertNoDragFiles(t, "/cygdrive/c/abc '/cygdrive/x/x'a ")
-
-	assertIgnoreDragFiles(t, "\x1b[200~\x1b[201~")
-	assertIgnoreDragFiles(t, "\x1b[200~\x1b[201~\x1b[200~\x1b[201~")
+	assertNoDragFiles(t, "x", false)
+	assertNoDragFiles(t, "xyz1234567890", false)
+	assertNoDragFiles(t, "/cygdrive/c/xyz1234567890 ", false)
+	assertNoDragFiles(t, "/cygdrive/c/abc x ", true)
+	assertNoDragFiles(t, "/cygdrive/c/abc xyz1234567890 ", true)
+	assertNoDragFiles(t, "/cygdrive/c/abc '/cygdrive/x/x ", false)
+	assertNoDragFiles(t, "/cygdrive/c/abc '/cygdrive/x/x'a ", true)
 }
 
 func TestDetectDragFilesOnWindows(t *testing.T) {
@@ -259,24 +264,21 @@ func TestDetectDragFilesOnWindows(t *testing.T) {
 
 	addMockFile("x", false)
 	addMockFile("xyz", true)
-	assertNoDragFiles(t, "x")
-	assertNoDragFiles(t, "xyz")
-	assertNoDragFiles(t, "C:\\xyz ")
-	assertNoDragFiles(t, "C:\\abc x ")
-	assertNoDragFiles(t, "C:\\abc xyz ")
-	assertNoDragFiles(t, "C:\\abc \"X:\\x\"a ")
+	assertNoDragFiles(t, "x", false)
+	assertNoDragFiles(t, "xyz", false)
+	assertNoDragFiles(t, "C:\\xyz ", false)
+	assertNoDragFiles(t, "C:\\abc x ", true)
+	assertNoDragFiles(t, "C:\\abc xyz ", true)
+	assertNoDragFiles(t, "C:\\abc \"X:\\x\"a ", true)
 
-	assertNoDragFiles(t, "C:\\\\xyz ")
-	assertNoDragFiles(t, "C:\\\\abc x ")
-	assertNoDragFiles(t, "C:\\\\abc xyz ")
-	assertNoDragFiles(t, "C:\\\\abc \"X:\\\\x ")
+	assertNoDragFiles(t, "C:\\\\xyz ", false)
+	assertNoDragFiles(t, "C:\\\\abc x ", true)
+	assertNoDragFiles(t, "C:\\\\abc xyz ", true)
+	assertNoDragFiles(t, "C:\\\\abc \"X:\\\\x ", false)
 
 	assertDragFilesPrefix(t, "C:\\a")
 	assertDragFilesPrefix(t, "C:\\abc D:\\1")
 	assertDragFilesPrefix(t, "C:\\abc \"D:\\12")
 	assertDragFilesPrefix(t, "C:\\abc \"D:\\12 ")
 	assertDragFilesPrefix(t, "C:\\abc \"D:\\12 3")
-
-	assertIgnoreDragFiles(t, "\x1b[200~\x1b[201~")
-	assertIgnoreDragFiles(t, "\x1b[200~\x1b[201~\x1b[200~\x1b[201~")
 }
