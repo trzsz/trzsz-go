@@ -25,6 +25,9 @@ SOFTWARE.
 package trzsz
 
 import (
+	"os"
+	"path/filepath"
+	"sync"
 	"syscall"
 
 	"golang.org/x/sys/windows"
@@ -44,3 +47,30 @@ var isWarpTerminal = func() bool {
 func getSysProcAttr() *syscall.SysProcAttr {
 	return nil
 }
+
+var getCygpath = func() func() string {
+	var cygpathOnce sync.Once
+	var cygpathPath string
+	return func() string {
+		cygpathOnce.Do(func() {
+			handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(os.Getppid()))
+			if err != nil {
+				return
+			}
+			defer windows.CloseHandle(handle)
+
+			var path [windows.MAX_PATH]uint16
+			var pathLen uint32 = uint32(len(path))
+			if err := windows.QueryFullProcessImageName(handle, 0, &path[0], &pathLen); err != nil {
+				return
+			}
+
+			dir := filepath.Dir(windows.UTF16ToString(path[:pathLen]))
+			cygpath := filepath.Join(dir, "cygpath.exe")
+			if _, err := os.Stat(cygpath); err == nil {
+				cygpathPath = cygpath
+			}
+		})
+		return cygpathPath
+	}
+}()

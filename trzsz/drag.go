@@ -28,6 +28,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 
@@ -187,6 +188,14 @@ func hasTmuxSendPrefix(buf []byte) bool {
 
 func detectDragFilesOnWindows(buf []byte, dragInfo *dragFilesInfo) {
 	length := len(buf)
+
+	if length > 1 && ((buf[0] == '\'' && buf[1] == '/') || buf[0] == '/') {
+		if cygpath := getCygpath(); cygpath != "" {
+			detectDragFilesWithCygpath(cygpath, buf, dragInfo)
+			return
+		}
+	}
+
 	if length < 4 {
 		return
 	}
@@ -314,4 +323,25 @@ func detectDragFilesOnCygwin(buf []byte, dragInfo *dragFilesInfo) {
 
 func unixPathToWinPath(buf string) string {
 	return fmt.Sprintf("%c:%s", buf[1], strings.ReplaceAll(string(buf[2:]), "/", "\\"))
+}
+
+func detectDragFilesWithCygpath(cygpath string, buf []byte, dragInfo *dragFilesInfo) {
+	paths, err := shlex.Split(string(buf))
+	if err != nil || len(paths) < 1 {
+		return
+	}
+	for _, path := range paths {
+		cmd := exec.Command(cygpath, "-w", path)
+		out, err := cmd.Output()
+		if err != nil {
+			dragInfo.files = nil
+			return
+		}
+		if !detectFilePath(strings.TrimSpace(string(out)), &dragInfo.files, &dragInfo.hasDir) {
+			dragInfo.files = nil
+			return
+		}
+		dragInfo.prefix = true
+	}
+	return
 }

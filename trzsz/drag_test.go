@@ -47,12 +47,13 @@ var mockDetectFilePath = func(path string, dragFiles *[]string, hasDir *bool) bo
 
 func setupTestRuntime(linux, macos, windows bool) func() {
 	mockFileMap = make(map[string]bool)
-	oriDetectFilePath := detectFilePath
+	oriDetectFilePath, oriGetCygpath := detectFilePath, getCygpath
 	detectFilePath = mockDetectFilePath
+	getCygpath = func() string { return "" }
 	oriLinuxRuntime, oriMacosRuntime, oriWindowsRuntime := linuxRuntime, macosRuntime, windowsRuntime
 	linuxRuntime, macosRuntime, windowsRuntime = linux, macos, windows
 	return func() {
-		detectFilePath, mockFileMap = oriDetectFilePath, nil
+		detectFilePath, getCygpath, mockFileMap = oriDetectFilePath, oriGetCygpath, nil
 		linuxRuntime, macosRuntime, windowsRuntime = oriLinuxRuntime, oriMacosRuntime, oriWindowsRuntime
 	}
 }

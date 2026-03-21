@@ -35,3 +35,7 @@ func getSysProcAttr() *syscall.SysProcAttr {
 		Setsid: true,
 	}
 }
+
+var getCygpath = func() string {
+	return ""
+}
