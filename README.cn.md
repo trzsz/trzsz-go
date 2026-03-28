@@ -134,9 +134,15 @@ _有关 `trzsz ( trz / tsz )` 更详细的文档，请查看 [https://trzsz.gith
   <details><summary><code>go install github.com/trzsz/trzsz-go/cmd/...@latest</code></summary>
 
   ```sh
+  # 最新发布版本
   go install github.com/trzsz/trzsz-go/cmd/trz@latest
   go install github.com/trzsz/trzsz-go/cmd/tsz@latest
   go install github.com/trzsz/trzsz-go/cmd/trzsz@latest
+
+  # 最新开发版本（ main 分支 ）
+  go install github.com/trzsz/trzsz-go/cmd/trz@main
+  go install github.com/trzsz/trzsz-go/cmd/tsz@main
+  go install github.com/trzsz/trzsz-go/cmd/trzsz@main
   ```
 
   安装后，`trzsz` 程序一般位于 `~/go/bin/` 目录下（ Windows 一般在 `C:\Users\your_name\go\bin\` ）。

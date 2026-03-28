@@ -134,9 +134,15 @@ _Please check [https://trzsz.github.io](https://trzsz.github.io) for more inform
   <details><summary><code>go install github.com/trzsz/trzsz-go/cmd/...@latest</code></summary>
 
   ```sh
+  # latest release
   go install github.com/trzsz/trzsz-go/cmd/trz@latest
   go install github.com/trzsz/trzsz-go/cmd/tsz@latest
   go install github.com/trzsz/trzsz-go/cmd/trzsz@latest
+
+  # latest development version (main branch)
+  go install github.com/trzsz/trzsz-go/cmd/trz@main
+  go install github.com/trzsz/trzsz-go/cmd/tsz@main
+  go install github.com/trzsz/trzsz-go/cmd/trzsz@main
   ```
 
   The binaries are usually located in `~/go/bin/` ( `C:\Users\your_name\go\bin\` on Windows ).
