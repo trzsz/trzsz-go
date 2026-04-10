@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -109,11 +110,23 @@ func detectDragFiles(buf []byte) (dragInfo dragFilesInfo) {
 		}
 		if !detectFilePath(path, &dragInfo.files, &dragInfo.hasDir) {
 			dragInfo.files = nil
+			if !dragInfo.prefix && isDirPrefix(path) {
+				dragInfo.prefix = true
+			}
 			return
 		}
 		dragInfo.prefix = true
 	}
 	return
+}
+
+func isDirPrefix(path string) bool {
+	var isDir bool
+	var files []string
+	if !detectFilePath(filepath.Dir(path), &files, &isDir) {
+		return false
+	}
+	return isDir
 }
 
 var detectFilePath = func(path string, dragFiles *[]string, hasDir *bool) bool {

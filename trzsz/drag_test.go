@@ -157,6 +157,9 @@ func TestDetectDragFilesOnMacOS(t *testing.T) {
 	assertNoDragFiles(t, "/tmp/abc '/x ", false)
 	assertNoDragFiles(t, "/tmp/abc '/x'a ", true)
 
+	addMockFile("/tmp", true)
+	assertNoDragFiles(t, "/tmp/a", true)
+
 	oriIsWarpTerminal := isWarpTerminal
 	isWarpTerminal = func() bool { return true }
 	defer func() { isWarpTerminal = oriIsWarpTerminal }()
