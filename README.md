@@ -43,7 +43,18 @@ _Please check [https://trzsz.github.io](https://trzsz.github.io) for more inform
 
   </details>
 
-- Install with yum on Linux
+- Install with dnf on Fedora / CentOS / RHEL
+
+  <details><summary><code>sudo dnf install trzsz</code></summary>
+
+  ```sh
+  sudo dnf copr enable @trzsz/trzsz
+  sudo dnf install trzsz
+  ```
+
+  </details>
+
+- Install with yum on Legacy CentOS / RHEL
 
   <details><summary><code>sudo yum install trzsz</code></summary>
 
@@ -66,17 +77,6 @@ _Please check [https://trzsz.github.io](https://trzsz.github.io) for more inform
 
     sudo yum install trzsz
     ```
-
-  </details>
-
-- Install with dnf on Linux
-
-  <details><summary><code>sudo dnf install trzsz</code></summary>
-
-  ```sh
-  sudo dnf copr enable @trzsz/trzsz
-  sudo dnf install trzsz
-  ```
 
   </details>
 
