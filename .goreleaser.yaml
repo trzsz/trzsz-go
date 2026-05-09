@@ -141,6 +141,7 @@ nfpms:
       - trz
       - tsz
       - trzsz
+    section: utils
     file_name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
@@ -151,9 +152,9 @@ nfpms:
       {{- else if eq .Arch "arm64" }}aarch64
       {{- else if eq .Arch "arm" }}armv{{ .Arm }}
       {{- else }}{{ .Arch }}{{ end }}
-    homepage: https://trzsz.github.io/
+    homepage: https://trzsz.github.io/go
     maintainer: Lonny Wong <lonnywong@qq.com>
-    description: |-
+    description: |
       trzsz ( trz / tsz ) is a simple file transfer tools.
       similar to lrzsz ( rz / sz ), and compatible with tmux.
     license: MIT

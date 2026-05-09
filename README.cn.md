@@ -129,6 +129,24 @@ _有关 `trzsz ( trz / tsz )` 更详细的文档，请查看 [https://trzsz.gith
 
   </details>
 
+- 用 pixi / conda / mamba 从 [conda-forge](https://github.com/conda-forge/trzsz-feedstock) 安装
+
+  <details><summary><code>pixi global install trzsz</code> / <code>conda install trzsz</code> / <code>mamba install trzsz</code></summary>
+
+  ```sh
+  pixi global install trzsz
+  ```
+
+  ```sh
+  conda install -c conda-forge trzsz
+  ```
+
+  ```sh
+  mamba install -c conda-forge trzsz
+  ```
+
+  </details>
+
 - 用 Go 直接安装（ 要求 go 1.25 以上 ）
 
   <details><summary><code>go install github.com/trzsz/trzsz-go/cmd/...@latest</code></summary>

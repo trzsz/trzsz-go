@@ -129,6 +129,24 @@ _Please check [https://trzsz.github.io](https://trzsz.github.io) for more inform
 
   </details>
 
+- Install with pixi / conda / mamba from [conda-forge](https://github.com/conda-forge/trzsz-feedstock)
+
+  <details><summary><code>pixi global install trzsz</code> / <code>conda install trzsz</code> / <code>mamba install trzsz</code></summary>
+
+  ```sh
+  pixi global install trzsz
+  ```
+
+  ```sh
+  conda install -c conda-forge trzsz
+  ```
+
+  ```sh
+  mamba install -c conda-forge trzsz
+  ```
+
+  </details>
+
 - Install with Go ( Requires go 1.25 or later )
 
   <details><summary><code>go install github.com/trzsz/trzsz-go/cmd/...@latest</code></summary>
