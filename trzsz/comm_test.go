@@ -456,3 +456,61 @@ func TestFormatSavedFileNames(t *testing.T) {
 		})
 	}
 }
+
+func TestAutoSavedFiles(t *testing.T) {
+	assert := assert.New(t)
+	type args struct {
+		files    []string
+		dstPath  string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "singleFilePath",
+			args: args{
+				dstPath: "/tmp",
+				files:   []string{"/Users/foo/app.jar"},
+			},
+			want: "Saved 1 file/directory to /tmp [auto]\r\n" +
+				"- /Users/foo/app.jar",
+		},
+		{
+			name: "folderPath",
+			args: args{
+				dstPath: "/tmp",
+				files:   []string{"/Users/foo/conf.d"},
+			},
+			want: "Saved 1 file/directory to /tmp [auto]\r\n" +
+				"- /Users/foo/conf.d",
+		},
+		{
+			name: "multiplePaths",
+			args: args{
+				dstPath: "/tmp",
+				files:   []string{"/Users/foo/a.jar", "/Users/foo/b.jar", "/Users/foo/conf.d"},
+			},
+			want: "Saved 3 files/directories to /tmp [auto]\r\n" +
+				"- /Users/foo/a.jar\r\n" +
+				"- /Users/foo/b.jar\r\n" +
+				"- /Users/foo/conf.d",
+		},
+		{
+			name: "noDestPath",
+			args: args{
+				dstPath: "",
+				files:   []string{"/Users/foo/app.jar"},
+			},
+			want: "Saved 1 file/directory [auto]\r\n" +
+				"- /Users/foo/app.jar",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := autoSavedFiles(tt.args.files, tt.args.dstPath)
+			assert.Equal(tt.want, got)
+		})
+	}
+}

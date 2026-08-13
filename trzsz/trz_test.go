@@ -39,7 +39,7 @@ func newTrzArgs(args baseArgs, path string) *trzArgs {
 	if args.Timeout == 0 {
 		args.Timeout = 20
 	}
-	return &trzArgs{args, path}
+	return &trzArgs{args, "", path}
 }
 
 func TestTrzArgs(t *testing.T) {

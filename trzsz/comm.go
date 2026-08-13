@@ -967,6 +967,30 @@ func formatSavedFiles(fileNames []string, destPath string) string {
 	return builder.String()
 }
 
+// autoSavedFiles reports the non-interactive (auto) upload result with the
+// original file/folder paths requested by the server, so the client operator
+// can tell exactly which file(s)/folder(s) were uploaded.
+func autoSavedFiles(filePaths []string, destPath string) string {
+	var builder strings.Builder
+	builder.WriteString("Saved ")
+	builder.WriteString(strconv.Itoa(len(filePaths)))
+	if len(filePaths) > 1 {
+		builder.WriteString(" files/directories")
+	} else {
+		builder.WriteString(" file/directory")
+	}
+	if len(destPath) > 0 {
+		builder.WriteString(" to ")
+		builder.WriteString(destPath)
+	}
+	builder.WriteString(" [auto]")
+	for _, path := range filePaths {
+		builder.WriteString("\r\n- ")
+		builder.WriteString(path)
+	}
+	return builder.String()
+}
+
 func joinFileNames(header string, fileNames []string) string {
 	var builder strings.Builder
 	builder.WriteString(header)

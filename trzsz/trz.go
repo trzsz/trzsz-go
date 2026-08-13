@@ -25,9 +25,11 @@ SOFTWARE.
 package trzsz
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/trzsz/go-arg"
@@ -36,6 +38,7 @@ import (
 
 type trzArgs struct {
 	baseArgs
+	LocalPath string `arg:"--local-path" help:"local file(s) or folder(s) to upload automatically without file dialog, comma separated, e.g. /path/a.jar,/path/b.jar"`
 	Path string `arg:"positional" default:"." help:"path to save file(s). (default: current directory)"`
 }
 
@@ -106,7 +109,15 @@ func recvFiles(transfer *trzszTransfer, args *trzArgs, tmuxMode tmuxModeType, tm
 		return err
 	}
 
-	transfer.serverExit(formatSavedFiles(localNames, args.Path))
+	if args.LocalPath != "" {
+		localPaths := strings.Split(args.LocalPath, ",")
+		for i := range localPaths {
+			localPaths[i] = strings.TrimSpace(localPaths[i])
+		}
+		transfer.serverExit(autoSavedFiles(localPaths, args.Path))
+	} else {
+		transfer.serverExit(formatSavedFiles(localNames, args.Path))
+	}
 	return nil
 }
 
@@ -176,6 +187,18 @@ func TrzMain() int {
 	if args.Directory {
 		mode = "D"
 	}
+	if args.LocalPath != "" {
+		if !serverLocalPathUploadEnabled() {
+			// config did not enable non-interactive upload: fall back to the file dialog
+			_, _ = fmt.Fprintf(os.Stdout, "\r\n[trzsz] auto upload disabled by config (enable %s: local_path_upload=true)\r\n", trzszConfigPath())
+			_ = os.Stdout.Sync()
+		} else {
+			// base64 encode to avoid escape table (not established before handshake)
+			encoded := base64.StdEncoding.EncodeToString([]byte(args.LocalPath))
+			_, _ = fmt.Fprintf(os.Stdout, "\x1b[s::TRZSZ:LOCALPATH:%s\r\n", encoded)
+			_ = os.Stdout.Sync()
+		}
+	}
 	_, _ = fmt.Fprintf(os.Stdout, "\x1b[s::TRZSZ:TRANSFER:%s:%s:%013d:%d\r\n", mode, kTrzszVersion, uniqueID, port)
 	_ = os.Stdout.Sync()
 
@@ -220,4 +243,8 @@ func TrzMain() int {
 	}
 
 	return 0
+}
+
+func serverLocalPathUploadEnabled() bool {
+	return isTruthy(loadTrzszConfig()["local_path_upload"])
 }

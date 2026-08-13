@@ -88,7 +88,11 @@ type TrzszFilter struct {
 	osc52Sequence         *bytes.Buffer
 	progressColorPair     atomic.Pointer[string]
 	oneTimeUploadFiles    []string
+	autoUploadPaths       []string
 	oneTimeUploadResult   chan error
+	clientAutoUpload      bool
+	localPathUpload       bool
+	localPathPending      []byte
 	hidingCursor          bool
 	closed                atomic.Bool
 }
@@ -243,6 +247,12 @@ func (filter *TrzszFilter) SetDragFileUploadCommand(command string) {
 	filter.dragFileUploadCommand.Store(&command)
 }
 
+// SetClientAutoUpload sets whether the client allows the server to upload
+// files without showing the file dialog (non-interactive upload).
+func (filter *TrzszFilter) SetClientAutoUpload(enabled bool) {
+	filter.clientAutoUpload = enabled
+}
+
 // SetProgressColorPair sets the color pair for the progress bar.
 func (filter *TrzszFilter) SetProgressColorPair(colorPair string) {
 	filter.progressColorPair.Store(&colorPair)
@@ -280,16 +290,23 @@ func (filter *TrzszFilter) Close() {
 	filter.closed.Store(true)
 }
 
-func (filter *TrzszFilter) readTrzszConfig() {
+const trzszConfigFilename = ".trzsz.conf"
+
+func trzszConfigPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return
+		return trzszConfigFilename
 	}
-	file, err := os.Open(filepath.Join(home, ".trzsz.conf"))
+	return filepath.Join(home, trzszConfigFilename)
+}
+
+func loadTrzszConfig() map[string]string {
+	file, err := os.Open(trzszConfigPath())
 	if err != nil {
-		return
+		return nil
 	}
 	defer func() { _ = file.Close() }()
+	config := make(map[string]string)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -306,6 +323,21 @@ func (filter *TrzszFilter) readTrzszConfig() {
 		if name == "" || value == "" {
 			continue
 		}
+		config[name] = value
+	}
+	return config
+}
+
+func isTruthy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "1", "yes", "on":
+		return true
+	}
+	return false
+}
+
+func (filter *TrzszFilter) readTrzszConfig() {
+	for name, value := range loadTrzszConfig() {
 		switch {
 		case name == "defaultuploadpath" && filter.defaultUploadPath.Load() == nil:
 			filter.SetDefaultUploadPath(value)
@@ -315,6 +347,10 @@ func (filter *TrzszFilter) readTrzszConfig() {
 			filter.SetDragFileUploadCommand(value)
 		case name == "progresscolorpair" && filter.progressColorPair.Load() == nil:
 			filter.SetProgressColorPair(value)
+		case name == "client_auto_upload":
+			filter.clientAutoUpload = isTruthy(value)
+		case name == "local_path_upload":
+			filter.localPathUpload = isTruthy(value)
 		}
 	}
 }
@@ -412,6 +448,54 @@ func (filter *TrzszFilter) chooseUploadPaths(directory bool) ([]string, error) {
 	return files, nil
 }
 
+const kLocalPathPrefix = "::TRZSZ:LOCALPATH:"
+
+// parseLocalPathMessage parses a LOCALPATH message and returns the consumed
+// length and the requested local paths. It does not pre-register the upload,
+// so the caller can honor the client auto-upload config switch first.
+func (filter *TrzszFilter) parseLocalPathMessage(buf []byte) (int, []string, error) {
+	idx := bytes.Index(buf, []byte(kLocalPathPrefix))
+	if idx < 0 {
+		return 0, nil, simpleTrzszError("local path message not found")
+	}
+	payload := buf[idx+len(kLocalPathPrefix):]
+	consumed := idx + len(kLocalPathPrefix)
+	end := bytes.IndexAny(payload, "\r\n")
+	if end < 0 {
+		// message not complete in this buffer, wait for the rest
+		return 0, nil, simpleTrzszError("local path message not terminated")
+	}
+	consumed += end + 2 // include the trailing \r\n
+	decoded, err := base64.StdEncoding.DecodeString(string(payload[:end]))
+	if err != nil {
+		return consumed, nil, simpleTrzszError("invalid local path message: %v", err)
+	}
+	var paths []string
+	for _, p := range strings.Split(string(decoded), ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			paths = append(paths, p)
+		}
+	}
+	if len(paths) == 0 {
+		return consumed, nil, simpleTrzszError("no valid local path in message")
+	}
+	return consumed, paths, nil
+}
+
+// handleLocalPathMessage parses the LOCALPATH message and pre-registers the
+// paths for a one-time upload. Kept for the tests; wrapOutput uses
+// parseLocalPathMessage so the client config switch can be honored.
+func (filter *TrzszFilter) handleLocalPathMessage(buf []byte) (int, error) {
+	consumed, paths, err := filter.parseLocalPathMessage(buf)
+	if err != nil {
+		return consumed, err
+	}
+	if _, err := filter.OneTimeUpload(paths); err != nil {
+		return consumed, simpleTrzszError("upload local path failed: %v", err)
+	}
+	return consumed, nil
+}
+
 func (filter *TrzszFilter) createProgressBar(quiet bool, tmuxPaneColumns int32) {
 	if quiet {
 		filter.progress.Store(nil)
@@ -496,6 +580,9 @@ func (filter *TrzszFilter) uploadFiles(transfer *trzszTransfer, directory bool) 
 	remoteNames, err := transfer.sendFiles(files, filter.progress.Load())
 	if err != nil {
 		return err
+	}
+	if len(filter.autoUploadPaths) > 0 {
+		return transfer.clientExit(autoSavedFiles(filter.autoUploadPaths, ""))
 	}
 	return transfer.clientExit(formatSavedFiles(remoteNames, ""))
 }
@@ -740,6 +827,45 @@ func (filter *TrzszFilter) wrapOutput() {
 			}
 			if filter.options.EnableOSC52 {
 				filter.detectOSC52(buf)
+			}
+
+			if len(filter.localPathPending) > 0 {
+				buf = append(filter.localPathPending, buf...)
+				filter.localPathPending = nil
+			}
+			if localIdx := bytes.Index(buf, []byte(kLocalPathPrefix)); localIdx >= 0 {
+				consumed, paths, msgErr := filter.parseLocalPathMessage(buf[localIdx:])
+				if localIdx > 0 {
+					_ = writeAll(filter.clientOut, buf[:localIdx])
+				}
+				if consumed == 0 && msgErr != nil {
+					// message split across reads: keep the rest and wait for the next chunk
+					rest := buf[localIdx:]
+					if len(rest) > 4096 {
+						filter.localPathPending = nil
+						_, _ = fmt.Fprintf(filter.clientOut, "\r\n[trzsz] local path upload failed: %v\r\n", msgErr)
+						continue
+					}
+					filter.localPathPending = append(filter.localPathPending, rest...)
+					continue
+				}
+				if msgErr != nil {
+					_, _ = fmt.Fprintf(filter.clientOut, "\r\n[trzsz] local path upload failed: %v\r\n", msgErr)
+			} else if filter.clientAutoUpload {
+					if _, err := filter.OneTimeUpload(paths); err != nil {
+						_, _ = fmt.Fprintf(filter.clientOut, "\r\n[trzsz] local path upload failed: %v\r\n", err)
+					} else {
+						filter.autoUploadPaths = append([]string(nil), paths...)
+					}
+				} else {
+					// client config did not enable auto upload: keep the file dialog
+					_, _ = fmt.Fprintf(filter.clientOut, "\r\n[trzsz] server requests auto upload but disabled by client config, using file dialog\r\n")
+				}
+				rest := buf[localIdx+consumed:]
+				if len(rest) == 0 {
+					continue
+				}
+				buf = rest // keep processing the rest, e.g. the TRANSFER handshake
 			}
 
 			var trigger *trzszTrigger

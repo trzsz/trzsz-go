@@ -268,6 +268,7 @@ DefaultUploadPath =
 DefaultDownloadPath = /Users/username/Downloads/
 DragFileUploadCommand = trz -y
 ProgressColorPair = B14FFF 00FFA3
+LocalPathUpload = true
 ```
 
 - If the `DefaultUploadPath` is not empty, the path will be opened by default while choosing upload files.
@@ -277,6 +278,24 @@ ProgressColorPair = B14FFF 00FFA3
 - The default value of `DragFileUploadCommand` is `trz`, configure it to `trz -y` if you want to overwrite the existing files, configure it to `rz` if you want to use `rz` to upload.
 
 - The `ProgressColorPair` configures the color of the progress bar. You need to configure 2 colors and do not include `#`. The progress bar will gradient from the first color to the second color.
+
+- The `LocalPathUpload` configures whether to allow `trz --local-path` to upload files and directories automatically without popping up the file selection dialog. Disabled by default, set it to `true` to enable the automatic upload. The client ( e.g. [trzsz-ssh](https://trzsz.github.io/ssh) ) also needs to enable the `ClientAutoUpload` config to accept the automatic upload.
+
+### Auto upload files
+
+With `trz --local-path`, files and directories can be uploaded without popping up the file selection dialog:
+
+  ```sh
+  # upload a single file
+  trz --local-path /path/to/file1 /tmp
+
+  # upload multiple files and directories, separated by commas
+  trz --local-path /path/to/file1,/path/to/dir2 /tmp
+  ```
+
+- The `LocalPathUpload` must be set to `true` in the `~/.trzsz.conf` on the server, otherwise it will fall back to the file selection dialog.
+
+- The client needs to support the automatic upload, e.g. [trzsz-ssh](https://trzsz.github.io/ssh) ( tssh ) with the `ClientAutoUpload` config set to `yes`.
 
 ## Trouble shooting
 
