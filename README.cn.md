@@ -289,7 +289,7 @@ ProgressColorPair = B14FFF 00FFA3
 
 ```sh
 TRZSZ_NO_GUI=1 tssh xxx_server   # trzsz-ssh ( tssh ) 用户
-TRZSZ_NO_GUI=1 ssh xxx_server     # 本机用 trzsz 包装 ssh 的用户
+TRZSZ_NO_GUI=1 trzsz ssh xxx_server   # 本机用 trzsz 包装 ssh 的用户
 ```
 
 - 值为 `0` 时关闭，其他非空值开启。

@@ -289,7 +289,7 @@ Set the environment variable `TRZSZ_NO_GUI` to replace the GUI dialogs ( `zenity
 
 ```sh
 TRZSZ_NO_GUI=1 tssh xxx_server   # for trzsz-ssh ( tssh ) users
-TRZSZ_NO_GUI=1 ssh xxx_server     # with trzsz wrapping ssh on local
+TRZSZ_NO_GUI=1 trzsz ssh xxx_server   # with trzsz wrapping ssh on local
 ```
 
 - The value `0` disables it; any other non-empty value enables it.
