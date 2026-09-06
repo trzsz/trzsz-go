@@ -366,6 +366,10 @@ func (z *zmodemTransfer) uploadFiles(files []string) {
 }
 
 func (z *zmodemTransfer) downloadFiles(path string) {
+	if err := checkPathWritable(path); err != nil {
+		z.handleZmodemError(fmt.Sprintf("download path is invalid: %v", err))
+		return
+	}
 	cmd, err := z.launchZmodemCmd(path, "rz", "-E", "-e", "-b", "-B", "32768")
 	if err != nil {
 		z.handleZmodemError(fmt.Sprintf("run rz client failed: %v", err))

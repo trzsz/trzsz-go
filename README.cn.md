@@ -283,6 +283,37 @@ ProgressColorPair = B14FFF 00FFA3
 
 - `ProgressColorPair` 配置进度条的颜色，需要配置 2 个颜色并且不要带 `#`，进度条将从第一个颜色渐变到第二个颜色。
 
+### 用文本提示代替 GUI 文件选择对话框
+
+设置环境变量 `TRZSZ_NO_GUI`，可以把 GUI 文件选择对话框（ `zenity` ）替换为终端上的文本提示，适用于没有桌面环境的服务器，以及给编程智能体使用：
+
+```sh
+TRZSZ_NO_GUI=1 tssh xxx_server   # trzsz-ssh ( tssh ) 用户
+TRZSZ_NO_GUI=1 ssh xxx_server     # 本机用 trzsz 包装 ssh 的用户
+```
+
+- 值为 `0` 时关闭，其他非空值开启。
+
+- 下载（ `tsz` ）时，提示输入一个已存在、可写的目录的绝对路径，文件将保存到该目录内：
+
+  ```
+  [trzsz] download path (absolute; an existing directory to save INTO; Ctrl+C to cancel):
+  ```
+
+- 上传（ `trz` ）时，提示输入已存在的文件/目录的绝对路径，多个路径用空格分隔：
+
+  ```
+  [trzsz] upload path(s) (absolute, space separated, existing file(s)/dir(s); Ctrl+C to cancel):
+  ```
+
+- 输入为空时会重新提示（ 不会静默使用默认值 ）；按 `Ctrl+C` 或 `Ctrl+D` 取消传输，服务端会打印 `Cancelled`。
+
+- 输入无效（ 如相对路径、不存在的路径、或仅上传文件时输入了目录 ）时会带上原因重新提示。
+
+- 如果配置了 `DefaultDownloadPath`，仍然优先使用配置的路径自动保存，不会弹出提示。拖拽上传和 `AllowedAutoUploadDirs` 也保持原有行为。
+
+- zmodem（ `rz` / `sz` ）功能同样使用文本提示。
+
 ## 常见问题
 
 - 如果 [MSYS2](https://www.msys2.org/) 或 [Git Bash](https://www.atlassian.com/git/tutorials/git-bash) 遇到错误 `The handle is invalid`。
