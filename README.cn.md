@@ -57,7 +57,6 @@ _有关 `trzsz ( trz / tsz )` 更详细的文档，请查看 [https://trzsz.gith
 - 传统版本 CentOS / RHEL 可用 yum 安装
 
   <details><summary><code>sudo yum install trzsz</code></summary>
-
   - 国内推荐使用 [wlnmp](https://www.wlnmp.com/install) 源，安装 trzsz 只需要添加 wlnmp 源（ 配置 epel 源不是必须的 ）：
 
     ```sh
@@ -147,7 +146,7 @@ _有关 `trzsz ( trz / tsz )` 更详细的文档，请查看 [https://trzsz.gith
 
   </details>
 
-- 用 Go 直接安装（ 要求 go 1.25 以上 ）
+- 用 Go 直接安装（ 要求 go 1.26 以上 ）
 
   <details><summary><code>go install github.com/trzsz/trzsz-go/cmd/...@latest</code></summary>
 
@@ -167,7 +166,7 @@ _有关 `trzsz ( trz / tsz )` 更详细的文档，请查看 [https://trzsz.gith
 
   </details>
 
-- 用 Go 自己编译（ 要求 go 1.25 以上 ）
+- 用 Go 自己编译（ 要求 go 1.26 以上 ）
 
   <details><summary><code>sudo make install</code></summary>
 

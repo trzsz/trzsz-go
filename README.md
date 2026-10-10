@@ -147,7 +147,7 @@ _Please check [https://trzsz.github.io/py](https://trzsz.github.io/py) for more 
 
   </details>
 
-- Install with Go ( Requires go 1.25 or later )
+- Install with Go ( Requires go 1.26 or later )
 
   <details><summary><code>go install github.com/trzsz/trzsz-go/cmd/...@latest</code></summary>
 
@@ -167,7 +167,7 @@ _Please check [https://trzsz.github.io/py](https://trzsz.github.io/py) for more 
 
   </details>
 
-- Build from source ( Requires go 1.25 or later )
+- Build from source ( Requires go 1.26 or later )
 
   <details><summary><code>sudo make install</code></summary>
 
