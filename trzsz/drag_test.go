@@ -258,6 +258,12 @@ func TestDetectDragFilesOnWindows(t *testing.T) {
 	assertHasDragFiles(t, "\"C:\\abc\"", []string{"C:\\abc"})
 	assertHasDragFiles(t, "C:\\abc \"D:\\12 3\" ", []string{"C:\\abc", "D:\\12 3"})
 
+	addMockFile("c:\\abc", false)
+	addMockFile("d:\\12 3", false)
+	assertHasDragFiles(t, "c:\\abc", []string{"c:\\abc"})
+	assertHasDragFiles(t, "\"c:\\abc\"", []string{"c:\\abc"})
+	assertHasDragFiles(t, "c:\\abc \"d:\\12 3\" ", []string{"c:\\abc", "d:\\12 3"})
+
 	addMockFile("X:\\x", true)
 	assertHasDragDirs(t, "C:\\abc \"D:\\12 3\" X:\\x", []string{"C:\\abc", "D:\\12 3", "X:\\x"})
 
@@ -265,6 +271,10 @@ func TestDetectDragFilesOnWindows(t *testing.T) {
 
 	assertHasDragFiles(t, "C:\\\\abc", []string{"C:\\abc"})
 	assertHasDragFiles(t, "C:\\\\abc D:\\\\12\\ 3 ", []string{"C:\\abc", "D:\\12 3"})
+
+	assertHasDragFiles(t, "c:\\abc\"", []string{"c:\\abc"})
+	assertHasDragFiles(t, "c:\\\\abc", []string{"c:\\abc"})
+	assertHasDragFiles(t, "c:\\\\abc d:\\\\12\\ 3 ", []string{"c:\\abc", "d:\\12 3"})
 
 	addMockFile("x", false)
 	addMockFile("xyz", true)

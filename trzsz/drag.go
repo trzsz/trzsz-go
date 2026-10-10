@@ -199,6 +199,10 @@ func hasTmuxSendPrefix(buf []byte) bool {
 	return true
 }
 
+func isDriveLetter(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
+}
+
 func detectDragFilesOnWindows(buf []byte, dragInfo *dragFilesInfo) {
 	length := len(buf)
 
@@ -225,7 +229,7 @@ func detectDragFilesOnWindows(buf []byte, dragInfo *dragFilesInfo) {
 		return
 	}
 
-	if buf[length-1] == '"' && buf[0] >= 'A' && buf[0] <= 'Z' && buf[1] == ':' && buf[2] == '\\' &&
+	if buf[length-1] == '"' && isDriveLetter(buf[0]) && buf[1] == ':' && buf[2] == '\\' &&
 		bytes.IndexByte(buf[:length-1], '"') < 0 {
 		// Cmd & PowerShell may lost the first `"`, and supports one path only.
 		if detectFilePath(string(buf[:length-1]), &dragInfo.files, &dragInfo.hasDir) {
@@ -234,13 +238,13 @@ func detectDragFilesOnWindows(buf []byte, dragInfo *dragFilesInfo) {
 		}
 	}
 
-	if length > 4 && buf[0] >= 'A' && buf[0] <= 'Z' && buf[1] == ':' && buf[2] == '\\' && buf[3] == '\\' {
+	if length > 4 && isDriveLetter(buf[0]) && buf[1] == ':' && buf[2] == '\\' && buf[3] == '\\' {
 		paths, err := shlex.Split(string(buf))
 		if err != nil {
 			return
 		}
 		for _, path := range paths {
-			if len(path) < 4 || path[0] < 'A' || path[0] > 'Z' || path[1] != ':' || path[2] != '\\' { // not absolute path
+			if len(path) < 4 || !isDriveLetter(path[0]) || path[1] != ':' || path[2] != '\\' { // not absolute path
 				dragInfo.files = nil
 				return
 			}
@@ -268,7 +272,6 @@ func detectDragFilesOnWindows(buf []byte, dragInfo *dragFilesInfo) {
 		dragInfo.prefix = true
 		idx += inc
 	}
-	return
 }
 
 func nextWinPath(buf []byte) (string, int, bool) {
@@ -276,7 +279,7 @@ func nextWinPath(buf []byte) (string, int, bool) {
 	if length < 4 {
 		return "", 0, false
 	}
-	if buf[0] == '"' && buf[1] >= 'A' && buf[1] <= 'Z' && buf[2] == ':' && buf[3] == '\\' {
+	if buf[0] == '"' && isDriveLetter(buf[1]) && buf[2] == ':' && buf[3] == '\\' {
 		idx := bytes.IndexByte(buf[1:], '"')
 		if idx < 0 {
 			return "", 0, true
@@ -286,7 +289,7 @@ func nextWinPath(buf []byte) (string, int, bool) {
 			return "", 0, false
 		}
 		return string(buf[1:idx]), idx + 2, false
-	} else if buf[0] >= 'A' && buf[0] <= 'Z' && buf[1] == ':' && buf[2] == '\\' {
+	} else if isDriveLetter(buf[0]) && buf[1] == ':' && buf[2] == '\\' {
 		idx := bytes.IndexByte(buf, ' ')
 		if idx < 0 {
 			return string(buf), length, true
@@ -312,7 +315,6 @@ func detectDragFilesOnMSYS(buf []byte, dragInfo *dragFilesInfo) {
 		}
 		dragInfo.prefix = true
 	}
-	return
 }
 
 func detectDragFilesOnCygwin(buf []byte, dragInfo *dragFilesInfo) {
@@ -331,7 +333,6 @@ func detectDragFilesOnCygwin(buf []byte, dragInfo *dragFilesInfo) {
 		}
 		dragInfo.prefix = true
 	}
-	return
 }
 
 func unixPathToWinPath(buf string) string {
@@ -356,5 +357,4 @@ func detectDragFilesWithCygpath(cygpath string, buf []byte, dragInfo *dragFilesI
 		}
 		dragInfo.prefix = true
 	}
-	return
 }
