@@ -86,6 +86,7 @@ type TrzszFilter struct {
 	tunnelConnector       atomic.Pointer[func(int) net.Conn]
 	redrawScreenFunc      atomic.Pointer[func()]
 	transferStateCallback atomic.Pointer[func(bool)]
+	textDialogPipe        atomic.Pointer[io.PipeWriter]
 	osc52Sequence         *bytes.Buffer
 	progressColorPair     atomic.Pointer[string]
 	oneTimeUploadFiles    []string
@@ -403,6 +404,10 @@ func (filter *TrzszFilter) chooseDownloadPath() (string, error) {
 		time.Sleep(50 * time.Millisecond) // wait for all output to show
 		return savePath, nil
 	}
+	// replace the GUI dialog ( zenity ) with a text prompt if enabled
+	if noGuiEnabled() {
+		return filter.chooseDownloadPathByPrompt()
+	}
 	options := []zenity.Option{
 		zenity.Title("Choose a folder to save file(s)"),
 		zenity.Directory(),
@@ -437,6 +442,10 @@ func (filter *TrzszFilter) chooseUploadPaths(directory bool) ([]string, error) {
 	defaultPath := ""
 	if path := filter.defaultUploadPath.Load(); path != nil {
 		defaultPath = *path
+	}
+	// replace the GUI dialog ( zenity ) with a text prompt if enabled
+	if noGuiEnabled() {
+		return filter.chooseUploadPathsByPrompt(directory)
 	}
 	if defaultPath != "" {
 		options = append(options, zenity.Filename(defaultPath))
@@ -718,6 +727,11 @@ func (filter *TrzszFilter) uploadDragFiles(dragInfo *dragFilesInfo) {
 func (filter *TrzszFilter) sendInput(buf []byte, detectDragFile *atomic.Bool) {
 	if filter.logger != nil {
 		filter.logger.writeTraceLog(buf, "stdin")
+	}
+
+	// route the client input into the active text dialog prompt
+	if filter.interceptTextDialog(buf) {
+		return
 	}
 
 	if transfer := filter.transfer.Load(); transfer != nil {
