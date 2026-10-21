@@ -597,7 +597,10 @@ func (filter *TrzszFilter) handleTrzsz() {
 		transfer.tmuxInputAckChan = make(chan bool, 100)
 	}
 
+	// Register initialization before publishing the transfer to terminal readers.
+	transfer.tunnelInitWG.Add(1)
 	if !filter.transfer.CompareAndSwap(nil, transfer) {
+		transfer.tunnelInitWG.Done()
 		return
 	}
 	if callback := filter.transferStateCallback.Load(); callback != nil {
@@ -614,6 +617,7 @@ func (filter *TrzszFilter) handleTrzsz() {
 	if connector := filter.tunnelConnector.Load(); connector != nil {
 		transfer.connectToTunnel(*connector, filter.trigger.uniqueID, filter.trigger.tunnelPort)
 	}
+	transfer.tunnelInitWG.Done()
 
 	done := make(chan struct{}, 1)
 	go func() {

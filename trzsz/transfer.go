@@ -260,6 +260,10 @@ func (t *trzszTransfer) writeTraceLog(buf []byte, typ string) {
 }
 
 func (t *trzszTransfer) addReceivedData(buf []byte, tunnel bool) {
+	if !tunnel {
+		// Pending terminal redraws must not enter a successfully negotiated tunnel.
+		t.tunnelInitWG.Wait()
+	}
 	if len(t.tmuxPaneID) > 0 && !tunnel {
 		t.handleTmuxOutput(buf)
 		return
