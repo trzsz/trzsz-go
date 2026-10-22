@@ -283,6 +283,37 @@ ProgressColorPair = B14FFF 00FFA3
 
 - The `ProgressColorPair` configures the color of the progress bar. You need to configure 2 colors and do not include `#`. The progress bar will gradient from the first color to the second color.
 
+### Text path prompts instead of GUI dialogs
+
+Set the environment variable `TRZSZ_NO_GUI` to replace the GUI dialogs ( `zenity` / file pickers ) with text prompts on the client terminal, which is useful on servers without a desktop environment, and for coding agents:
+
+```sh
+TRZSZ_NO_GUI=1 tssh xxx_server   # for trzsz-ssh ( tssh ) users
+TRZSZ_NO_GUI=1 trzsz ssh xxx_server   # with trzsz wrapping ssh on local
+```
+
+- The value `0` disables it; any other non-empty value enables it.
+
+- When downloading ( `tsz` ), the prompt asks for an absolute path of an existing writable directory to save files into:
+
+  ```
+  [trzsz] download path (absolute; an existing directory to save INTO; Ctrl+C to cancel):
+  ```
+
+- When uploading ( `trz` ), the prompt asks for absolute path(s) of existing file(s) or directory(s), space separated:
+
+  ```
+  [trzsz] upload path(s) (absolute, space separated, existing file(s)/dir(s); Ctrl+C to cancel):
+  ```
+
+- Empty input will re-prompt ( never a silent default ); press `Ctrl+C` or `Ctrl+D` to cancel the transfer, then the server side will print `Cancelled`.
+
+- Invalid input ( e.g. a relative path, a nonexistent path, or a directory while uploading files only ) will re-prompt with the reason.
+
+- If `DefaultDownloadPath` is configured, it still takes precedence: files are saved there automatically without prompting. The one-time upload ( e.g. dragging files ) and `AllowedAutoUploadDirs` also keep their current behavior.
+
+- The zmodem ( `rz` / `sz` ) feature uses the same text prompts.
+
 ### Trouble shooting
 
 - If using [MSYS2](https://www.msys2.org/) or [Git Bash](https://www.atlassian.com/git/tutorials/git-bash) on windows, and getting an error `The handle is invalid`.
