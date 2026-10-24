@@ -39,7 +39,7 @@ func TestDetectZmodem(t *testing.T) {
 	download := false
 	assertDetectZmodem := func(buf string, expect *bool) {
 		t.Helper()
-		zmodem := detectZmodem([]byte(buf))
+		zmodem := detectZmodem([]byte(buf), false)
 		if expect == nil {
 			assert.Nil(zmodem)
 		} else {

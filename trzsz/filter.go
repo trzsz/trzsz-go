@@ -92,6 +92,7 @@ type TrzszFilter struct {
 	oneTimeUploadResult   chan error
 	hidingCursor          bool
 	closed                atomic.Bool
+	zmodemAutoRename      atomic.Pointer[bool]
 }
 
 // NewTrzszFilter create a TrzszFilter to support trzsz ( trz / tsz ).
@@ -308,6 +309,11 @@ func (filter *TrzszFilter) SetTransferStateCallback(transferStateCallback func(t
 	filter.transferStateCallback.Store(&transferStateCallback)
 }
 
+// SetZmodemAutoRename sets whether to automatically rename files when conflicts occur during Zmodem transfers.
+func (filter *TrzszFilter) SetZmodemAutoRename(autoRename bool) {
+	filter.zmodemAutoRename.Store(&autoRename)
+}
+
 // Close to let the filter gracefully exit.
 func (filter *TrzszFilter) Close() {
 	filter.closed.Store(true)
@@ -357,6 +363,15 @@ func (filter *TrzszFilter) readTrzszConfig() {
 			filter.SetDragFileUploadCommand(value)
 		case name == "progresscolorpair" && filter.progressColorPair.Load() == nil:
 			filter.SetProgressColorPair(value)
+		case name == "zmodemautorename" && filter.zmodemAutoRename.Load() == nil:
+			switch strings.ToLower(value) {
+			case "on", "true", "yes", "1":
+				filter.SetZmodemAutoRename(true)
+			case "off", "false", "no", "0":
+				filter.SetZmodemAutoRename(false)
+			default:
+				warning("ZmodemAutoRename %q is invalid", value)
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -857,7 +872,11 @@ func (filter *TrzszFilter) wrapOutput() {
 			}
 
 			if filter.options.EnableZmodem {
-				if zmodem := detectZmodem(buf); zmodem != nil {
+				autoRename := false
+				if v := filter.zmodemAutoRename.Load(); v != nil {
+					autoRename = *v
+				}
+				if zmodem := detectZmodem(buf, autoRename); zmodem != nil {
 					_ = writeAll(filter.clientOut, buf)
 					zmodem.redrawScreen = filter.redrawScreenFunc.Load()
 					if filter.zmodem.CompareAndSwap(nil, zmodem) {

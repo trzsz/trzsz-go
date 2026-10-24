@@ -268,6 +268,7 @@ DefaultDownloadPath = /Users/username/Downloads/
 AllowedAutoUploadDirs = ~/Downloads/ '/Users/username/My Documents/'
 DragFileUploadCommand = trz -y
 ProgressColorPair = B14FFF 00FFA3
+ZmodemAutoRename = no
 ```
 
 - 如果 `DefaultUploadPath` 不为空，上传选择文件时会默认打开此目录。
@@ -281,6 +282,8 @@ ProgressColorPair = B14FFF 00FFA3
 - `DragFileUploadCommand` 的默认值是 `trz`，如果想上传时覆盖现有文件可配置成 `trz -y`，如果想使用 `rz` 上传可配置成 `rz`。
 
 - `ProgressColorPair` 配置进度条的颜色，需要配置 2 个颜色并且不要带 `#`，进度条将从第一个颜色渐变到第二个颜色。
+
+- `ZmodemAutoRename` 用于配置在使用 Zmodem（`rz`/`sz`）传输文件遇到同名冲突时，是否自动重命名文件（对应 `-E` 选项）。支持的有效值为 `on`、`true`、`yes`、`1`、`off`、`false`、`no` 和 `0`（不区分大小写），默认为 `no`。
 
 ## 常见问题
 

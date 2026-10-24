@@ -25,12 +25,17 @@ SOFTWARE.
 package trzsz
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -58,6 +63,11 @@ type zmodemTransfer struct {
 	transferredSize int64
 	recentSpeed     recentSpeed
 	redrawScreen    *func()
+	autoRename      bool
+	outputWG        sync.WaitGroup
+	recvFiles       []string
+	sendFiles       []string
+	skipFiles       []string
 }
 
 var zmodemOverAndOut = []byte("OO\x08\x08")
@@ -65,18 +75,37 @@ var zmodemCanNotOpenFile = []byte("cannot open ")
 var zmodemCancelSubSequence = []byte("\x18\x18\x18\x18\x18")
 var zmodemCancelFullSequence = []byte("\x18\x18\x18\x18\x18\x18\x18\x18\x18\x18\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08")
 
-var zmodemInitRegexp = regexp.MustCompile(`\*\*\x18B0(0|1)[0-9a-f]{12}`)
-var zmodemFinishRegexp = regexp.MustCompile(`\*\*\x18B08[0-9a-f]{12}`)
+var (
+	initZmodemRegexpOnce sync.Once
+	zmodemInitRegexp     *regexp.Regexp
+	zmodemFinishRegexp   *regexp.Regexp
+	zmodemRecvFileRegexp *regexp.Regexp
+	zmodemSendFileRegexp *regexp.Regexp
+	zmodemSkipFileRegexp *regexp.Regexp
+)
 
-func detectZmodem(buf []byte) *zmodemTransfer {
+func initZmodemRegexp() {
+	initZmodemRegexpOnce.Do(func() {
+		zmodemInitRegexp = regexp.MustCompile(`\*\*\x18B0(0|1)[0-9a-f]{12}`)
+		zmodemFinishRegexp = regexp.MustCompile(`\*\*\x18B08[0-9a-f]{12}`)
+		zmodemRecvFileRegexp = regexp.MustCompile(`Receiving:\s*([^\r]+)`)
+		zmodemSendFileRegexp = regexp.MustCompile(`Sending:\s*([^\r]+)`)
+		zmodemSkipFileRegexp = regexp.MustCompile(`(?:sz:\s*skipped|file exists,\s*skipped):\s*([^\r]+?)(?:\s*Skipped|[\r]|$)`)
+	})
+}
+
+func detectZmodem(buf []byte, autoRename bool) *zmodemTransfer {
+	initZmodemRegexp()
+
 	match := zmodemInitRegexp.FindSubmatch(buf)
 	if len(match) < 2 || bytes.Contains(buf, zmodemCancelSubSequence) || bytes.Contains(buf, zmodemCanNotOpenFile) {
 		return nil
 	}
+
 	if match[1][0] == '1' {
-		return &zmodemTransfer{upload: true}
+		return &zmodemTransfer{upload: true, autoRename: autoRename}
 	} else {
-		return &zmodemTransfer{upload: false}
+		return &zmodemTransfer{upload: false, autoRename: autoRename}
 	}
 }
 
@@ -234,7 +263,13 @@ func (z *zmodemTransfer) handleZmodemStream(cmd *exec.Cmd) {
 	z.resetServerTimer()
 
 	// async check if the client has exited
+	z.outputWG.Add(1)
 	go z.checkClientExited(cmd)
+
+	defer func() {
+		_ = z.stdout.Close()
+		z.outputWG.Done()
+	}()
 
 	// forward client output to the server
 	buffer := make([]byte, 32*1024)
@@ -304,11 +339,14 @@ func (z *zmodemTransfer) ensureClientExit(cmd *exec.Cmd) {
 
 func (z *zmodemTransfer) checkClientExited(cmd *exec.Cmd) {
 	_ = cmd.Wait()
+	z.outputWG.Wait()
 	z.stopped.Store(true)
 
 	if z.serverTimer != nil {
 		z.serverTimer.Stop()
 	}
+
+	_ = z.stdin.Close()
 
 	z.updateProgress(nil) // nil means finished
 
@@ -320,6 +358,23 @@ func (z *zmodemTransfer) checkClientExited(cmd *exec.Cmd) {
 		z.writeMessage(fmt.Sprintf("client exit with %d", code))
 	} else {
 		z.writeMessage("\033[1;32mSuccess!!\033[0m")
+
+		if len(z.recvFiles) > 0 {
+			_, _ = z.clientOut.Write(fmt.Appendf(nil, "\r\n%s\r\n", joinFileNames("Saved files:", z.recvFiles)))
+		} else if len(z.sendFiles) > 0 {
+			var files []string
+			for _, name := range z.sendFiles {
+				if !slices.Contains(z.skipFiles, name) {
+					files = append(files, name)
+				}
+			}
+			if len(files) > 0 {
+				_, _ = z.clientOut.Write(fmt.Appendf(nil, "\r\n%s\r\n", joinFileNames("Transferred files:", files)))
+			}
+		}
+		if len(z.skipFiles) > 0 {
+			_, _ = z.clientOut.Write(fmt.Appendf(nil, "\r\n%s\r\n", joinFileNames("Skipped files:", z.skipFiles)))
+		}
 	}
 
 	z.resetCleanupTimer()
@@ -328,21 +383,85 @@ func (z *zmodemTransfer) checkClientExited(cmd *exec.Cmd) {
 	_ = writeAll(z.serverIn, zmodemCancelFullSequence)
 }
 
+func extractLastMatch(line string, re *regexp.Regexp) string {
+	if matches := re.FindAllStringSubmatch(line, -1); len(matches) > 0 {
+		lastMatch := matches[len(matches)-1]
+		if len(lastMatch) > 1 {
+			return strings.TrimSpace(lastMatch[1])
+		}
+	}
+	return ""
+}
+
+func (z *zmodemTransfer) handleZmodemStderr(stderr io.ReadCloser) {
+	z.outputWG.Go(func() {
+		defer func() { _ = stderr.Close() }()
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if name := extractLastMatch(line, zmodemRecvFileRegexp); name != "" {
+				z.recvFiles = append(z.recvFiles, name)
+				continue
+			}
+			if name := extractLastMatch(line, zmodemSendFileRegexp); name != "" {
+				z.sendFiles = append(z.sendFiles, name)
+				continue
+			}
+			if name := extractLastMatch(line, zmodemSkipFileRegexp); name != "" {
+				z.skipFiles = append(z.skipFiles, name)
+				continue
+			}
+		}
+		if err := scanner.Err(); err != nil && z.logger != nil {
+			z.logger.writeTraceLog(fmt.Appendf(nil, "handle zmodem stderr failed: %v", err), "error")
+		}
+	})
+}
+
 func (z *zmodemTransfer) launchZmodemCmd(dir, name string, args ...string) (*exec.Cmd, error) {
 	var err error
 	cmd := exec.Command(name, args...)
 	cmd.Dir = dir
+
 	z.stdin, err = cmd.StdinPipe()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cmd stdin pipe failed: %v", err)
 	}
-	z.stdout, err = cmd.StdoutPipe()
+
+	var stdoutWriter *os.File
+	z.stdout, stdoutWriter, err = os.Pipe()
 	if err != nil {
-		return nil, err
+		_ = z.stdin.Close()
+		return nil, fmt.Errorf("cmd stdout pipe failed: %v", err)
 	}
+
+	stderrReader, stderrWriter, err := os.Pipe()
+	if err != nil {
+		_ = z.stdin.Close()
+		_ = z.stdout.Close()
+		_ = stdoutWriter.Close()
+		return nil, fmt.Errorf("cmd stderr pipe failed: %v", err)
+	}
+
+	// The write sides are inherited by the child process. Close the copies held
+	// by the parent process in all cases; otherwise the read sides won't reach
+	// EOF and the file descriptors will leak if the command fails to start.
+	defer func() {
+		_ = stdoutWriter.Close()
+		_ = stderrWriter.Close()
+	}()
+
+	cmd.Stdout, cmd.Stderr = stdoutWriter, stderrWriter
+
 	if err := cmd.Start(); err != nil {
+		_ = z.stdin.Close()
+		_ = z.stdout.Close()
+		_ = stderrReader.Close()
 		return nil, err
 	}
+
+	z.handleZmodemStderr(stderrReader)
+
 	return cmd, nil
 }
 
@@ -357,7 +476,12 @@ func (z *zmodemTransfer) uploadFiles(files []string) {
 			files[i] = filepath.Base(files[i])
 		}
 	}
-	cmd, err := z.launchZmodemCmd(workDir, "sz", append([]string{"-e", "-b", "-B", "32768"}, files...)...)
+	args := []string{"-v", "-e", "-b", "-B", "32768"}
+	if z.autoRename {
+		args = append(args, "-E")
+	}
+	args = append(args, files...)
+	cmd, err := z.launchZmodemCmd(workDir, "sz", args...)
 	if err != nil {
 		z.handleZmodemError(fmt.Sprintf("run sz client failed: %v", err))
 		return
@@ -366,7 +490,11 @@ func (z *zmodemTransfer) uploadFiles(files []string) {
 }
 
 func (z *zmodemTransfer) downloadFiles(path string) {
-	cmd, err := z.launchZmodemCmd(path, "rz", "-E", "-e", "-b", "-B", "32768")
+	args := []string{"-v", "-e", "-b", "-B", "32768"}
+	if z.autoRename {
+		args = append(args, "-E")
+	}
+	cmd, err := z.launchZmodemCmd(path, "rz", args...)
 	if err != nil {
 		z.handleZmodemError(fmt.Sprintf("run rz client failed: %v", err))
 		return

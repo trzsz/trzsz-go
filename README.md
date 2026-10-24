@@ -269,6 +269,7 @@ DefaultDownloadPath = /Users/username/Downloads/
 AllowedAutoUploadDirs = ~/Downloads/ '/Users/username/My Documents/'
 DragFileUploadCommand = trz -y
 ProgressColorPair = B14FFF 00FFA3
+ZmodemAutoRename = no
 ```
 
 - If the `DefaultUploadPath` is not empty, the path will be opened by default while choosing upload files.
@@ -282,6 +283,8 @@ ProgressColorPair = B14FFF 00FFA3
 - The default value of `DragFileUploadCommand` is `trz`, configure it to `trz -y` if you want to overwrite the existing files, configure it to `rz` if you want to use `rz` to upload.
 
 - The `ProgressColorPair` configures the color of the progress bar. You need to configure 2 colors and do not include `#`. The progress bar will gradient from the first color to the second color.
+
+- The `ZmodemAutoRename` configures whether to automatically rename files when file name conflicts occur during Zmodem (`rz`/`sz`) transfers (corresponding to the `-E` option). Valid values are `on`, `true`, `yes`, `1`, `off`, `false`, `no`, and `0`. The default value is `no`.
 
 ### Trouble shooting
 
