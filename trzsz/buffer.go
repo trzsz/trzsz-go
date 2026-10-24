@@ -26,6 +26,7 @@ package trzsz
 
 import (
 	"bytes"
+	"sync/atomic"
 	"time"
 )
 
@@ -36,7 +37,7 @@ type trzszBuffer struct {
 	nextIdx    int
 	readBuf    bytes.Buffer
 	timeout    <-chan time.Time
-	newTimeout <-chan time.Time
+	newTimeout atomic.Pointer[<-chan time.Time]
 }
 
 func newTrzszBuffer() *trzszBuffer {
@@ -82,7 +83,7 @@ func (b *trzszBuffer) popBuffer() []byte {
 }
 
 func (b *trzszBuffer) setNewTimeout(timeout <-chan time.Time) {
-	b.newTimeout = timeout
+	b.newTimeout.Store(&timeout)
 }
 
 func (b *trzszBuffer) nextBuffer() ([]byte, error) {
@@ -97,9 +98,8 @@ func (b *trzszBuffer) nextBuffer() ([]byte, error) {
 		case <-b.stopCh:
 			return nil, errStopped
 		case <-b.timeout:
-			if b.newTimeout != nil {
-				b.timeout = b.newTimeout
-				b.newTimeout = nil
+			if timeout := b.newTimeout.Swap(nil); timeout != nil {
+				b.timeout = *timeout
 				continue
 			}
 			return nil, errReceiveDataTimeout
@@ -110,7 +110,7 @@ func (b *trzszBuffer) nextBuffer() ([]byte, error) {
 func (b *trzszBuffer) readLine(mayHasJunk bool, timeout <-chan time.Time) ([]byte, error) {
 	b.readBuf.Reset()
 	b.timeout = timeout
-	b.newTimeout = nil
+	b.newTimeout.Store(nil)
 	for {
 		buf, err := b.nextBuffer()
 		if err != nil {
@@ -143,7 +143,7 @@ func (b *trzszBuffer) readBinary(size int, timeout <-chan time.Time) ([]byte, er
 		b.readBuf.Grow(size)
 	}
 	b.timeout = timeout
-	b.newTimeout = nil
+	b.newTimeout.Store(nil)
 	for b.readBuf.Len() < size {
 		buf, err := b.nextBuffer()
 		if err != nil {
@@ -180,7 +180,7 @@ func isTrzszLetter(b byte) bool {
 func (b *trzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error) {
 	b.readBuf.Reset()
 	b.timeout = timeout
-	b.newTimeout = nil
+	b.newTimeout.Store(nil)
 	lastByte := byte('\x1b')
 	skipVT100 := false
 	hasNewline := false
