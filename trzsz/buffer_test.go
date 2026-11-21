@@ -196,6 +196,7 @@ func TestBufferReadOnWin(t *testing.T) {
 
 	tb.addBuffer([]byte("test1!\ntest2!\n"))
 	assertReadSucc([]byte("test1"))
+	assert.Equal("test2!\n", string(tb.nextBuf[tb.nextIdx:]))
 	assertReadSucc([]byte("test2"))
 
 	tb.addBuffer([]byte("test\x03message"))

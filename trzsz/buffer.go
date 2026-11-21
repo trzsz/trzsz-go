@@ -118,7 +118,7 @@ func (b *trzszBuffer) readLine(mayHasJunk bool, timeout <-chan time.Time) ([]byt
 		}
 		newLineIdx := bytes.IndexByte(buf, '\n')
 		if newLineIdx >= 0 {
-			b.nextIdx += newLineIdx + 1 // +1 to ignroe the '\n'
+			b.nextIdx += newLineIdx + 1 // +1 to ignore '\n'
 			buf = buf[0:newLineIdx]
 		} else {
 			b.nextIdx += len(buf)
@@ -194,9 +194,9 @@ func (b *trzszBuffer) readLineOnWindows(timeout <-chan time.Time) ([]byte, error
 		}
 		newLineIdx := bytes.IndexByte(buf, '!')
 		if newLineIdx >= 0 {
-			b.nextIdx += newLineIdx + 1 // +1 to ignroe the newline
+			b.nextIdx += newLineIdx + 1 // +1 to ignore '!'
 			if b.nextIdx < len(buf) && buf[b.nextIdx] == '\n' {
-				b.nextIdx++
+				b.nextIdx++ // ignore '\n' following '!'
 			}
 			buf = buf[0:newLineIdx]
 		} else {
